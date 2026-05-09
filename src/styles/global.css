@@ -202,3 +202,8 @@ body {
 .sidebar-footer { margin-top: auto; padding: 18px; border-top: 0.5px solid rgba(255,255,255,0.1); }
 .sidebar-user-name { font-size: 12px; color: rgba(255,255,255,0.8); margin-bottom: 3px; font-weight: 500; }
 .sidebar-user-email { font-size: 11px; color: rgba(255,255,255,0.4); margin-bottom: 12px; }
+input, select, textarea {
+  pointer-events: all !important;
+  position: relative;
+  z-index: 10;
+}

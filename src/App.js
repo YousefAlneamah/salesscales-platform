@@ -3,6 +3,7 @@ import "./styles/global.css";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Clients from "./pages/Clients";
+import Contacts from "./pages/Contacts";
 import AuditTool from "./pages/AuditTool";
 import Analytics from "./pages/Analytics";
 import Approvals from "./pages/Approvals";
@@ -28,6 +29,7 @@ const navItems = [
   { group: "MAIN", items: [
     { id: "dashboard", label: "Dashboard", icon: "ti-layout-dashboard" },
     { id: "clients", label: "Clients", icon: "ti-users" },
+    { id: "contacts", label: "Contacts", icon: "ti-user" },
     { id: "audit", label: "Audit Tool", icon: "ti-search" },
     { id: "analytics", label: "Analytics", icon: "ti-chart-bar" },
   ]},
@@ -60,13 +62,28 @@ const navItems = [
 ];
 
 const pageTitles = {
-  dashboard: "Owner Dashboard", clients: "All Clients", audit: "Audit Tool",
-  analytics: "Analytics", approvals: "Approval Queue", ai: "Zainab AI Engine",
-  sequences: "Sequences", pipeline: "Pipeline", inbox: "Unified Inbox",
-  knowledge: "Knowledge Base", shopify: "Shopify Stores", social: "Social Media",
-  voice: "Voice Agents", integrations: "All Integrations", mypipeline: "My Pipeline",
-  socialautomation: "Social Automation", reports: "Reports", casestudies: "Case Studies",
-  onboarding: "Onboarding", marketplace: "Marketplace", whitelabel: "White Label",
+  dashboard: "Owner Dashboard",
+  clients: "All Clients",
+  contacts: "Contacts",
+  audit: "Audit Tool",
+  analytics: "Analytics",
+  approvals: "Approval Queue",
+  ai: "Zainab AI Engine",
+  sequences: "Sequences",
+  pipeline: "Pipeline",
+  inbox: "Unified Inbox",
+  knowledge: "Knowledge Base",
+  shopify: "Shopify Stores",
+  social: "Social Media",
+  voice: "Voice Agents",
+  integrations: "All Integrations",
+  mypipeline: "My Pipeline",
+  socialautomation: "Social Automation",
+  reports: "Reports",
+  casestudies: "Case Studies",
+  onboarding: "Onboarding",
+  marketplace: "Marketplace",
+  whitelabel: "White Label",
   settings: "Settings",
 };
 
@@ -92,6 +109,7 @@ function App() {
     switch(currentPage) {
       case "dashboard": return <Dashboard />;
       case "clients": return <Clients />;
+      case "contacts": return <Contacts />;
       case "audit": return <AuditTool />;
       case "analytics": return <Analytics />;
       case "approvals": return <Approvals />;
