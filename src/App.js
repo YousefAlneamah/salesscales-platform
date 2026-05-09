@@ -26,42 +26,42 @@ import Settings from "./pages/Settings";
 
 const navItems = [
   { group: "MAIN", items: [
-    { id: "dashboard", label: "Dashboard" },
-    { id: "clients", label: "Clients" },
-    { id: "audit", label: "Audit Tool" },
-    { id: "analytics", label: "Analytics" },
+    { id: "dashboard", label: "Dashboard", icon: "ti-layout-dashboard" },
+    { id: "clients", label: "Clients", icon: "ti-users" },
+    { id: "audit", label: "Audit Tool", icon: "ti-search" },
+    { id: "analytics", label: "Analytics", icon: "ti-chart-bar" },
   ]},
   { group: "CLIENT MGMT", items: [
-    { id: "approvals", label: "Approvals", badge: "4" },
-    { id: "ai", label: "AI Engine" },
-    { id: "sequences", label: "Sequences" },
-    { id: "pipeline", label: "Pipeline" },
-    { id: "inbox", label: "Inbox", badge: "12" },
-    { id: "knowledge", label: "Knowledge Base" },
+    { id: "approvals", label: "Approvals", icon: "ti-bell", badge: "4" },
+    { id: "ai", label: "Zainab AI", icon: "ti-robot" },
+    { id: "sequences", label: "Sequences", icon: "ti-bolt" },
+    { id: "pipeline", label: "Pipeline", icon: "ti-target" },
+    { id: "inbox", label: "Inbox", icon: "ti-message", badge: "12" },
+    { id: "knowledge", label: "Knowledge Base", icon: "ti-brain" },
   ]},
   { group: "INTEGRATIONS", items: [
-    { id: "shopify", label: "Shopify" },
-    { id: "social", label: "Social Media" },
-    { id: "voice", label: "Voice Agents" },
-    { id: "integrations", label: "All Integrations" },
+    { id: "shopify", label: "Shopify", icon: "ti-shopping-cart" },
+    { id: "social", label: "Social Media", icon: "ti-social" },
+    { id: "voice", label: "Voice Agents", icon: "ti-microphone" },
+    { id: "integrations", label: "All Integrations", icon: "ti-plug" },
   ]},
   { group: "SALES SCALES", items: [
-    { id: "mypipeline", label: "My Pipeline" },
-    { id: "socialautomation", label: "Social Automation" },
-    { id: "reports", label: "Reports" },
-    { id: "casestudies", label: "Case Studies" },
+    { id: "mypipeline", label: "My Pipeline", icon: "ti-briefcase" },
+    { id: "socialautomation", label: "Social Automation", icon: "ti-device-mobile" },
+    { id: "reports", label: "Reports", icon: "ti-file-analytics" },
+    { id: "casestudies", label: "Case Studies", icon: "ti-trophy" },
   ]},
   { group: "PLATFORM", items: [
-    { id: "onboarding", label: "Onboarding" },
-    { id: "marketplace", label: "Marketplace" },
-    { id: "whitelabel", label: "White Label" },
-    { id: "settings", label: "Settings" },
+    { id: "onboarding", label: "Onboarding", icon: "ti-rocket" },
+    { id: "marketplace", label: "Marketplace", icon: "ti-building-store" },
+    { id: "whitelabel", label: "White Label", icon: "ti-tag" },
+    { id: "settings", label: "Settings", icon: "ti-settings" },
   ]},
 ];
 
 const pageTitles = {
   dashboard: "Owner Dashboard", clients: "All Clients", audit: "Audit Tool",
-  analytics: "Analytics", approvals: "Approval Queue", ai: "AI Engine",
+  analytics: "Analytics", approvals: "Approval Queue", ai: "Zainab AI Engine",
   sequences: "Sequences", pipeline: "Pipeline", inbox: "Unified Inbox",
   knowledge: "Knowledge Base", shopify: "Shopify Stores", social: "Social Media",
   voice: "Voice Agents", integrations: "All Integrations", mypipeline: "My Pipeline",
@@ -79,9 +79,7 @@ function App() {
     if (saved) setUser(JSON.parse(saved));
   }, []);
 
-  const handleLogin = (userData) => {
-    setUser(userData);
-  };
+  const handleLogin = (userData) => setUser(userData);
 
   const handleLogout = () => {
     localStorage.removeItem("user");
@@ -124,7 +122,9 @@ function App() {
         <div className="logo-area">
           <div className="logo">SALES SCALES</div>
           <div className="logo-sub">AI REVENUE SYSTEM</div>
+          <div className="logo-line"></div>
         </div>
+
         {navItems.map(group => (
           <div className="nav-group" key={group.group}>
             <div className="nav-label">{group.group}</div>
@@ -134,16 +134,18 @@ function App() {
                 className={"nav-item " + (currentPage === item.id ? "active" : "")}
                 onClick={() => setCurrentPage(item.id)}
               >
+                <i className={"ti " + item.icon} style={{fontSize:"15px"}} aria-hidden="true"></i>
                 <span>{item.label}</span>
                 {item.badge && <span className="nav-badge">{item.badge}</span>}
               </div>
             ))}
           </div>
         ))}
-        <div style={{marginTop:"auto", padding:"16px"}}>
-          <div style={{fontSize:"11px", color:"var(--muted)", marginBottom:"4px"}}>{user.name}</div>
-          <div style={{fontSize:"10px", color:"var(--muted)", marginBottom:"10px"}}>{user.email}</div>
-          <button onClick={handleLogout} className="btn btn-outline" style={{width:"100%", fontSize:"10px", padding:"6px"}}>Sign Out</button>
+
+        <div className="sidebar-footer">
+          <div className="sidebar-user-name">{user.name}</div>
+          <div className="sidebar-user-email">{user.email}</div>
+          <button onClick={handleLogout} style={{width:"100%", padding:"7px", fontSize:"10px", borderRadius:"7px", background:"rgba(255,255,255,0.06)", border:"0.5px solid rgba(255,255,255,0.1)", color:"rgba(255,255,255,0.4)", cursor:"pointer"}}>Sign Out</button>
         </div>
       </div>
 
