@@ -1,107 +1,164 @@
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const axios = require("axios");
+require('dotenv').config();
+
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
+const crypto = require('crypto');
 
 const app = express();
+
+app.use((req, res, next) => {
+  console.log(req.method, req.path);
+  next();
+});
+
 app.use(cors());
 app.use(express.json());
 
-app.post("/audit", async (req, res) => {
+// ─── AUDIT ENDPOINT ───────────────────────────────────────
+app.post('/audit', async (req, res) => {
   const { url } = req.body;
-  console.log("Audit requested for:", url);
+
+  console.log('API Key loaded:', !!process.env.ANTHROPIC_API_KEY);
+  console.log('Audit requested for:', url);
 
   try {
     const response = await axios.post(
-      "https://api.anthropic.com/v1/messages",
+      'https://api.anthropic.com/v1/messages',
       {
-        model: "claude-haiku-4-5-20251001",
+        model: 'claude-sonnet-4-20250514',
         max_tokens: 2000,
-        system: `You are a senior revenue consultant for Sales Scales, a done-for-you AI revenue systems agency. You analyze ecommerce and business websites and produce detailed revenue gap audits.
-
-Analyze the given URL and return ONLY a JSON object with NO markdown, NO explanation, NO extra text. Return this exact structure:
-
+        system: `You are a Shopify store analyst for Sales Scales. Analyze the store and return JSON only — no markdown, no explanation, no extra text. Return this exact structure:
 {
   "brandName": "Brand Name",
-  "niche": "Specific niche e.g. Luxury Travel Bags",
-  "estimatedAOV": "$XXX",
-  "score": 42,
-  "estimatedMonthlyRevenue": "$XXK-$XXK",
+  "niche": "e.g. Travel Bags",
+  "estimatedAOV": "$XX",
+  "score": 35,
   "hasEmailPopup": true,
-  "hasCartRecovery": false,
+  "hasCartRecovery": "likely",
   "hasSMS": false,
   "hasWhatsApp": false,
   "hasAIVoice": false,
-  "hasPostPurchase": false,
-  "hasWinBack": false,
-  "hasUpsell": false,
-  "estimatedMonthlyLoss": "$X,XXX - $XX,XXX",
-  "gaps": [
-    {
-      "name": "Cart Recovery Sequences",
-      "status": "missing",
-      "impact": "High",
-      "estimatedLoss": "$2,400/mo",
-      "description": "No automated cart abandonment recovery detected. Industry average recovery rate is 15-20% of abandoned carts.",
-      "recommendation": "Build a 3-touch cart recovery sequence across email and SMS firing at 1hr, 24hr, and 48hr after abandonment."
-    },
-    {
-      "name": "SMS Marketing",
-      "status": "missing",
-      "impact": "High",
-      "estimatedLoss": "$1,800/mo",
-      "description": "No SMS automation detected. SMS has 98% open rates vs 21% for email, making it the highest converting channel.",
-      "recommendation": "Implement SMS sequences for cart recovery, back-in-stock alerts, and VIP customer communications."
-    },
-    {
-      "name": "Post-Purchase Sequences",
-      "status": "missing",
-      "impact": "Medium",
-      "estimatedLoss": "$1,200/mo",
-      "description": "No post-purchase follow-up detected. Customers who receive post-purchase nurture have 60% higher lifetime value.",
-      "recommendation": "Build a 5-email post-purchase sequence covering order confirmation, product tips, review request, cross-sell, and loyalty."
-    },
-    {
-      "name": "Win-Back Automation",
-      "status": "missing",
-      "impact": "Medium",
-      "estimatedLoss": "$900/mo",
-      "description": "No win-back sequences for lapsed customers detected. Winning back existing customers costs 5x less than acquiring new ones.",
-      "recommendation": "Create a 3-touch win-back sequence targeting customers inactive for 60-90 days."
-    },
-    {
-      "name": "WhatsApp Marketing",
-      "status": "missing",
-      "impact": "Medium",
-      "estimatedLoss": "$800/mo",
-      "description": "No WhatsApp Business automation detected. WhatsApp messages have 98% open rates and feel more personal than email.",
-      "recommendation": "Add WhatsApp sequences for order updates, cart recovery, and VIP customer communications."
-    }
-  ],
-  "biggestGap": "One specific sentence about the single most impactful gap and the exact estimated monthly revenue loss",
-  "competitorInsight": "One sentence about what competitors in this niche are doing that this brand is missing",
-  "quickWin": "The single fastest action they could take this week to recover revenue immediately",
-  "pitchMessage": "A specific personalised 3-4 sentence outreach message to the founder. Reference their specific brand, their specific gaps, and mention a specific number. Sound human not robotic. End with a question."
+  "estimatedMonthlyRevenue": "$XXK",
+  "biggestGap": "one sentence describing the biggest revenue gap",
+  "pitchMessage": "personalised outreach message to the founder explaining what they are missing and how Sales Scales can fix it"
 }`,
-        messages: [{ role: "user", content: `Perform a detailed revenue audit on this website: ${url}. Analyze everything visible including their marketing, automation gaps, and revenue opportunities. Be specific with dollar estimates based on their apparent business size.` }]
+        messages: [
+          {
+            role: 'user',
+            content: `Audit this Shopify store and identify all revenue gaps: ${url}`
+          }
+        ]
       },
       {
         headers: {
-          "Content-Type": "application/json",
-          "x-api-key": process.env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01"
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01'
         }
       }
     );
 
-    const text = response.data.content[0].text.trim().replace(/```json|```/g, "");
+    const text = response.data.content[0].text.trim().replace(/```json|```/g, '');
     const audit = JSON.parse(text);
-    console.log("Audit complete for:", audit.brandName);
+    console.log('Audit complete for:', audit.brandName);
     res.json(audit);
+
   } catch (e) {
-    console.error("Error:", e.message);
-    res.status(500).json({ error: "Audit failed" });
+    console.error('Audit error:', e.message);
+    if (e.response) {
+      console.error('Response status:', e.response.status);
+      console.error('Response data:', JSON.stringify(e.response.data));
+    }
+    res.status(500).json({ error: 'Audit failed', details: e.message });
   }
 });
 
-app.listen(3001, () => console.log("Server running on port 3001"));
+// ─── SHOPIFY OAUTH ────────────────────────────────────────
+
+// Step 1 — redirect merchant to Shopify login
+app.get('/shopify/install', (req, res) => {
+  const shop = req.query.shop;
+  if (!shop) return res.status(400).send('Missing shop parameter');
+
+  const state = crypto.randomBytes(16).toString('hex');
+  const scopes = 'read_analytics,write_checkouts,read_checkouts,read_customers,write_customers,read_price_rules,write_price_rules,read_discounts,write_discounts,write_draft_orders,read_draft_orders,read_fulfillments,write_fulfillments,write_inventory,read_inventory,write_marketing_events,read_marketing_events,read_orders,write_orders,read_products,write_products,read_shipping';
+  const redirectUri = process.env.SHOPIFY_REDIRECT_URI;
+  const clientId = process.env.SHOPIFY_CLIENT_ID;
+
+  const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${clientId}&scope=${scopes}&redirect_uri=${redirectUri}&state=${state}`;
+
+  console.log('Redirecting to Shopify OAuth:', installUrl);
+  res.redirect(installUrl);
+});
+
+// Step 2 — Shopify redirects back here with code
+app.get('/shopify/callback', async (req, res) => {
+  const { shop, code, state } = req.query;
+
+  if (!shop || !code) {
+    return res.status(400).send('Missing required parameters');
+  }
+
+  try {
+    const tokenResponse = await axios.post(
+      `https://${shop}/admin/oauth/access_token`,
+      {
+        client_id: process.env.SHOPIFY_CLIENT_ID,
+        client_secret: process.env.SHOPIFY_CLIENT_SECRET,
+        code: code
+      }
+    );
+
+    const accessToken = tokenResponse.data.access_token;
+    console.log('Shopify access token received for:', shop);
+
+    // Return success to frontend
+    res.json({
+      success: true,
+      shop: shop,
+      accessToken: accessToken,
+      message: 'Shopify connected successfully'
+    });
+
+  } catch (e) {
+    console.error('Shopify callback error:', e.message);
+    res.status(500).json({ error: 'Failed to get access token', details: e.message });
+  }
+});
+
+// Step 3 — sync customers from Shopify
+app.post('/shopify/sync-customers', async (req, res) => {
+  const { shop, accessToken, clientId } = req.body;
+
+  if (!shop || !accessToken) {
+    return res.status(400).json({ error: 'Missing shop or accessToken' });
+  }
+
+  try {
+    const response = await axios.get(
+      `https://${shop}/admin/api/2026-01/customers.json?limit=250`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const customers = response.data.customers;
+    console.log(`Synced ${customers.length} customers from ${shop}`);
+
+    res.json({
+      success: true,
+      count: customers.length,
+      customers: customers
+    });
+
+  } catch (e) {
+    console.error('Sync error:', e.message);
+    res.status(500).json({ error: 'Sync failed', details: e.message });
+  }
+});
+
+app.listen(3001, () => console.log('Server running on port 3001'));
