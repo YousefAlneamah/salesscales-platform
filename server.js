@@ -6,6 +6,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const multer = require('multer');
 const PDF2Json = require('pdf2json');
+const { YoutubeTranscript } = require('youtube-transcript');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -187,6 +188,28 @@ app.post('/upload-pdf', upload.single('pdf'), async (req, res) => {
   } catch (e) {
     console.error('PDF upload error:', e.message);
     res.status(500).json({ error: 'Failed to parse PDF', details: e.message });
+  }
+});
+
+// ─── YOUTUBE TRANSCRIPT ───────────────────────────────────
+app.post('/youtube-transcript', async (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'No URL provided' });
+
+  try {
+    console.log('Fetching transcript for:', url);
+    const transcript = await YoutubeTranscript.fetchTranscript(url);
+    const text = transcript.map(t => t.text).join(' ').trim();
+    const wordCount = text.split(/\s+/).length;
+    console.log('Transcript extracted:', wordCount, 'words');
+    res.json({
+      success: true,
+      wordCount,
+      text: text.substring(0, 50000)
+    });
+  } catch (e) {
+    console.error('YouTube transcript error:', e.message);
+    res.status(500).json({ error: 'Failed to fetch transcript', details: e.message });
   }
 });
 

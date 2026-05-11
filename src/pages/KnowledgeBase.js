@@ -55,7 +55,34 @@ export default function KnowledgeBase() {
     setProcessing(true);
 
     let finalContent = content;
+    let finalSource = source;
 
+    // YouTube transcript
+    if (url && url.includes('youtube.com') && !pdfFile) {
+      try {
+        const response = await fetch('http://localhost:3001/youtube-transcript', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        const data = await response.json();
+        if (data.success) {
+          finalContent = data.text;
+          finalSource = 'YouTube';
+          console.log('YouTube transcript extracted:', data.wordCount, 'words');
+        } else {
+          alert('YouTube transcript failed: ' + data.error);
+          setProcessing(false);
+          return;
+        }
+      } catch (e) {
+        alert('YouTube error: ' + e.message);
+        setProcessing(false);
+        return;
+      }
+    }
+
+    // PDF upload
     if (pdfFile) {
       try {
         const formData = new FormData();
@@ -67,6 +94,7 @@ export default function KnowledgeBase() {
         const data = await response.json();
         if (data.success) {
           finalContent = data.text;
+          finalSource = 'PDF Upload';
           console.log('PDF extracted:', data.pageCount, 'pages,', data.wordCount, 'words');
         } else {
           alert('PDF extraction failed: ' + data.error);
@@ -85,7 +113,7 @@ export default function KnowledgeBase() {
       content: finalContent,
       url,
       type,
-      source: pdfFile ? 'PDF Upload' : source,
+      source: finalSource,
       client_id: clientId,
       status: 'trained',
       notes: aiMember
@@ -102,6 +130,8 @@ export default function KnowledgeBase() {
       setSource('Manual');
       setPdfFile(null);
       setAiMember('All Team');
+    } else {
+      alert('Error saving: ' + error.message);
     }
     setProcessing(false);
   };
@@ -232,16 +262,13 @@ export default function KnowledgeBase() {
                 {aiMembers.map(m => <option key={m}>{m}</option>)}
               </select>
             </div>
-            <div>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>SOURCE</div>
-              <select value={source} onChange={e => setSource(e.target.value)} style={inputStyle}>
-                {sources.map(s => <option key={s}>{s}</option>)}
-              </select>
-            </div>
-            <div>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>WEBSITE URL (optional)</div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>YOUTUBE OR WEBSITE URL (optional)</div>
               <input type="text" value={url} onChange={e => setUrl(e.target.value)}
-                placeholder="https://example.com" style={inputStyle} />
+                placeholder="https://youtube.com/watch?v=... or https://example.com" style={inputStyle} />
+              {url && url.includes('youtube.com') && (
+                <div style={{ fontSize: '10px', color: '#10b981', marginTop: '4px' }}>✓ YouTube URL detected — transcript will be pulled automatically</div>
+              )}
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
               <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>UPLOAD PDF (optional)</div>
