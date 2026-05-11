@@ -88,7 +88,7 @@ export default function MyPipeline() {
   const getProspectsForStage = (stageId) => prospects.filter(p => p.pipeline_stage === stageId);
 
   const totalValue = () => {
-    const tierValues = { starter: 1500, growth: 3000, elite: 6000 };
+    
     return prospects.filter(p => p.pipeline_stage === 'Closed').length * 3000;
   };
 

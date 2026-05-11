@@ -6,9 +6,7 @@ export default function Reports() {
   const [selectedClient, setSelectedClient] = useState('');
   const [generating, setGenerating] = useState(false);
   const [report, setReport] = useState(null);
-  const [savedReports, setSavedReports] = useState([]);
-  const [loading, setLoading] = useState(true);
-
+  
   useEffect(() => {
     fetchClients();
     fetchReports();
