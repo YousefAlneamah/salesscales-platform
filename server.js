@@ -26,7 +26,7 @@ app.post('/audit', async (req, res) => {
     const response = await axios.post(
       'https://api.anthropic.com/v1/messages',
       {
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 2000,
         system: `You are a Shopify store analyst for Sales Scales. Analyze the store and return JSON only — no markdown, no explanation, no extra text. Return this exact structure:
 {
@@ -74,9 +74,56 @@ app.post('/audit', async (req, res) => {
   }
 });
 
+// ─── GENERATE AI REPLY ────────────────────────────────────
+app.post('/generate-reply', async (req, res) => {
+  const { channel, senderName, content, clientName } = req.body;
+
+  console.log('Generating reply for:', senderName, 'on', channel);
+
+  try {
+    const response = await axios.post(
+      'https://api.anthropic.com/v1/messages',
+      {
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 500,
+        system: `You are an AI assistant for Sales Scales helping respond to customer messages on behalf of clients. Write a professional, friendly, and helpful reply. Keep it concise and appropriate for the channel. Do not use placeholders like [name] - write a complete ready to send message.`,
+        messages: [
+          {
+            role: 'user',
+            content: `Channel: ${channel}
+Client: ${clientName}
+Customer name: ${senderName}
+Customer message: ${content}
+
+Write a reply to this message.`
+          }
+        ]
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01'
+        }
+      }
+    );
+
+    const reply = response.data.content[0].text.trim();
+    console.log('Reply generated successfully');
+    res.json({ reply });
+
+  } catch (e) {
+    console.error('Generate reply error:', e.message);
+    if (e.response) {
+      console.error('Response status:', e.response.status);
+      console.error('Response data:', JSON.stringify(e.response.data));
+    }
+    res.status(500).json({ error: 'Failed to generate reply', details: e.message });
+  }
+});
+
 // ─── SHOPIFY OAUTH ────────────────────────────────────────
 
-// Step 1 — redirect merchant to Shopify login
 app.get('/shopify/install', (req, res) => {
   const shop = req.query.shop;
   if (!shop) return res.status(400).send('Missing shop parameter');
@@ -92,7 +139,6 @@ app.get('/shopify/install', (req, res) => {
   res.redirect(installUrl);
 });
 
-// Step 2 — Shopify redirects back here with code
 app.get('/shopify/callback', async (req, res) => {
   const { shop, code, state } = req.query;
 
@@ -113,7 +159,6 @@ app.get('/shopify/callback', async (req, res) => {
     const accessToken = tokenResponse.data.access_token;
     console.log('Shopify access token received for:', shop);
 
-    // Return success to frontend
     res.json({
       success: true,
       shop: shop,
@@ -127,7 +172,6 @@ app.get('/shopify/callback', async (req, res) => {
   }
 });
 
-// Step 3 — sync customers from Shopify
 app.post('/shopify/sync-customers', async (req, res) => {
   const { shop, accessToken, clientId } = req.body;
 
