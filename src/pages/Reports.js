@@ -18,7 +18,6 @@ export default function Reports() {
   };
 
   const fetchReports = async () => {
-    setLoading(false);
   };
 
   const generateReport = async () => {
