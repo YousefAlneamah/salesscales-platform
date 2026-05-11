@@ -16,9 +16,12 @@ export default function KnowledgeBase() {
   const [clientId, setClientId] = useState('');
   const [source, setSource] = useState('Manual');
   const [selectedDoc, setSelectedDoc] = useState(null);
+  const [pdfFile, setPdfFile] = useState(null);
+  const [aiMember, setAiMember] = useState('All Team');
 
   const types = ['All', 'document', 'website', 'faq', 'product', 'review', 'script', 'case_study'];
-  const sources = ['Manual', 'Website', 'Upload', 'Google Drive', 'Notion'];
+  const sources = ['Manual', 'Website', 'PDF Upload', 'YouTube', 'Google Drive', 'Notion'];
+  const aiMembers = ['All Team', 'Ali', 'Hassan', 'Mahdi', 'Hussain', 'Zainab', 'Fatima'];
 
   useEffect(() => {
     fetchDocuments();
@@ -45,20 +48,49 @@ export default function KnowledgeBase() {
       alert('Please fill in title and select a client');
       return;
     }
-    if (!content && !url) {
-      alert('Please add content or a URL');
+    if (!content && !url && !pdfFile) {
+      alert('Please add content, a URL, or upload a PDF');
       return;
     }
     setProcessing(true);
+
+    let finalContent = content;
+
+    if (pdfFile) {
+      try {
+        const formData = new FormData();
+        formData.append('pdf', pdfFile);
+        const response = await fetch('http://localhost:3001/upload-pdf', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await response.json();
+        if (data.success) {
+          finalContent = data.text;
+          console.log('PDF extracted:', data.pageCount, 'pages,', data.wordCount, 'words');
+        } else {
+          alert('PDF extraction failed: ' + data.error);
+          setProcessing(false);
+          return;
+        }
+      } catch (e) {
+        alert('PDF upload error: ' + e.message);
+        setProcessing(false);
+        return;
+      }
+    }
+
     const { error } = await supabase.from('knowledge_base').insert([{
       title,
-      content,
+      content: finalContent,
       url,
       type,
-      source,
+      source: pdfFile ? 'PDF Upload' : source,
       client_id: clientId,
-      status: 'trained'
+      status: 'trained',
+      notes: aiMember
     }]);
+
     if (!error) {
       fetchDocuments();
       setShowForm(false);
@@ -68,6 +100,8 @@ export default function KnowledgeBase() {
       setType('document');
       setClientId('');
       setSource('Manual');
+      setPdfFile(null);
+      setAiMember('All Team');
     }
     setProcessing(false);
   };
@@ -90,8 +124,7 @@ export default function KnowledgeBase() {
   const typeIcon = (type) => {
     const icons = {
       document: '📄', website: '🌐', faq: '❓',
-      product: '📦', review: '⭐', script: '📝',
-      case_study: '🏆'
+      product: '📦', review: '⭐', script: '📝', case_study: '🏆'
     };
     return icons[type] || '📋';
   };
@@ -99,8 +132,7 @@ export default function KnowledgeBase() {
   const typeLabel = (type) => {
     const labels = {
       document: 'Document', website: 'Website', faq: 'FAQ',
-      product: 'Product', review: 'Review', script: 'Script',
-      case_study: 'Case Study'
+      product: 'Product', review: 'Review', script: 'Script', case_study: 'Case Study'
     };
     return labels[type] || type;
   };
@@ -146,7 +178,7 @@ export default function KnowledgeBase() {
         ))}
       </div>
 
-      {/* CLIENT BRAINS OVERVIEW */}
+      {/* CLIENT BRAINS */}
       {clients.length > 0 && (
         <div style={{ marginBottom: '16px' }}>
           <div style={{ fontSize: '10px', color: '#94a3b8', letterSpacing: '1px', fontWeight: 600, marginBottom: '10px' }}>CLIENT AI BRAINS</div>
@@ -173,7 +205,7 @@ export default function KnowledgeBase() {
             <div>
               <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>TITLE</div>
               <input type="text" value={title} onChange={e => setTitle(e.target.value)}
-                placeholder="e.g. Luux Bags Brand Guidelines" style={inputStyle} />
+                placeholder="e.g. $100M Offers — Alex Hormozi" style={inputStyle} />
             </div>
             <div>
               <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>CLIENT</div>
@@ -195,26 +227,44 @@ export default function KnowledgeBase() {
               </select>
             </div>
             <div>
+              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>AI TEAM MEMBER</div>
+              <select value={aiMember} onChange={e => setAiMember(e.target.value)} style={inputStyle}>
+                {aiMembers.map(m => <option key={m}>{m}</option>)}
+              </select>
+            </div>
+            <div>
               <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>SOURCE</div>
               <select value={source} onChange={e => setSource(e.target.value)} style={inputStyle}>
                 {sources.map(s => <option key={s}>{s}</option>)}
               </select>
             </div>
-            <div style={{ gridColumn: '1 / -1' }}>
+            <div>
               <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>WEBSITE URL (optional)</div>
               <input type="text" value={url} onChange={e => setUrl(e.target.value)}
-                placeholder="https://luuxbags.com" style={inputStyle} />
+                placeholder="https://example.com" style={inputStyle} />
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>CONTENT</div>
+              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>UPLOAD PDF (optional)</div>
+              <input
+                type="file"
+                accept=".pdf"
+                onChange={e => setPdfFile(e.target.files[0])}
+                style={{ ...inputStyle, padding: '6px 12px', cursor: 'pointer' }}
+              />
+              {pdfFile && (
+                <div style={{ fontSize: '10px', color: '#10b981', marginTop: '4px' }}>✓ {pdfFile.name} selected</div>
+              )}
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>CONTENT (paste text directly)</div>
               <textarea value={content} onChange={e => setContent(e.target.value)}
-                placeholder="Paste the content here — brand guidelines, FAQs, product descriptions, customer reviews, scripts, anything the AI should know about this client..."
+                placeholder="Paste content here — brand guidelines, FAQs, scripts, transcripts, or anything the AI should know..."
                 rows={6} style={{ ...inputStyle, resize: 'vertical' }} />
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button className="btn btn-green" onClick={addDocument} disabled={processing}>
-              {processing ? 'Adding...' : 'Add to Knowledge Base'}
+              {processing ? 'Processing...' : 'Add to Knowledge Base'}
             </button>
             <button className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>
           </div>
@@ -246,6 +296,9 @@ export default function KnowledgeBase() {
                 <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>
                   {getClientName(selectedDoc.client_id)} · {typeLabel(selectedDoc.type)} · Added {formatDate(selectedDoc.created_at)}
                 </div>
+                {selectedDoc.notes && (
+                  <div style={{ fontSize: '10px', color: '#10b981', marginTop: '2px' }}>AI Member: {selectedDoc.notes}</div>
+                )}
                 {selectedDoc.url && (
                   <a href={selectedDoc.url} target="_blank" rel="noreferrer"
                     style={{ fontSize: '10px', color: '#10b981', marginTop: '4px', display: 'block' }}>
@@ -278,20 +331,21 @@ export default function KnowledgeBase() {
         <div style={{ background: 'white', border: '0.5px solid #e2e8f0', borderRadius: '10px', padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
           <div style={{ fontSize: '32px', marginBottom: '12px' }}>🧠</div>
           <div style={{ fontWeight: 600, color: '#1a3c5e', marginBottom: '6px' }}>Knowledge base is empty</div>
-          <div style={{ fontSize: '11px' }}>Add documents, FAQs, brand guidelines, and product info to train the AI</div>
+          <div style={{ fontSize: '11px' }}>Add documents, PDFs, or paste content to train the AI team</div>
         </div>
       ) : (
         <div className="table-wrap">
-          <div className="table-header" style={{ gridTemplateColumns: '2.5fr 1.5fr 1fr 1fr 1fr' }}>
+          <div className="table-header" style={{ gridTemplateColumns: '2.5fr 1.5fr 1fr 1fr 1fr 1fr' }}>
             <div className="th">DOCUMENT</div>
             <div className="th">CLIENT</div>
             <div className="th">TYPE</div>
+            <div className="th">AI MEMBER</div>
             <div className="th">STATUS</div>
             <div className="th">ADDED</div>
           </div>
           {filtered.map(doc => (
             <div key={doc.id} className="table-row"
-              style={{ gridTemplateColumns: '2.5fr 1.5fr 1fr 1fr 1fr', cursor: 'pointer', background: selectedDoc?.id === doc.id ? '#fafffe' : 'white' }}
+              style={{ gridTemplateColumns: '2.5fr 1.5fr 1fr 1fr 1fr 1fr', cursor: 'pointer', background: selectedDoc?.id === doc.id ? '#fafffe' : 'white' }}
               onClick={() => setSelectedDoc(selectedDoc?.id === doc.id ? null : doc)}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{ fontSize: '20px' }}>{typeIcon(doc.type)}</div>
@@ -303,6 +357,7 @@ export default function KnowledgeBase() {
               </div>
               <div style={{ fontSize: '11px', color: '#475569' }}>{getClientName(doc.client_id)}</div>
               <div style={{ fontSize: '11px', color: '#475569' }}>{typeLabel(doc.type)}</div>
+              <div style={{ fontSize: '11px', color: '#10b981' }}>{doc.notes || 'All Team'}</div>
               <div>
                 <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '8px', background: doc.status === 'trained' ? '#ecfdf5' : '#fffbeb', color: doc.status === 'trained' ? '#059669' : '#d97706', border: `0.5px solid ${doc.status === 'trained' ? '#a7f3d0' : '#fde68a'}` }}>
                   {doc.status === 'trained' ? '✓ Trained' : 'Processing'}
