@@ -8,6 +8,9 @@ const multer = require('multer');
 const PDF2Json = require('pdf2json');
 const { YoutubeTranscript } = require('youtube-transcript');
 const twilio = require('twilio');
+const sgMail = require('@sendgrid/mail');
+
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -23,7 +26,6 @@ app.use(express.json());
 // ─── AUDIT ────────────────────────────────────────────────
 app.post('/audit', async (req, res) => {
   const { url } = req.body;
-  console.log('Audit requested for:', url);
   try {
     const response = await axios.post(
       'https://api.anthropic.com/v1/messages',
@@ -67,7 +69,6 @@ app.post('/audit', async (req, res) => {
 // ─── GENERATE AI REPLY ────────────────────────────────────
 app.post('/generate-reply', async (req, res) => {
   const { channel, senderName, content, clientName } = req.body;
-  console.log('Generating reply for:', senderName, 'on', channel);
   try {
     const response = await axios.post(
       'https://api.anthropic.com/v1/messages',
@@ -141,15 +142,10 @@ app.post('/shopify/sync-customers', async (req, res) => {
 app.post('/upload-pdf', upload.single('pdf'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    console.log('PDF received:', req.file.originalname, req.file.size, 'bytes');
-
     const pdfParser = new PDF2Json();
-
     pdfParser.on('pdfParser_dataError', errData => {
-      console.error('PDF parse error:', errData.parserError);
       res.status(500).json({ error: 'Failed to parse PDF' });
     });
-
     pdfParser.on('pdfParser_dataReady', pdfData => {
       const pages = pdfData.Pages || [];
       let text = '';
@@ -166,20 +162,16 @@ app.post('/upload-pdf', upload.single('pdf'), async (req, res) => {
         });
       });
       text = text.trim();
-      const wordCount = text.split(/\s+/).length;
-      console.log('PDF extracted:', pages.length, 'pages,', wordCount, 'words');
       res.json({
         success: true,
         filename: req.file.originalname,
         pageCount: pages.length,
-        wordCount,
+        wordCount: text.split(/\s+/).length,
         text: text.substring(0, 50000)
       });
     });
-
     pdfParser.parseBuffer(req.file.buffer);
   } catch (e) {
-    console.error('PDF upload error:', e.message);
     res.status(500).json({ error: 'Failed to parse PDF', details: e.message });
   }
 });
@@ -189,14 +181,10 @@ app.post('/youtube-transcript', async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'No URL provided' });
   try {
-    console.log('Fetching transcript for:', url);
     const transcript = await YoutubeTranscript.fetchTranscript(url);
     const text = transcript.map(t => t.text).join(' ').trim();
-    const wordCount = text.split(/\s+/).length;
-    console.log('Transcript extracted:', wordCount, 'words');
-    res.json({ success: true, wordCount, text: text.substring(0, 50000) });
+    res.json({ success: true, wordCount: text.split(/\s+/).length, text: text.substring(0, 50000) });
   } catch (e) {
-    console.error('YouTube transcript error:', e.message);
     res.status(500).json({ error: 'Failed to fetch transcript', details: e.message });
   }
 });
@@ -204,14 +192,9 @@ app.post('/youtube-transcript', async (req, res) => {
 // ─── SEND SMS ─────────────────────────────────────────────
 app.post('/send-sms', async (req, res) => {
   const { to, message } = req.body;
-  if (!to || !message) {
-    return res.status(400).json({ error: 'Missing to or message' });
-  }
+  if (!to || !message) return res.status(400).json({ error: 'Missing to or message' });
   try {
-    const client = twilio(
-      process.env.TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
+    const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     const result = await client.messages.create({
       body: message,
       from: process.env.TWILIO_PHONE_NUMBER,
@@ -222,6 +205,29 @@ app.post('/send-sms', async (req, res) => {
   } catch (e) {
     console.error('SMS error:', e.message);
     res.status(500).json({ error: 'Failed to send SMS', details: e.message });
+  }
+});
+
+// ─── SEND EMAIL ───────────────────────────────────────────
+app.post('/send-email', async (req, res) => {
+  const { to, subject, html, from, fromName } = req.body;
+  if (!to || !subject || !html) return res.status(400).json({ error: 'Missing to, subject, or html' });
+  try {
+    const msg = {
+      to: to,
+      from: {
+        email: from || process.env.SENDGRID_FROM_EMAIL || 'noreply@salesscales.com',
+        name: fromName || 'Sales Scales'
+      },
+      subject: subject,
+      html: html
+    };
+    await sgMail.send(msg);
+    console.log('Email sent to:', to);
+    res.json({ success: true, message: 'Email sent successfully' });
+  } catch (e) {
+    console.error('Email error:', e.message);
+    res.status(500).json({ error: 'Failed to send email', details: e.message });
   }
 });
 
