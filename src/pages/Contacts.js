@@ -46,29 +46,70 @@ export default function Contacts() {
     const { error } = await supabase.from('contacts').insert([{
       first_name: firstName,
       last_name: lastName,
-      email: email,
-      phone: phone,
-      source: source,
-      channel: channel,
+      email,
+      phone,
+      source,
+      channel,
       pipeline_stage: stage,
-      notes: notes,
+      notes,
       client_id: clientId || null,
       last_activity: new Date().toISOString()
     }]);
     if (!error) {
       fetchContacts();
       setShowForm(false);
-      setFirstName('');
-      setLastName('');
-      setEmail('');
-      setPhone('');
-      setSource('Manual');
-      setChannel('Email');
-      setStage('New Lead');
-      setNotes('');
-      setClientId('');
+      setFirstName(''); setLastName(''); setEmail(''); setPhone('');
+      setSource('Manual'); setChannel('Email'); setStage('New Lead');
+      setNotes(''); setClientId('');
     } else {
       alert('Error saving contact: ' + error.message);
+    }
+  };
+
+  const enrollContact = async (contact) => {
+    const { data: workflows } = await supabase
+      .from('workflows')
+      .select('id, name')
+      .eq('client_id', contact.client_id)
+      .eq('status', 'active');
+
+    if (!workflows || workflows.length === 0) {
+      alert('No active workflows found for this client. Create and activate a workflow first.');
+      return;
+    }
+
+    const workflowNames = workflows.map((w, i) => `${i + 1}. ${w.name}`).join('\n');
+    const choice = prompt(`Select a workflow to enroll ${contact.first_name} in:\n\n${workflowNames}\n\nEnter number:`);
+
+    if (!choice) return;
+
+    const selectedWorkflow = workflows[parseInt(choice) - 1];
+    if (!selectedWorkflow) {
+      alert('Invalid selection');
+      return;
+    }
+
+    try {
+      const response = await fetch('http://localhost:3001/enroll-contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workflowId: selectedWorkflow.id,
+          contactId: contact.id,
+          clientId: contact.client_id,
+          contactEmail: contact.email,
+          contactPhone: contact.phone,
+          contactName: contact.first_name
+        })
+      });
+      const data = await response.json();
+      if (data.success) {
+        alert(`${contact.first_name} enrolled in ${selectedWorkflow.name}. First message sent.`);
+      } else {
+        alert('Enrollment failed: ' + data.error);
+      }
+    } catch (e) {
+      alert('Error: ' + e.message);
     }
   };
 
@@ -135,43 +176,19 @@ export default function Contacts() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
             <div>
               <label style={labelStyle}>FIRST NAME</label>
-              <input
-                type="text"
-                value={firstName}
-                onChange={e => setFirstName(e.target.value)}
-                placeholder="First name"
-                style={inputStyle}
-              />
+              <input type="text" value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="First name" style={inputStyle} />
             </div>
             <div>
               <label style={labelStyle}>LAST NAME</label>
-              <input
-                type="text"
-                value={lastName}
-                onChange={e => setLastName(e.target.value)}
-                placeholder="Last name"
-                style={inputStyle}
-              />
+              <input type="text" value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Last name" style={inputStyle} />
             </div>
             <div>
               <label style={labelStyle}>EMAIL</label>
-              <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="email@example.com"
-                style={inputStyle}
-              />
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="email@example.com" style={inputStyle} />
             </div>
             <div>
               <label style={labelStyle}>PHONE</label>
-              <input
-                type="text"
-                value={phone}
-                onChange={e => setPhone(e.target.value)}
-                placeholder="+1 555 000 0000"
-                style={inputStyle}
-              />
+              <input type="text" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+965 XXXX XXXX" style={inputStyle} />
             </div>
             <div>
               <label style={labelStyle}>CLIENT</label>
@@ -220,13 +237,9 @@ export default function Contacts() {
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={labelStyle}>NOTES</label>
-              <textarea
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                placeholder="Any notes about this contact..."
-                rows={2}
-                style={{ ...inputStyle, resize: 'none' }}
-              />
+              <textarea value={notes} onChange={e => setNotes(e.target.value)}
+                placeholder="Any notes about this contact..." rows={2}
+                style={{ ...inputStyle, resize: 'none' }} />
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
@@ -271,6 +284,11 @@ export default function Contacts() {
             <div style={{ display: 'flex', gap: '6px' }}>
               <button className="btn btn-green" style={{ fontSize: '10px', padding: '5px 10px' }}>Send Message</button>
               <button className="btn btn-outline" style={{ fontSize: '10px', padding: '5px 10px' }}>Add Task</button>
+              <button
+                onClick={() => enrollContact(selectedContact)}
+                style={{ background: '#1a3c5e', color: 'white', border: 'none', borderRadius: '7px', fontSize: '10px', padding: '5px 10px', cursor: 'pointer' }}>
+                Enroll in Workflow
+              </button>
               <button onClick={() => setSelectedContact(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '18px', padding: '0 4px' }}>×</button>
             </div>
           </div>

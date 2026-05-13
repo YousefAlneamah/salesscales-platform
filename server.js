@@ -9,8 +9,14 @@ const PDF2Json = require('pdf2json');
 const { YoutubeTranscript } = require('youtube-transcript');
 const twilio = require('twilio');
 const sgMail = require('@sendgrid/mail');
+const { createClient } = require('@supabase/supabase-js');
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+
+const supabase = createClient(
+  process.env.REACT_APP_SUPABASE_URL,
+  process.env.REACT_APP_SUPABASE_ANON_KEY
+);
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -198,7 +204,7 @@ app.post('/send-sms', async (req, res) => {
     const result = await client.messages.create({
       body: message,
       from: process.env.TWILIO_PHONE_NUMBER,
-      to: to
+      to
     });
     console.log('SMS sent:', result.sid);
     res.json({ success: true, sid: result.sid });
@@ -262,6 +268,80 @@ app.post('/execute-step', async (req, res) => {
   } catch (e) {
     console.error('Execute step error:', e.message);
     res.status(500).json({ error: 'Failed to execute step', details: e.message });
+  }
+});
+
+// ─── ENROLL CONTACT IN WORKFLOW ───────────────────────────
+app.post('/enroll-contact', async (req, res) => {
+  const { workflowId, contactId, clientId, contactEmail, contactPhone, contactName } = req.body;
+  if (!workflowId || !contactId) return res.status(400).json({ error: 'Missing workflowId or contactId' });
+
+  try {
+    const { data: steps } = await supabase
+      .from('workflow_steps')
+      .select('*')
+      .eq('workflow_id', workflowId)
+      .order('step_order');
+
+    if (!steps || steps.length === 0) {
+      return res.status(400).json({ error: 'No steps found for this workflow' });
+    }
+
+    const { data: enrollment } = await supabase
+      .from('workflow_enrollments')
+      .insert([{
+        workflow_id: workflowId,
+        contact_id: contactId,
+        client_id: clientId,
+        status: 'active',
+        current_step: 1,
+        enrolled_at: new Date().toISOString(),
+        next_step_at: new Date().toISOString()
+      }])
+      .select()
+      .single();
+
+    const firstStep = steps[0];
+    if (firstStep.step_type !== 'wait' && firstStep.content) {
+      if (firstStep.step_type === 'sms' && contactPhone) {
+        const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        await twilioClient.messages.create({
+          body: firstStep.content.replace('{{first_name}}', contactName || 'there'),
+          from: process.env.TWILIO_PHONE_NUMBER,
+          to: contactPhone
+        });
+        console.log('Step 1 SMS sent to:', contactPhone);
+      } else if (firstStep.step_type === 'email' && contactEmail) {
+        await sgMail.send({
+          to: contactEmail,
+          from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+          subject: firstStep.subject || 'Message for you',
+          html: `<p>${firstStep.content.replace('{{first_name}}', contactName || 'there')}</p>`
+        });
+        console.log('Step 1 email sent to:', contactEmail);
+      }
+
+      await supabase.from('messages').insert([{
+        client_id: clientId,
+        contact_id: contactId,
+        channel: firstStep.step_type,
+        direction: 'outbound',
+        sender_name: 'Sales Scales AI',
+        content: firstStep.content,
+        status: 'sent'
+      }]);
+    }
+
+    await supabase
+      .from('workflows')
+      .update({ enrolled_count: steps.length })
+      .eq('id', workflowId);
+
+    res.json({ success: true, enrollmentId: enrollment?.id, stepsCount: steps.length });
+
+  } catch (e) {
+    console.error('Enrollment error:', e.message);
+    res.status(500).json({ error: 'Failed to enroll contact', details: e.message });
   }
 });
 
