@@ -20,7 +20,7 @@ export default function KnowledgeBase() {
   const [aiMember, setAiMember] = useState('All Team');
 
   const types = ['All', 'document', 'website', 'faq', 'product', 'review', 'script', 'case_study'];
-  const sources = ['Manual', 'Website', 'PDF Upload', 'YouTube', 'Google Drive', 'Notion'];
+  
   const aiMembers = ['All Team', 'Ali', 'Hassan', 'Mahdi', 'Hussain', 'Zainab', 'Fatima'];
 
   useEffect(() => {
