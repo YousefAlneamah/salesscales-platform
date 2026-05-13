@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const PDF2Json = require('pdf2json');
 const { YoutubeTranscript } = require('youtube-transcript');
+const twilio = require('twilio');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -152,39 +153,31 @@ app.post('/upload-pdf', upload.single('pdf'), async (req, res) => {
     pdfParser.on('pdfParser_dataReady', pdfData => {
       const pages = pdfData.Pages || [];
       let text = '';
-
       pages.forEach(page => {
         if (!page.Texts) return;
         page.Texts.forEach(textItem => {
           if (!textItem.R) return;
           textItem.R.forEach(run => {
             let word = run.T || '';
-            try {
-              word = decodeURIComponent(word);
-            } catch (e) {
-              // keep original if decode fails
-            }
+            try { word = decodeURIComponent(word); } catch (e) {}
             text += word + ' ';
           });
           text += '\n';
         });
       });
-
       text = text.trim();
       const wordCount = text.split(/\s+/).length;
       console.log('PDF extracted:', pages.length, 'pages,', wordCount, 'words');
-
       res.json({
         success: true,
         filename: req.file.originalname,
         pageCount: pages.length,
-        wordCount: wordCount,
+        wordCount,
         text: text.substring(0, 50000)
       });
     });
 
     pdfParser.parseBuffer(req.file.buffer);
-
   } catch (e) {
     console.error('PDF upload error:', e.message);
     res.status(500).json({ error: 'Failed to parse PDF', details: e.message });
@@ -195,21 +188,40 @@ app.post('/upload-pdf', upload.single('pdf'), async (req, res) => {
 app.post('/youtube-transcript', async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'No URL provided' });
-
   try {
     console.log('Fetching transcript for:', url);
     const transcript = await YoutubeTranscript.fetchTranscript(url);
     const text = transcript.map(t => t.text).join(' ').trim();
     const wordCount = text.split(/\s+/).length;
     console.log('Transcript extracted:', wordCount, 'words');
-    res.json({
-      success: true,
-      wordCount,
-      text: text.substring(0, 50000)
-    });
+    res.json({ success: true, wordCount, text: text.substring(0, 50000) });
   } catch (e) {
     console.error('YouTube transcript error:', e.message);
     res.status(500).json({ error: 'Failed to fetch transcript', details: e.message });
+  }
+});
+
+// ─── SEND SMS ─────────────────────────────────────────────
+app.post('/send-sms', async (req, res) => {
+  const { to, message } = req.body;
+  if (!to || !message) {
+    return res.status(400).json({ error: 'Missing to or message' });
+  }
+  try {
+    const client = twilio(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+    const result = await client.messages.create({
+      body: message,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to: to
+    });
+    console.log('SMS sent:', result.sid);
+    res.json({ success: true, sid: result.sid });
+  } catch (e) {
+    console.error('SMS error:', e.message);
+    res.status(500).json({ error: 'Failed to send SMS', details: e.message });
   }
 });
 
