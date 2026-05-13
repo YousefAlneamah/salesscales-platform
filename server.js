@@ -143,7 +143,7 @@ app.post('/upload-pdf', upload.single('pdf'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const pdfParser = new PDF2Json();
-    pdfParser.on('pdfParser_dataError', errData => {
+    pdfParser.on('pdfParser_dataError', () => {
       res.status(500).json({ error: 'Failed to parse PDF' });
     });
     pdfParser.on('pdfParser_dataReady', pdfData => {
@@ -213,21 +213,55 @@ app.post('/send-email', async (req, res) => {
   const { to, subject, html, from, fromName } = req.body;
   if (!to || !subject || !html) return res.status(400).json({ error: 'Missing to, subject, or html' });
   try {
-    const msg = {
-      to: to,
+    await sgMail.send({
+      to,
       from: {
-        email: from || process.env.SENDGRID_FROM_EMAIL || 'noreply@salesscales.com',
+        email: from || process.env.SENDGRID_FROM_EMAIL,
         name: fromName || 'Sales Scales'
       },
-      subject: subject,
-      html: html
-    };
-    await sgMail.send(msg);
+      subject,
+      html
+    });
     console.log('Email sent to:', to);
     res.json({ success: true, message: 'Email sent successfully' });
   } catch (e) {
     console.error('Email error:', e.message);
     res.status(500).json({ error: 'Failed to send email', details: e.message });
+  }
+});
+
+// ─── EXECUTE WORKFLOW STEP ────────────────────────────────
+app.post('/execute-step', async (req, res) => {
+  const { stepType, to, subject, message, contactName, clientName } = req.body;
+  if (!to || !message) return res.status(400).json({ error: 'Missing to or message' });
+  try {
+    if (stepType === 'sms') {
+      const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      const result = await client.messages.create({
+        body: message,
+        from: process.env.TWILIO_PHONE_NUMBER,
+        to
+      });
+      console.log('Workflow SMS sent:', result.sid);
+      res.json({ success: true, channel: 'sms', sid: result.sid });
+    } else if (stepType === 'email') {
+      await sgMail.send({
+        to,
+        from: {
+          email: process.env.SENDGRID_FROM_EMAIL,
+          name: clientName || 'Sales Scales'
+        },
+        subject: subject || 'Message from ' + (clientName || 'Sales Scales'),
+        html: `<p>Hi ${contactName || 'there'},</p><p>${message}</p>`
+      });
+      console.log('Workflow email sent to:', to);
+      res.json({ success: true, channel: 'email' });
+    } else {
+      res.json({ success: true, channel: stepType, note: 'Channel logged — sending not yet configured' });
+    }
+  } catch (e) {
+    console.error('Execute step error:', e.message);
+    res.status(500).json({ error: 'Failed to execute step', details: e.message });
   }
 });
 
