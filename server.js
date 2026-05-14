@@ -10,6 +10,7 @@ const { YoutubeTranscript } = require('youtube-transcript');
 const twilio = require('twilio');
 const sgMail = require('@sendgrid/mail');
 const { createClient } = require('@supabase/supabase-js');
+const cron = require('node-cron');
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
@@ -28,6 +29,161 @@ app.use((req, res, next) => {
 
 app.use(cors());
 app.use(express.json());
+
+// ─── SCHEDULER — runs every 15 minutes ───────────────────
+cron.schedule('*/15 * * * *', async () => {
+  console.log('Scheduler running — checking pending workflow steps...');
+  try {
+    const now = new Date().toISOString();
+
+    const { data: enrollments } = await supabase
+      .from('workflow_enrollments')
+      .select('*')
+      .eq('status', 'active')
+      .lte('next_step_at', now);
+
+    if (!enrollments || enrollments.length === 0) {
+      console.log('No pending steps found');
+      return;
+    }
+
+    console.log(`Found ${enrollments.length} enrollments to process`);
+
+    for (const enrollment of enrollments) {
+      const { data: steps } = await supabase
+        .from('workflow_steps')
+        .select('*')
+        .eq('workflow_id', enrollment.workflow_id)
+        .order('step_order');
+
+      if (!steps || steps.length === 0) continue;
+
+      const currentStep = steps[enrollment.current_step - 1];
+      if (!currentStep) {
+        await supabase
+          .from('workflow_enrollments')
+          .update({ status: 'completed', completed_at: now })
+          .eq('id', enrollment.id);
+        continue;
+      }
+
+      const { data: contact } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('id', enrollment.contact_id)
+        .single();
+
+      if (!contact) continue;
+
+      if (currentStep.step_type === 'wait') {
+        const nextStepAt = new Date();
+        nextStepAt.setHours(nextStepAt.getHours() + (currentStep.wait_hours || 1));
+        await supabase
+          .from('workflow_enrollments')
+          .update({
+            current_step: enrollment.current_step + 1,
+            next_step_at: nextStepAt.toISOString()
+          })
+          .eq('id', enrollment.id);
+        console.log(`Wait step processed for ${contact.first_name}`);
+
+      } else if (currentStep.step_type === 'sms' && contact.phone && currentStep.content) {
+        try {
+          const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+          await twilioClient.messages.create({
+            body: currentStep.content.replace('{{first_name}}', contact.first_name || 'there'),
+            from: process.env.TWILIO_PHONE_NUMBER,
+            to: contact.phone
+          });
+          console.log(`SMS sent to ${contact.first_name} — step ${enrollment.current_step}`);
+        } catch (e) {
+          console.error('SMS step error:', e.message);
+        }
+
+        const nextStep = steps[enrollment.current_step];
+        const nextStepAt = new Date();
+        if (nextStep && nextStep.step_type === 'wait') {
+          nextStepAt.setHours(nextStepAt.getHours() + (nextStep.wait_hours || 1));
+        }
+
+        await supabase
+          .from('workflow_enrollments')
+          .update({
+            current_step: enrollment.current_step + 1,
+            next_step_at: nextStepAt.toISOString()
+          })
+          .eq('id', enrollment.id);
+
+        await supabase.from('messages').insert([{
+          client_id: enrollment.client_id,
+          contact_id: enrollment.contact_id,
+          channel: 'sms',
+          direction: 'outbound',
+          sender_name: 'Sales Scales AI',
+          content: currentStep.content,
+          status: 'sent'
+        }]);
+
+      } else if (currentStep.step_type === 'email' && contact.email && currentStep.content) {
+        try {
+          await sgMail.send({
+            to: contact.email,
+            from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+            subject: currentStep.subject || 'Message for you',
+            html: `<p>${currentStep.content.replace('{{first_name}}', contact.first_name || 'there')}</p>`
+          });
+          console.log(`Email sent to ${contact.first_name} — step ${enrollment.current_step}`);
+        } catch (e) {
+          console.error('Email step error:', e.message);
+        }
+
+        const nextStep = steps[enrollment.current_step];
+        const nextStepAt = new Date();
+        if (nextStep && nextStep.step_type === 'wait') {
+          nextStepAt.setHours(nextStepAt.getHours() + (nextStep.wait_hours || 1));
+        }
+
+        await supabase
+          .from('workflow_enrollments')
+          .update({
+            current_step: enrollment.current_step + 1,
+            next_step_at: nextStepAt.toISOString()
+          })
+          .eq('id', enrollment.id);
+
+        await supabase.from('messages').insert([{
+          client_id: enrollment.client_id,
+          contact_id: enrollment.contact_id,
+          channel: 'email',
+          direction: 'outbound',
+          sender_name: 'Sales Scales AI',
+          content: currentStep.content,
+          status: 'sent'
+        }]);
+
+      } else {
+        const nextStepAt = new Date();
+        await supabase
+          .from('workflow_enrollments')
+          .update({
+            current_step: enrollment.current_step + 1,
+            next_step_at: nextStepAt.toISOString()
+          })
+          .eq('id', enrollment.id);
+      }
+
+      if (enrollment.current_step >= steps.length) {
+        await supabase
+          .from('workflow_enrollments')
+          .update({ status: 'completed', completed_at: now })
+          .eq('id', enrollment.id);
+        console.log(`Enrollment completed for ${contact.first_name}`);
+      }
+    }
+  } catch (e) {
+    console.error('Scheduler error:', e.message);
+  }
+});
 
 // ─── AUDIT ────────────────────────────────────────────────
 app.post('/audit', async (req, res) => {
@@ -248,22 +404,17 @@ app.post('/execute-step', async (req, res) => {
         from: process.env.TWILIO_PHONE_NUMBER,
         to
       });
-      console.log('Workflow SMS sent:', result.sid);
       res.json({ success: true, channel: 'sms', sid: result.sid });
     } else if (stepType === 'email') {
       await sgMail.send({
         to,
-        from: {
-          email: process.env.SENDGRID_FROM_EMAIL,
-          name: clientName || 'Sales Scales'
-        },
+        from: { email: process.env.SENDGRID_FROM_EMAIL, name: clientName || 'Sales Scales' },
         subject: subject || 'Message from ' + (clientName || 'Sales Scales'),
         html: `<p>Hi ${contactName || 'there'},</p><p>${message}</p>`
       });
-      console.log('Workflow email sent to:', to);
       res.json({ success: true, channel: 'email' });
     } else {
-      res.json({ success: true, channel: stepType, note: 'Channel logged — sending not yet configured' });
+      res.json({ success: true, channel: stepType, note: 'Channel logged' });
     }
   } catch (e) {
     console.error('Execute step error:', e.message);
@@ -287,6 +438,8 @@ app.post('/enroll-contact', async (req, res) => {
       return res.status(400).json({ error: 'No steps found for this workflow' });
     }
 
+    const nextStepAt = new Date().toISOString();
+
     const { data: enrollment } = await supabase
       .from('workflow_enrollments')
       .insert([{
@@ -296,7 +449,7 @@ app.post('/enroll-contact', async (req, res) => {
         status: 'active',
         current_step: 1,
         enrolled_at: new Date().toISOString(),
-        next_step_at: new Date().toISOString()
+        next_step_at: nextStepAt
       }])
       .select()
       .single();
@@ -333,6 +486,11 @@ app.post('/enroll-contact', async (req, res) => {
     }
 
     await supabase
+      .from('workflow_enrollments')
+      .update({ current_step: 2 })
+      .eq('id', enrollment.id);
+
+    await supabase
       .from('workflows')
       .update({ enrolled_count: steps.length })
       .eq('id', workflowId);
@@ -345,4 +503,7 @@ app.post('/enroll-contact', async (req, res) => {
   }
 });
 
-app.listen(3001, () => console.log('Server running on port 3001'));
+app.listen(3001, () => {
+  console.log('Server running on port 3001');
+  console.log('Scheduler active — checking workflow steps every 15 minutes');
+});
