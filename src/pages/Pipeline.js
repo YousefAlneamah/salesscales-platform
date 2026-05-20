@@ -13,15 +13,16 @@ export default function Pipeline() {
   const [stage, setStage] = useState('New Lead');
   const [contactId, setContactId] = useState('');
   const [clientId, setClientId] = useState('');
-  const [source, setSource] = useState('Manual');
+  const [source, setSource] = useState('Shopify');
   const [notes, setNotes] = useState('');
   const [dragging, setDragging] = useState(null);
+  const [selectedDeal, setSelectedDeal] = useState(null);
 
   const stages = [
-    { id: 'New Lead', color: '#94a3b8', light: '#f8fafc' },
+    { id: 'New Lead', color: '#8896a8', light: '#f8fafc' },
     { id: 'Contacted', color: '#3b82f6', light: '#eff6ff' },
-    { id: 'Nurturing', color: '#8b5cf6', light: '#f5f3ff' },
-    { id: 'Hot Lead', color: '#f59e0b', light: '#fffbeb' },
+    { id: 'Nurturing', color: '#7c3aed', light: '#f5f3ff' },
+    { id: 'Hot Lead', color: '#d97706', light: '#fffbeb' },
     { id: 'Proposal Sent', color: '#10b981', light: '#ecfdf5' },
     { id: 'Converted', color: '#059669', light: '#d1fae5' },
   ];
@@ -34,11 +35,8 @@ export default function Pipeline() {
 
   const fetchDeals = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('pipeline_deals')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (!error && data) setDeals(data);
+    const { data } = await supabase.from('pipeline_deals').select('*').order('created_at', { ascending: false });
+    if (data) setDeals(data);
     setLoading(false);
   };
 
@@ -53,29 +51,16 @@ export default function Pipeline() {
   };
 
   const addDeal = async () => {
-    if (!title || !clientId) {
-      alert('Please fill in deal title and select a client');
-      return;
-    }
+    if (!title || !clientId) { alert('Please fill in deal title and select a client'); return; }
     const { error } = await supabase.from('pipeline_deals').insert([{
-      title,
-      value: parseFloat(value) || 0,
-      stage,
-      client_id: clientId,
-      contact_id: contactId || null,
-      source,
-      notes
+      title, value: parseFloat(value) || 0, stage,
+      client_id: clientId, contact_id: contactId || null, source, notes
     }]);
     if (!error) {
       fetchDeals();
       setShowForm(false);
-      setTitle('');
-      setValue('');
-      setStage('New Lead');
-      setClientId('');
-      setContactId('');
-      setSource('Manual');
-      setNotes('');
+      setTitle(''); setValue(''); setStage('New Lead');
+      setClientId(''); setContactId(''); setSource('Shopify'); setNotes('');
     }
   };
 
@@ -84,200 +69,184 @@ export default function Pipeline() {
     fetchDeals();
   };
 
-  const getClientName = (clientId) => {
-    const client = clients.find(c => c.id === clientId);
-    return client ? client.name : '—';
-  };
-
-  const getContactName = (contactId) => {
-    const contact = contacts.find(c => c.id === contactId);
-    return contact ? `${contact.first_name} ${contact.last_name}` : '—';
-  };
+  const getClientName = (id) => clients.find(c => c.id === id)?.name || '—';
+  const getContactName = (id) => { const c = contacts.find(c => c.id === id); return c ? `${c.first_name} ${c.last_name}` : '—'; };
 
   const filtered = filterClient === 'All' ? deals : deals.filter(d => d.client_id === filterClient);
-
-  const getDealsForStage = (stageId) => filtered.filter(d => d.stage === stageId);
-
-  const getTotalValue = (stageId) => {
-    return getDealsForStage(stageId).reduce((sum, d) => sum + (d.value || 0), 0);
-  };
-
-  const totalPipelineValue = filtered.reduce((sum, d) => sum + (d.value || 0), 0);
-  const totalDeals = filtered.length;
+  const getDealsForStage = (s) => filtered.filter(d => d.stage === s);
+  const getTotalValue = (s) => getDealsForStage(s).reduce((sum, d) => sum + (d.value || 0), 0);
+  const totalValue = filtered.reduce((sum, d) => sum + (d.value || 0), 0);
   const convertedDeals = filtered.filter(d => d.stage === 'Converted').length;
   const hotLeads = filtered.filter(d => d.stage === 'Hot Lead').length;
 
-  const inputStyle = {
-    width: '100%', border: '0.5px solid #e2e8f0', borderRadius: '7px',
-    padding: '8px 12px', fontSize: '12px', color: '#1a3c5e',
-    outline: 'none', background: 'white', boxSizing: 'border-box'
-  };
-
-  const handleDragStart = (e, deal) => {
-    setDragging(deal);
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
-  const handleDragOver = (e) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  };
-
+  const handleDragStart = (e, deal) => { setDragging(deal); e.dataTransfer.effectAllowed = 'move'; };
+  const handleDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
   const handleDrop = (e, stageId) => {
     e.preventDefault();
-    if (dragging && dragging.stage !== stageId) {
-      moveDeal(dragging.id, stageId);
-    }
+    if (dragging && dragging.stage !== stageId) moveDeal(dragging.id, stageId);
     setDragging(null);
+  };
+
+  const inputStyle = {
+    width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px',
+    padding: '9px 12px', fontSize: '12px', color: '#0a1628',
+    outline: 'none', background: 'white', boxSizing: 'border-box',
+    fontFamily: 'DM Sans, sans-serif'
   };
 
   return (
     <div>
       {/* HEADER */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <div>
-          <div style={{ fontSize: '10px', color: '#94a3b8', letterSpacing: '1px', fontWeight: 600 }}>PIPELINE</div>
-          <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>{totalDeals} deals · ${totalPipelineValue.toLocaleString()} total value</div>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Deal Pipeline</div>
+          <div style={{ fontSize: '13px', color: '#0a1628', fontWeight: 600 }}>{filtered.length} deals · ${totalValue.toLocaleString()} total value</div>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <select value={filterClient} onChange={e => setFilterClient(e.target.value)}
-            style={{ ...inputStyle, width: '160px' }}>
-            <option value="All">All Clients</option>
+          <select value={filterClient} onChange={e => setFilterClient(e.target.value)} style={{ ...inputStyle, width: '160px' }}>
+            <option value="All">All Stores</option>
             {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-          <button className="btn btn-green" onClick={() => setShowForm(!showForm)}>+ Add Deal</button>
+          <button onClick={() => setShowForm(!showForm)}
+            style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+            + Add Deal
+          </button>
         </div>
       </div>
 
       {/* STATS */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
         {[
-          { label: 'TOTAL DEALS', value: totalDeals, sub: 'in pipeline' },
-          { label: 'PIPELINE VALUE', value: '$' + totalPipelineValue.toLocaleString(), sub: 'total value' },
-          { label: 'HOT LEADS', value: hotLeads, sub: 'ready to close' },
-          { label: 'CONVERTED', value: convertedDeals, sub: 'this pipeline' },
+          { label: 'Total Deals', value: filtered.length, sub: 'in pipeline', color: '#c9a84c' },
+          { label: 'Pipeline Value', value: '$' + totalValue.toLocaleString(), sub: 'total value', color: '#c9a84c' },
+          { label: 'Hot Leads', value: hotLeads, sub: 'ready to close', color: '#d97706' },
+          { label: 'Converted', value: convertedDeals, sub: 'this pipeline', color: '#10b981' },
         ].map(stat => (
-          <div key={stat.label} style={{ background: 'white', border: '0.5px solid #e2e8f0', borderRadius: '10px', padding: '14px 16px', borderTop: '2px solid #10b981' }}>
-            <div style={{ fontSize: '9px', color: '#94a3b8', letterSpacing: '1px', marginBottom: '4px', fontWeight: 600 }}>{stat.label}</div>
-            <div style={{ fontSize: '22px', fontWeight: 600, color: '#1a3c5e' }}>{stat.value}</div>
-            <div style={{ fontSize: '10px', color: '#10b981', marginTop: '2px' }}>{stat.sub}</div>
+          <div key={stat.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '16px 18px', borderTop: `2px solid ${stat.color}`, boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>{stat.label}</div>
+            <div style={{ fontSize: '24px', fontWeight: 700, color: '#0a1628', letterSpacing: '-0.5px', marginBottom: '4px' }}>{stat.value}</div>
+            <div style={{ fontSize: '11px', color: stat.color, fontWeight: 500 }}>{stat.sub}</div>
           </div>
         ))}
       </div>
 
       {/* ADD DEAL FORM */}
       {showForm && (
-        <div style={{ background: 'white', border: '0.5px solid #a7f3d0', borderRadius: '10px', padding: '16px 18px', marginBottom: '16px' }}>
-          <div style={{ fontSize: '10px', color: '#94a3b8', letterSpacing: '1px', fontWeight: 600, marginBottom: '14px' }}>ADD NEW DEAL</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', marginBottom: '20px', boxShadow: '0 4px 6px rgba(10,22,40,0.05)' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '16px' }}>New Deal</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '16px' }}>
             <div>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>DEAL TITLE</div>
-              <input type="text" value={title} onChange={e => setTitle(e.target.value)}
-                placeholder="e.g. Adam — Cart Recovery" style={inputStyle} />
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Deal Title</div>
+              <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Cart Recovery — Luux Bags" style={inputStyle} />
             </div>
             <div>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>DEAL VALUE ($)</div>
-              <input type="number" value={value} onChange={e => setValue(e.target.value)}
-                placeholder="0" style={inputStyle} />
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Value ($)</div>
+              <input type="number" value={value} onChange={e => setValue(e.target.value)} placeholder="0" style={inputStyle} />
             </div>
             <div>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>CLIENT</div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Client Store</div>
               <select value={clientId} onChange={e => setClientId(e.target.value)} style={inputStyle}>
-                <option value="">Select client</option>
+                <option value="">Select store</option>
                 {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>CONTACT</div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Contact</div>
               <select value={contactId} onChange={e => setContactId(e.target.value)} style={inputStyle}>
                 <option value="">Select contact</option>
                 {contacts.map(c => <option key={c.id} value={c.id}>{c.first_name} {c.last_name}</option>)}
               </select>
             </div>
             <div>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>STAGE</div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Stage</div>
               <select value={stage} onChange={e => setStage(e.target.value)} style={inputStyle}>
                 {stages.map(s => <option key={s.id}>{s.id}</option>)}
               </select>
             </div>
             <div>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>SOURCE</div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Source</div>
               <select value={source} onChange={e => setSource(e.target.value)} style={inputStyle}>
-                <option>Manual</option>
                 <option>Shopify</option>
                 <option>Instagram</option>
                 <option>Facebook</option>
-                <option>LinkedIn</option>
                 <option>Referral</option>
-                <option>Form</option>
+                <option>Manual</option>
               </select>
-            </div>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>NOTES</div>
-              <textarea value={notes} onChange={e => setNotes(e.target.value)}
-                placeholder="Any notes about this deal..." rows={2}
-                style={{ ...inputStyle, resize: 'none' }} />
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button className="btn btn-green" onClick={addDeal}>Save Deal</button>
-            <button className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>
+            <button onClick={addDeal} style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>Save Deal</button>
+            <button onClick={() => setShowForm(false)} style={{ background: 'white', border: '1px solid #e4e9f0', color: '#8896a8', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', cursor: 'pointer' }}>Cancel</button>
           </div>
         </div>
       )}
 
-      {/* KANBAN BOARD */}
+      {/* KANBAN */}
       {loading ? (
-        <div style={{ background: 'white', border: '0.5px solid #e2e8f0', borderRadius: '10px', padding: '40px', textAlign: 'center', color: '#94a3b8' }}>Loading pipeline...</div>
+        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '40px', textAlign: 'center', color: '#8896a8' }}>Loading pipeline...</div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '10px', overflowX: 'auto' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '10px' }}>
           {stages.map(stageObj => {
             const stageDeals = getDealsForStage(stageObj.id);
             const stageValue = getTotalValue(stageObj.id);
             return (
-              <div
-                key={stageObj.id}
+              <div key={stageObj.id}
                 onDragOver={handleDragOver}
                 onDrop={e => handleDrop(e, stageObj.id)}
-                style={{ background: stageObj.light, borderRadius: '10px', padding: '12px', minHeight: '400px', border: `0.5px solid ${stageObj.color}20` }}
-              >
-                <div style={{ marginBottom: '10px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
-                    <div style={{ fontSize: '10px', fontWeight: 600, color: stageObj.color, letterSpacing: '0.5px' }}>{stageObj.id.toUpperCase()}</div>
-                    <div style={{ fontSize: '10px', background: stageObj.color, color: 'white', borderRadius: '10px', padding: '1px 7px', fontWeight: 600 }}>{stageDeals.length}</div>
+                style={{ background: stageObj.light, borderRadius: '10px', padding: '12px', minHeight: '320px', border: `1px solid ${stageObj.color}20` }}>
+                <div style={{ marginBottom: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                    <div style={{ fontSize: '9px', fontWeight: 700, color: stageObj.color, letterSpacing: '1px', textTransform: 'uppercase' }}>{stageObj.id}</div>
+                    <div style={{ fontSize: '9px', background: stageObj.color, color: 'white', borderRadius: '10px', padding: '1px 7px', fontWeight: 700 }}>{stageDeals.length}</div>
                   </div>
-                  <div style={{ fontSize: '10px', color: '#94a3b8' }}>${stageValue.toLocaleString()}</div>
+                  <div style={{ fontSize: '10px', color: '#8896a8', fontWeight: 500 }}>${stageValue.toLocaleString()}</div>
                 </div>
 
                 {stageDeals.map(deal => (
-                  <div
-                    key={deal.id}
+                  <div key={deal.id}
                     draggable
                     onDragStart={e => handleDragStart(e, deal)}
-                    style={{ background: 'white', border: '0.5px solid #e2e8f0', borderRadius: '8px', padding: '10px 12px', marginBottom: '8px', cursor: 'grab', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
-                  >
-                    <div style={{ fontSize: '11px', fontWeight: 600, color: '#1a3c5e', marginBottom: '4px' }}>{deal.title}</div>
-                    <div style={{ fontSize: '10px', color: '#10b981', fontWeight: 500, marginBottom: '4px' }}>
-                      {deal.value > 0 ? '$' + deal.value.toLocaleString() : 'No value set'}
+                    onClick={() => setSelectedDeal(selectedDeal?.id === deal.id ? null : deal)}
+                    style={{ background: 'white', border: `1px solid ${selectedDeal?.id === deal.id ? stageObj.color : '#e4e9f0'}`, borderRadius: '8px', padding: '10px 12px', marginBottom: '8px', cursor: 'grab', boxShadow: '0 1px 3px rgba(10,22,40,0.06)', transition: 'border-color 0.1s' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: '#0a1628', marginBottom: '4px' }}>{deal.title}</div>
+                    <div style={{ fontSize: '11px', color: '#c9a84c', fontWeight: 600, marginBottom: '4px' }}>
+                      {deal.value > 0 ? '$' + deal.value.toLocaleString() : 'No value'}
                     </div>
-                    <div style={{ fontSize: '9px', color: '#94a3b8', marginBottom: '2px' }}>{getClientName(deal.client_id)}</div>
-                    {deal.contact_id && (
-                      <div style={{ fontSize: '9px', color: '#94a3b8' }}>{getContactName(deal.contact_id)}</div>
-                    )}
-                    <div style={{ fontSize: '9px', color: '#cbd5e1', marginTop: '6px' }}>
-                      {new Date(deal.created_at).toLocaleDateString()}
-                    </div>
+                    <div style={{ fontSize: '9px', color: '#8896a8' }}>{getClientName(deal.client_id)}</div>
+                    {deal.contact_id && <div style={{ fontSize: '9px', color: '#8896a8' }}>{getContactName(deal.contact_id)}</div>}
+                    <div style={{ fontSize: '9px', color: '#c4cdd6', marginTop: '6px' }}>{new Date(deal.created_at).toLocaleDateString()}</div>
                   </div>
                 ))}
 
                 {stageDeals.length === 0 && (
-                  <div style={{ textAlign: 'center', padding: '20px 10px', color: '#cbd5e1', fontSize: '11px', border: '0.5px dashed #e2e8f0', borderRadius: '8px' }}>
-                    Drop deals here
+                  <div style={{ textAlign: 'center', padding: '20px 8px', color: '#c4cdd6', fontSize: '10px', border: '1px dashed #e4e9f0', borderRadius: '8px' }}>
+                    Drop here
                   </div>
                 )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* DEAL DETAIL */}
+      {selectedDeal && (
+        <div style={{ marginTop: '16px', background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '18px', boxShadow: '0 4px 6px rgba(10,22,40,0.05)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628', marginBottom: '4px' }}>{selectedDeal.title}</div>
+              <div style={{ fontSize: '11px', color: '#8896a8', marginBottom: '8px' }}>
+                {getClientName(selectedDeal.client_id)} · {selectedDeal.source} · {new Date(selectedDeal.created_at).toLocaleDateString()}
+              </div>
+              {selectedDeal.notes && (
+                <div style={{ fontSize: '11px', color: '#475569', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e4e9f0' }}>
+                  {selectedDeal.notes}
+                </div>
+              )}
+            </div>
+            <button onClick={() => setSelectedDeal(null)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '20px' }}>×</button>
+          </div>
         </div>
       )}
     </div>
