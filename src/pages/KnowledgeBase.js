@@ -14,13 +14,10 @@ export default function KnowledgeBase() {
   const [url, setUrl] = useState('');
   const [type, setType] = useState('document');
   const [clientId, setClientId] = useState('');
-  const [source, setSource] = useState('Manual');
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [pdfFile, setPdfFile] = useState(null);
   const [aiMember, setAiMember] = useState('All Team');
 
-  const types = ['All', 'document', 'website', 'faq', 'product', 'review', 'script', 'case_study'];
-  
   const aiMembers = ['All Team', 'Ali', 'Hassan', 'Mahdi', 'Hussain', 'Zainab', 'Fatima'];
 
   useEffect(() => {
@@ -30,11 +27,8 @@ export default function KnowledgeBase() {
 
   const fetchDocuments = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('knowledge_base')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (!error && data) setDocuments(data);
+    const { data } = await supabase.from('knowledge_base').select('*').order('created_at', { ascending: false });
+    if (data) setDocuments(data);
     setLoading(false);
   };
 
@@ -44,94 +38,49 @@ export default function KnowledgeBase() {
   };
 
   const addDocument = async () => {
-    if (!title || !clientId) {
-      alert('Please fill in title and select a client');
-      return;
-    }
-    if (!content && !url && !pdfFile) {
-      alert('Please add content, a URL, or upload a PDF');
-      return;
-    }
+    if (!title || !clientId) { alert('Please fill in title and select a client'); return; }
+    if (!content && !url && !pdfFile) { alert('Please add content, a URL, or upload a PDF'); return; }
     setProcessing(true);
 
     let finalContent = content;
-    let finalSource = source;
+    let finalSource = 'Manual';
 
-    // YouTube transcript
     if (url && url.includes('youtube.com') && !pdfFile) {
       try {
         const response = await fetch('http://localhost:3001/youtube-transcript', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url })
         });
         const data = await response.json();
-        if (data.success) {
-          finalContent = data.text;
-          finalSource = 'YouTube';
-          console.log('YouTube transcript extracted:', data.wordCount, 'words');
-        } else {
-          alert('YouTube transcript failed: ' + data.error);
-          setProcessing(false);
-          return;
-        }
-      } catch (e) {
-        alert('YouTube error: ' + e.message);
-        setProcessing(false);
-        return;
-      }
+        if (data.success) { finalContent = data.text; finalSource = 'YouTube'; }
+        else { alert('YouTube transcript failed: ' + data.error); setProcessing(false); return; }
+      } catch (e) { alert('YouTube error: ' + e.message); setProcessing(false); return; }
     }
 
-    // PDF upload
     if (pdfFile) {
       try {
         const formData = new FormData();
         formData.append('pdf', pdfFile);
-        const response = await fetch('http://localhost:3001/upload-pdf', {
-          method: 'POST',
-          body: formData
-        });
+        const response = await fetch('http://localhost:3001/upload-pdf', { method: 'POST', body: formData });
         const data = await response.json();
-        if (data.success) {
-          finalContent = data.text;
-          finalSource = 'PDF Upload';
-          console.log('PDF extracted:', data.pageCount, 'pages,', data.wordCount, 'words');
-        } else {
-          alert('PDF extraction failed: ' + data.error);
-          setProcessing(false);
-          return;
-        }
-      } catch (e) {
-        alert('PDF upload error: ' + e.message);
-        setProcessing(false);
-        return;
-      }
+        if (data.success) { finalContent = data.text; finalSource = 'PDF Upload'; }
+        else { alert('PDF failed: ' + data.error); setProcessing(false); return; }
+      } catch (e) { alert('PDF error: ' + e.message); setProcessing(false); return; }
     }
 
     const { error } = await supabase.from('knowledge_base').insert([{
-      title,
-      content: finalContent,
-      url,
-      type,
-      source: finalSource,
-      client_id: clientId,
-      status: 'trained',
-      notes: aiMember
+      title, content: finalContent, url, type,
+      source: finalSource, client_id: clientId,
+      status: 'trained', notes: aiMember
     }]);
 
     if (!error) {
       fetchDocuments();
       setShowForm(false);
-      setTitle('');
-      setContent('');
-      setUrl('');
-      setType('document');
-      setClientId('');
-      setSource('Manual');
-      setPdfFile(null);
-      setAiMember('All Team');
+      setTitle(''); setContent(''); setUrl(''); setType('document');
+      setClientId(''); setPdfFile(null); setAiMember('All Team');
     } else {
-      alert('Error saving: ' + error.message);
+      alert('Error: ' + error.message);
     }
     setProcessing(false);
   };
@@ -142,30 +91,11 @@ export default function KnowledgeBase() {
     if (selectedDoc?.id === id) setSelectedDoc(null);
   };
 
-  const getClientName = (clientId) => {
-    const client = clients.find(c => c.id === clientId);
-    return client ? client.name : '—';
-  };
+  const getClientName = (id) => clients.find(c => c.id === id)?.name || '—';
+  const formatDate = (d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
-
-  const typeIcon = (type) => {
-    const icons = {
-      document: '📄', website: '🌐', faq: '❓',
-      product: '📦', review: '⭐', script: '📝', case_study: '🏆'
-    };
-    return icons[type] || '📋';
-  };
-
-  const typeLabel = (type) => {
-    const labels = {
-      document: 'Document', website: 'Website', faq: 'FAQ',
-      product: 'Product', review: 'Review', script: 'Script', case_study: 'Case Study'
-    };
-    return labels[type] || type;
-  };
+  const typeIcon = (t) => ({ document: '📄', website: '🌐', faq: '❓', product: '📦', review: '⭐', script: '📝', case_study: '🏆' }[t] || '📋');
+  const typeLabel = (t) => ({ document: 'Document', website: 'Website', faq: 'FAQ', product: 'Product', review: 'Review', script: 'Script', case_study: 'Case Study' }[t] || t);
 
   const filtered = documents.filter(d => {
     const matchClient = filterClient === 'All' || d.client_id === filterClient;
@@ -173,53 +103,55 @@ export default function KnowledgeBase() {
     return matchClient && matchType;
   });
 
-  const totalByClient = (clientId) => documents.filter(d => d.client_id === clientId).length;
-
   const inputStyle = {
-    width: '100%', border: '0.5px solid #e2e8f0', borderRadius: '7px',
-    padding: '8px 12px', fontSize: '12px', color: '#1a3c5e',
-    outline: 'none', background: 'white', boxSizing: 'border-box'
+    width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px',
+    padding: '9px 12px', fontSize: '12px', color: '#0a1628',
+    outline: 'none', background: 'white', boxSizing: 'border-box',
+    fontFamily: 'DM Sans, sans-serif'
   };
 
   return (
     <div>
       {/* HEADER */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <div>
-          <div style={{ fontSize: '10px', color: '#94a3b8', letterSpacing: '1px', fontWeight: 600 }}>KNOWLEDGE BASE</div>
-          <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>{documents.length} documents · {clients.length} client brains</div>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Knowledge Base</div>
+          <div style={{ fontSize: '13px', color: '#0a1628', fontWeight: 600 }}>{documents.length} documents · {clients.length} AI brains active</div>
         </div>
-        <button className="btn btn-green" onClick={() => setShowForm(!showForm)}>+ Add Document</button>
+        <button onClick={() => setShowForm(!showForm)}
+          style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+          + Add Document
+        </button>
       </div>
 
       {/* STATS */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
         {[
-          { label: 'TOTAL DOCUMENTS', value: documents.length, sub: 'in knowledge base' },
-          { label: 'CLIENT BRAINS', value: clients.length, sub: 'active AI brains' },
-          { label: 'TRAINED', value: documents.filter(d => d.status === 'trained').length, sub: 'ready for AI' },
-          { label: 'PROCESSING', value: documents.filter(d => d.status === 'processing').length, sub: 'being ingested' },
+          { label: 'Total Documents', value: documents.length, sub: 'in knowledge base', color: '#c9a84c' },
+          { label: 'AI Brains', value: clients.length, sub: 'active client brains', color: '#c9a84c' },
+          { label: 'Trained', value: documents.filter(d => d.status === 'trained').length, sub: 'ready for AI', color: '#10b981' },
+          { label: 'Processing', value: documents.filter(d => d.status === 'processing').length, sub: 'being ingested', color: '#d97706' },
         ].map(stat => (
-          <div key={stat.label} style={{ background: 'white', border: '0.5px solid #e2e8f0', borderRadius: '10px', padding: '14px 16px', borderTop: '2px solid #10b981' }}>
-            <div style={{ fontSize: '9px', color: '#94a3b8', letterSpacing: '1px', marginBottom: '4px', fontWeight: 600 }}>{stat.label}</div>
-            <div style={{ fontSize: '22px', fontWeight: 600, color: '#1a3c5e' }}>{stat.value}</div>
-            <div style={{ fontSize: '10px', color: '#10b981', marginTop: '2px' }}>{stat.sub}</div>
+          <div key={stat.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '16px 18px', borderTop: `2px solid ${stat.color}`, boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>{stat.label}</div>
+            <div style={{ fontSize: '24px', fontWeight: 700, color: '#0a1628', letterSpacing: '-0.5px', marginBottom: '4px' }}>{stat.value}</div>
+            <div style={{ fontSize: '11px', color: stat.color, fontWeight: 500 }}>{stat.sub}</div>
           </div>
         ))}
       </div>
 
       {/* CLIENT BRAINS */}
       {clients.length > 0 && (
-        <div style={{ marginBottom: '16px' }}>
-          <div style={{ fontSize: '10px', color: '#94a3b8', letterSpacing: '1px', fontWeight: 600, marginBottom: '10px' }}>CLIENT AI BRAINS</div>
+        <div style={{ marginBottom: '20px' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '12px' }}>Client AI Brains</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
             {clients.map(client => (
-              <div key={client.id} style={{ background: 'white', border: '0.5px solid #e2e8f0', borderRadius: '10px', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#ecfdf5', border: '0.5px solid #a7f3d0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>🧠</div>
+              <div key={client.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 1px 3px rgba(10,22,40,0.04)' }}>
+                <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>🧠</div>
                 <div>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#1a3c5e' }}>{client.name}</div>
-                  <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>{totalByClient(client.id)} documents trained</div>
-                  <div style={{ fontSize: '9px', color: '#10b981', marginTop: '2px' }}>● AI Brain Active</div>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628' }}>{client.name}</div>
+                  <div style={{ fontSize: '10px', color: '#8896a8', marginTop: '2px' }}>{documents.filter(d => d.client_id === client.id).length} documents trained</div>
+                  <div style={{ fontSize: '9px', color: '#10b981', marginTop: '2px', fontWeight: 600 }}>● Active</div>
                 </div>
               </div>
             ))}
@@ -229,23 +161,22 @@ export default function KnowledgeBase() {
 
       {/* ADD DOCUMENT FORM */}
       {showForm && (
-        <div style={{ background: 'white', border: '0.5px solid #a7f3d0', borderRadius: '10px', padding: '16px 18px', marginBottom: '16px' }}>
-          <div style={{ fontSize: '10px', color: '#94a3b8', letterSpacing: '1px', fontWeight: 600, marginBottom: '14px' }}>ADD TO KNOWLEDGE BASE</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', marginBottom: '20px', boxShadow: '0 4px 6px rgba(10,22,40,0.05)' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '16px' }}>Add to Knowledge Base</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '16px' }}>
             <div>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>TITLE</div>
-              <input type="text" value={title} onChange={e => setTitle(e.target.value)}
-                placeholder="e.g. $100M Offers — Alex Hormozi" style={inputStyle} />
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Title</div>
+              <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. $100M Offers — Alex Hormozi" style={inputStyle} />
             </div>
             <div>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>CLIENT</div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Client Store</div>
               <select value={clientId} onChange={e => setClientId(e.target.value)} style={inputStyle}>
-                <option value="">Select client</option>
+                <option value="">Select store</option>
                 {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>TYPE</div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Type</div>
               <select value={type} onChange={e => setType(e.target.value)} style={inputStyle}>
                 <option value="document">Document</option>
                 <option value="website">Website</option>
@@ -257,94 +188,87 @@ export default function KnowledgeBase() {
               </select>
             </div>
             <div>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>AI TEAM MEMBER</div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>AI Team Member</div>
               <select value={aiMember} onChange={e => setAiMember(e.target.value)} style={inputStyle}>
                 {aiMembers.map(m => <option key={m}>{m}</option>)}
               </select>
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>YOUTUBE OR WEBSITE URL (optional)</div>
-              <input type="text" value={url} onChange={e => setUrl(e.target.value)}
-                placeholder="https://youtube.com/watch?v=... or https://example.com" style={inputStyle} />
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>YouTube or Website URL</div>
+              <input type="text" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://youtube.com/watch?v=... or https://example.com" style={inputStyle} />
               {url && url.includes('youtube.com') && (
-                <div style={{ fontSize: '10px', color: '#10b981', marginTop: '4px' }}>✓ YouTube URL detected — transcript will be pulled automatically</div>
+                <div style={{ fontSize: '10px', color: '#10b981', marginTop: '4px', fontWeight: 500 }}>✓ YouTube URL — transcript will be pulled automatically</div>
               )}
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>UPLOAD PDF (optional)</div>
-              <input
-                type="file"
-                accept=".pdf"
-                onChange={e => setPdfFile(e.target.files[0])}
-                style={{ ...inputStyle, padding: '6px 12px', cursor: 'pointer' }}
-              />
-              {pdfFile && (
-                <div style={{ fontSize: '10px', color: '#10b981', marginTop: '4px' }}>✓ {pdfFile.name} selected</div>
-              )}
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Upload PDF</div>
+              <input type="file" accept=".pdf" onChange={e => setPdfFile(e.target.files[0])} style={{ ...inputStyle, padding: '7px 12px', cursor: 'pointer' }} />
+              {pdfFile && <div style={{ fontSize: '10px', color: '#10b981', marginTop: '4px', fontWeight: 500 }}>✓ {pdfFile.name} selected</div>}
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '5px', fontWeight: 500 }}>CONTENT (paste text directly)</div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Content — paste text directly</div>
               <textarea value={content} onChange={e => setContent(e.target.value)}
-                placeholder="Paste content here — brand guidelines, FAQs, scripts, transcripts, or anything the AI should know..."
-                rows={6} style={{ ...inputStyle, resize: 'vertical' }} />
+                placeholder="Paste content here — brand guidelines, FAQs, scripts, or anything the AI should know..."
+                rows={5} style={{ ...inputStyle, resize: 'vertical' }} />
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button className="btn btn-green" onClick={addDocument} disabled={processing}>
+            <button onClick={addDocument} disabled={processing}
+              style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
               {processing ? 'Processing...' : 'Add to Knowledge Base'}
             </button>
-            <button className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>
+            <button onClick={() => setShowForm(false)}
+              style={{ background: 'white', border: '1px solid #e4e9f0', color: '#8896a8', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', cursor: 'pointer' }}>
+              Cancel
+            </button>
           </div>
         </div>
       )}
 
       {/* FILTERS */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
-        <select value={filterClient} onChange={e => setFilterClient(e.target.value)}
-          style={{ ...inputStyle, width: '160px' }}>
-          <option value="All">All Clients</option>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>
+        <select value={filterClient} onChange={e => setFilterClient(e.target.value)} style={{ ...inputStyle, width: '160px' }}>
+          <option value="All">All Stores</option>
           {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <select value={filterType} onChange={e => setFilterType(e.target.value)}
-          style={{ ...inputStyle, width: '140px' }}>
-          {types.map(t => <option key={t} value={t}>{t === 'All' ? 'All Types' : typeLabel(t)}</option>)}
+        <select value={filterType} onChange={e => setFilterType(e.target.value)} style={{ ...inputStyle, width: '140px' }}>
+          <option value="All">All Types</option>
+          <option value="document">Document</option>
+          <option value="website">Website</option>
+          <option value="faq">FAQ</option>
+          <option value="product">Product</option>
+          <option value="review">Review</option>
+          <option value="script">Script</option>
+          <option value="case_study">Case Study</option>
         </select>
-        <div style={{ marginLeft: 'auto', fontSize: '11px', color: '#94a3b8' }}>{filtered.length} documents</div>
+        <div style={{ marginLeft: 'auto', fontSize: '11px', color: '#8896a8' }}>{filtered.length} documents</div>
       </div>
 
-      {/* DOCUMENT DETAIL PANEL */}
+      {/* DOCUMENT DETAIL */}
       {selectedDoc && (
-        <div style={{ background: '#fafffe', border: '0.5px solid #a7f3d0', borderRadius: '10px', padding: '16px 18px', marginBottom: '16px' }}>
+        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', marginBottom: '16px', boxShadow: '0 4px 6px rgba(10,22,40,0.05)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
             <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
               <div style={{ fontSize: '28px' }}>{typeIcon(selectedDoc.type)}</div>
               <div>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#1a3c5e' }}>{selectedDoc.title}</div>
-                <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>
-                  {getClientName(selectedDoc.client_id)} · {typeLabel(selectedDoc.type)} · Added {formatDate(selectedDoc.created_at)}
+                <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628', marginBottom: '3px' }}>{selectedDoc.title}</div>
+                <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '4px' }}>
+                  {getClientName(selectedDoc.client_id)} · {typeLabel(selectedDoc.type)} · {formatDate(selectedDoc.created_at)}
                 </div>
-                {selectedDoc.notes && (
-                  <div style={{ fontSize: '10px', color: '#10b981', marginTop: '2px' }}>AI Member: {selectedDoc.notes}</div>
-                )}
-                {selectedDoc.url && (
-                  <a href={selectedDoc.url} target="_blank" rel="noreferrer"
-                    style={{ fontSize: '10px', color: '#10b981', marginTop: '4px', display: 'block' }}>
-                    {selectedDoc.url}
-                  </a>
-                )}
+                {selectedDoc.notes && <div style={{ fontSize: '10px', color: '#c9a84c', fontWeight: 600 }}>AI Member: {selectedDoc.notes}</div>}
               </div>
             </div>
             <div style={{ display: 'flex', gap: '6px' }}>
               <button onClick={() => deleteDocument(selectedDoc.id)}
-                style={{ background: '#fef2f2', border: '0.5px solid #fecaca', color: '#dc2626', borderRadius: '7px', padding: '5px 10px', fontSize: '10px', cursor: 'pointer' }}>
+                style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '7px', padding: '6px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
                 Delete
               </button>
               <button onClick={() => setSelectedDoc(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '18px' }}>×</button>
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '20px', lineHeight: 1 }}>×</button>
             </div>
           </div>
           {selectedDoc.content && (
-            <div style={{ background: 'white', border: '0.5px solid #e2e8f0', borderRadius: '8px', padding: '12px', fontSize: '11px', color: '#475569', lineHeight: '1.7', maxHeight: '200px', overflowY: 'auto' }}>
+            <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '14px', fontSize: '11px', color: '#475569', lineHeight: '1.7', maxHeight: '200px', overflowY: 'auto', border: '1px solid #f0f3f8' }}>
               {selectedDoc.content}
             </div>
           )}
@@ -353,44 +277,42 @@ export default function KnowledgeBase() {
 
       {/* DOCUMENTS LIST */}
       {loading ? (
-        <div style={{ background: 'white', border: '0.5px solid #e2e8f0', borderRadius: '10px', padding: '40px', textAlign: 'center', color: '#94a3b8' }}>Loading knowledge base...</div>
+        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '40px', textAlign: 'center', color: '#8896a8' }}>Loading...</div>
       ) : filtered.length === 0 ? (
-        <div style={{ background: 'white', border: '0.5px solid #e2e8f0', borderRadius: '10px', padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
+        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '60px', textAlign: 'center' }}>
           <div style={{ fontSize: '32px', marginBottom: '12px' }}>🧠</div>
-          <div style={{ fontWeight: 600, color: '#1a3c5e', marginBottom: '6px' }}>Knowledge base is empty</div>
-          <div style={{ fontSize: '11px' }}>Add documents, PDFs, or paste content to train the AI team</div>
+          <div style={{ fontWeight: 600, color: '#0a1628', marginBottom: '6px', fontSize: '14px' }}>Knowledge base is empty</div>
+          <div style={{ fontSize: '12px', color: '#8896a8' }}>Add documents, PDFs, or paste content to train the AI team</div>
         </div>
       ) : (
-        <div className="table-wrap">
-          <div className="table-header" style={{ gridTemplateColumns: '2.5fr 1.5fr 1fr 1fr 1fr 1fr' }}>
-            <div className="th">DOCUMENT</div>
-            <div className="th">CLIENT</div>
-            <div className="th">TYPE</div>
-            <div className="th">AI MEMBER</div>
-            <div className="th">STATUS</div>
-            <div className="th">ADDED</div>
+        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 1.2fr 1fr 1fr 1fr 1fr', padding: '12px 18px', background: '#0a1628' }}>
+            {['DOCUMENT', 'STORE', 'TYPE', 'AI MEMBER', 'STATUS', 'ADDED'].map(h => (
+              <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px', fontWeight: 700 }}>{h}</div>
+            ))}
           </div>
           {filtered.map(doc => (
-            <div key={doc.id} className="table-row"
-              style={{ gridTemplateColumns: '2.5fr 1.5fr 1fr 1fr 1fr 1fr', cursor: 'pointer', background: selectedDoc?.id === doc.id ? '#fafffe' : 'white' }}
-              onClick={() => setSelectedDoc(selectedDoc?.id === doc.id ? null : doc)}>
+            <div key={doc.id}
+              onClick={() => setSelectedDoc(selectedDoc?.id === doc.id ? null : doc)}
+              style={{ display: 'grid', gridTemplateColumns: '2.5fr 1.2fr 1fr 1fr 1fr 1fr', padding: '13px 18px', borderBottom: '1px solid #f4f6fa', cursor: 'pointer', background: selectedDoc?.id === doc.id ? '#fafbfd' : 'white', transition: 'background 0.1s' }}
+              onMouseEnter={e => { if (selectedDoc?.id !== doc.id) e.currentTarget.style.background = '#fafbfd'; }}
+              onMouseLeave={e => { if (selectedDoc?.id !== doc.id) e.currentTarget.style.background = 'white'; }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ fontSize: '20px' }}>{typeIcon(doc.type)}</div>
+                <div style={{ fontSize: '20px', flexShrink: 0 }}>{typeIcon(doc.type)}</div>
                 <div>
-                  <div style={{ fontSize: '11px', fontWeight: 500, color: '#1a3c5e' }}>{doc.title}</div>
-                  {doc.url && <div style={{ fontSize: '9px', color: '#10b981' }}>{doc.url}</div>}
-                  {doc.content && <div style={{ fontSize: '9px', color: '#94a3b8' }}>{doc.content.substring(0, 60)}...</div>}
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628' }}>{doc.title}</div>
+                  {doc.content && <div style={{ fontSize: '10px', color: '#8896a8', marginTop: '1px' }}>{doc.content.substring(0, 50)}...</div>}
                 </div>
               </div>
-              <div style={{ fontSize: '11px', color: '#475569' }}>{getClientName(doc.client_id)}</div>
-              <div style={{ fontSize: '11px', color: '#475569' }}>{typeLabel(doc.type)}</div>
-              <div style={{ fontSize: '11px', color: '#10b981' }}>{doc.notes || 'All Team'}</div>
-              <div>
-                <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '8px', background: doc.status === 'trained' ? '#ecfdf5' : '#fffbeb', color: doc.status === 'trained' ? '#059669' : '#d97706', border: `0.5px solid ${doc.status === 'trained' ? '#a7f3d0' : '#fde68a'}` }}>
+              <div style={{ fontSize: '11px', color: '#4a5568', display: 'flex', alignItems: 'center' }}>{getClientName(doc.client_id)}</div>
+              <div style={{ fontSize: '11px', color: '#4a5568', display: 'flex', alignItems: 'center' }}>{typeLabel(doc.type)}</div>
+              <div style={{ fontSize: '11px', color: '#c9a84c', fontWeight: 500, display: 'flex', alignItems: 'center' }}>{doc.notes || 'All Team'}</div>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: doc.status === 'trained' ? '#ecfdf5' : '#fffbeb', color: doc.status === 'trained' ? '#059669' : '#d97706', border: `1px solid ${doc.status === 'trained' ? '#a7f3d0' : '#fde68a'}` }}>
                   {doc.status === 'trained' ? '✓ Trained' : 'Processing'}
                 </span>
               </div>
-              <div style={{ fontSize: '10px', color: '#94a3b8' }}>{formatDate(doc.created_at)}</div>
+              <div style={{ fontSize: '10px', color: '#8896a8', display: 'flex', alignItems: 'center' }}>{formatDate(doc.created_at)}</div>
             </div>
           ))}
         </div>
