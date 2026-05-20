@@ -63,7 +63,7 @@ const navItems = [
 
 const pageTitles = {
   dashboard: "Owner Dashboard",
-  clients: "All Clients",
+  clients: "Ecommerce Clients",
   contacts: "Contacts",
   audit: "Audit Tool",
   analytics: "Analytics",
