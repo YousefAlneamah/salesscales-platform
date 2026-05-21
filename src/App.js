@@ -25,6 +25,7 @@ import Marketplace from "./pages/Marketplace";
 import WhiteLabel from "./pages/WhiteLabel";
 import Settings from "./pages/Settings";
 import ClientDashboard from "./pages/ClientDashboard";
+import Hussain from "./pages/Hussain";
 
 const navItems = [
   { group: "MAIN", items: [
@@ -34,9 +35,12 @@ const navItems = [
     { id: "audit", label: "Audit Tool", icon: "ti-search" },
     { id: "analytics", label: "Analytics", icon: "ti-chart-bar" },
   ]},
+  { group: "AI TEAM", items: [
+    { id: "hussain", label: "Hussain AI", icon: "ti-brain" },
+    { id: "ai", label: "Zainab AI", icon: "ti-robot" },
+  ]},
   { group: "CLIENT MGMT", items: [
     { id: "approvals", label: "Approvals", icon: "ti-bell", badge: "4" },
-    { id: "ai", label: "Zainab AI", icon: "ti-robot" },
     { id: "sequences", label: "Sequences", icon: "ti-bolt" },
     { id: "pipeline", label: "Pipeline", icon: "ti-target" },
     { id: "inbox", label: "Inbox", icon: "ti-message", badge: "12" },
@@ -68,6 +72,7 @@ const pageTitles = {
   contacts: "Contacts",
   audit: "Audit Tool",
   analytics: "Analytics",
+  hussain: "Hussain — Intelligence & Strategy",
   approvals: "Approval Queue",
   ai: "Zainab AI Engine",
   sequences: "Sequences",
@@ -115,6 +120,7 @@ function App() {
       case "contacts": return <Contacts />;
       case "audit": return <AuditTool />;
       case "analytics": return <Analytics />;
+      case "hussain": return <Hussain />;
       case "approvals": return <Approvals />;
       case "ai": return <AIEngine />;
       case "sequences": return <Sequences />;

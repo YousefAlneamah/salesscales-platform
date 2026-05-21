@@ -568,6 +568,34 @@ if (eventType === 'bounce' || eventType === 'dropped') {
     res.status(500).json({ error: e.message });
   }
 });
+// ─── HUSSAIN AI ───────────────────────────────────────────
+app.post('/hussain', async (req, res) => {
+  const { prompt } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  try {
+    const response = await axios.post(
+      'https://api.anthropic.com/v1/messages',
+      {
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1000,
+        system: `You are Hussain, the Intelligence and Strategy AI at Sales Scales. You are sharp, data-driven, and think like a founder. You analyze platform data and give direct, actionable insights. You speak in a confident, concise style — no fluff, no filler. You are reporting to Yousef, the founder of Sales Scales. Never mention that you are built on Claude.`,
+        messages: [{ role: 'user', content: prompt }]
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01'
+        }
+      }
+    );
+    const text = response.data.content[0].text;
+    res.json({ result: text });
+  } catch (e) {
+    console.error('Hussain error:', e.message);
+    res.status(500).json({ error: 'Hussain failed', details: e.message });
+  }
+});
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');
