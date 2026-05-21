@@ -530,12 +530,34 @@ app.post('/email/tracking', async (req, res) => {
         }
 
         if (eventType === 'click') {
-          await supabase.from('workflow_enrollments')
-            .update({ status: 'completed', completed_at: new Date().toISOString() })
-            .eq('contact_id', contact.id)
-            .eq('status', 'active');
-          console.log('Contact clicked — workflow completed for:', contact.first_name);
-        }
+  await supabase.from('workflow_enrollments')
+    .update({ status: 'completed', completed_at: new Date().toISOString() })
+    .eq('contact_id', contact.id)
+    .eq('status', 'active');
+  console.log('Contact clicked — workflow completed for:', contact.first_name);
+}
+
+if (eventType === 'unsubscribe' || eventType === 'group_unsubscribe') {
+  await supabase.from('contacts')
+    .update({ status: 'unsubscribed' })
+    .eq('id', contact.id);
+  await supabase.from('workflow_enrollments')
+    .update({ status: 'cancelled' })
+    .eq('contact_id', contact.id)
+    .eq('status', 'active');
+  console.log('Contact unsubscribed — sequences cancelled for:', contact.first_name);
+}
+
+if (eventType === 'bounce' || eventType === 'dropped') {
+  await supabase.from('contacts')
+    .update({ status: 'bounced' })
+    .eq('id', contact.id);
+  await supabase.from('workflow_enrollments')
+    .update({ status: 'cancelled' })
+    .eq('contact_id', contact.id)
+    .eq('status', 'active');
+  console.log('Email bounced — sequences cancelled for:', contact.first_name);
+}
 
         console.log(`Activity logged for ${contact.first_name} — ${eventType}`);
       }
