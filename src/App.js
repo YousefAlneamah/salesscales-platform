@@ -24,6 +24,7 @@ import Onboarding from "./pages/Onboarding";
 import Marketplace from "./pages/Marketplace";
 import WhiteLabel from "./pages/WhiteLabel";
 import Settings from "./pages/Settings";
+import ClientDashboard from "./pages/ClientDashboard";
 
 const navItems = [
   { group: "MAIN", items: [
@@ -104,6 +105,8 @@ function App() {
   };
 
   if (!user) return <Login onLogin={handleLogin} />;
+
+  if (user.role === 'client') return <ClientDashboard user={user} onLogout={handleLogout} />;
 
   const renderPage = () => {
     switch(currentPage) {
