@@ -14,7 +14,7 @@ export default function ClientDashboard({ user, onLogout }) {
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchData = async () => {
     setLoading(true);
