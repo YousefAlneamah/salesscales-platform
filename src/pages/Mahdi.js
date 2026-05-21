@@ -14,7 +14,6 @@ export default function Mahdi() {
   const [adType, setAdType] = useState('Facebook Ad');
   const [adGoal, setAdGoal] = useState('');
   const [smsCount, setSmsCount] = useState('3');
-  const [topic, setTopic] = useState('');
 
   const callMahdi = async (prompt) => {
     const response = await fetch('http://localhost:3001/hussain', {
