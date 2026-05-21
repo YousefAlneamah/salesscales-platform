@@ -31,6 +31,53 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// ─── HELPER: AI CALL WITH RAG CONTEXT ────────────────────
+const aiCall = async (systemPrompt, userPrompt, context = '') => {
+  const fullSystem = context
+    ? `${systemPrompt}\n\nRelevant knowledge base context:\n${context}`
+    : systemPrompt;
+  const response = await axios.post(
+    'https://api.anthropic.com/v1/messages',
+    {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1000,
+      system: fullSystem,
+      messages: [{ role: 'user', content: userPrompt }]
+    },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      }
+    }
+  );
+  return response.data.content[0].text;
+};
+
+// ─── HELPER: RAG SEARCH ───────────────────────────────────
+const ragSearch = async (query, clientId = null) => {
+  try {
+    const embeddingResponse = await axios.post(
+      'https://api.openai.com/v1/embeddings',
+      { input: query.substring(0, 500), model: 'text-embedding-3-small' },
+      { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' } }
+    );
+    const queryEmbedding = embeddingResponse.data.data[0].embedding;
+    const { data: results } = await supabase.rpc('search_knowledge_base', {
+      query_embedding: queryEmbedding,
+      client_id_filter: clientId || null,
+      match_count: 3
+    });
+    if (results && results.length > 0) {
+      return results.map(r => `${r.title}:\n${r.content?.substring(0, 500)}`).join('\n\n');
+    }
+  } catch (e) {
+    console.log('RAG search skipped:', e.message);
+  }
+  return '';
+};
+
 // ─── SCHEDULER ────────────────────────────────────────────
 cron.schedule('*/15 * * * *', async () => {
   console.log('Scheduler running — checking pending workflow steps...');
@@ -162,51 +209,86 @@ cron.schedule('*/15 * * * *', async () => {
 app.post('/sms/inbound', async (req, res) => {
   const { From, Body } = req.body;
   console.log('Inbound SMS from:', From, '— Message:', Body);
-
   try {
     const { data: contact } = await supabase
-      .from('contacts')
-      .select('*')
-      .eq('phone', From)
-      .single();
-
+      .from('contacts').select('*').eq('phone', From).single();
     if (contact) {
       await supabase.from('messages').insert([{
         client_id: contact.client_id,
         contact_id: contact.id,
-        channel: 'SMS',
-        direction: 'inbound',
+        channel: 'SMS', direction: 'inbound',
         sender_name: contact.first_name + ' ' + contact.last_name,
-        sender_phone: From,
-        content: Body,
-        status: 'unread'
+        sender_phone: From, content: Body, status: 'unread'
       }]);
-
-      await supabase
-        .from('workflow_enrollments')
+      await supabase.from('workflow_enrollments')
         .update({ status: 'paused' })
         .eq('contact_id', contact.id)
         .eq('status', 'active');
-
       console.log('Inbound SMS saved and workflow paused for:', contact.first_name);
     } else {
       await supabase.from('messages').insert([{
-        channel: 'SMS',
-        direction: 'inbound',
-        sender_name: From,
-        sender_phone: From,
-        content: Body,
-        status: 'unread'
+        channel: 'SMS', direction: 'inbound',
+        sender_name: From, sender_phone: From,
+        content: Body, status: 'unread'
       }]);
       console.log('Inbound SMS from unknown contact:', From);
     }
-
     res.set('Content-Type', 'text/xml');
     res.send('<Response></Response>');
   } catch (e) {
     console.error('Inbound SMS error:', e.message);
     res.set('Content-Type', 'text/xml');
     res.send('<Response></Response>');
+  }
+});
+
+// ─── SENDGRID EMAIL TRACKING ──────────────────────────────
+app.post('/email/tracking', async (req, res) => {
+  const events = req.body;
+  console.log('Email tracking events received:', events.length);
+  try {
+    for (const event of events) {
+      const { email, event: eventType, timestamp, url } = event;
+      console.log(`Email event: ${eventType} — ${email}`);
+      const { data: contact } = await supabase
+        .from('contacts').select('*').eq('email', email).single();
+      if (contact) {
+        await supabase.from('activity').insert([{
+          contact_id: contact.id, client_id: contact.client_id,
+          type: eventType,
+          description: eventType === 'open' ? 'Opened email' : eventType === 'click' ? `Clicked link: ${url}` : eventType,
+          created_at: new Date(timestamp * 1000).toISOString()
+        }]);
+        if (eventType === 'open' || eventType === 'click') {
+          await supabase.from('contacts').update({ last_activity: new Date(timestamp * 1000).toISOString() }).eq('id', contact.id);
+        }
+        if (eventType === 'click') {
+          await supabase.from('workflow_enrollments')
+            .update({ status: 'completed', completed_at: new Date().toISOString() })
+            .eq('contact_id', contact.id).eq('status', 'active');
+          console.log('Contact clicked — workflow completed for:', contact.first_name);
+        }
+        if (eventType === 'unsubscribe' || eventType === 'group_unsubscribe') {
+          await supabase.from('contacts').update({ status: 'unsubscribed' }).eq('id', contact.id);
+          await supabase.from('workflow_enrollments')
+            .update({ status: 'cancelled' })
+            .eq('contact_id', contact.id).eq('status', 'active');
+          console.log('Contact unsubscribed — sequences cancelled for:', contact.first_name);
+        }
+        if (eventType === 'bounce' || eventType === 'dropped') {
+          await supabase.from('contacts').update({ status: 'bounced' }).eq('id', contact.id);
+          await supabase.from('workflow_enrollments')
+            .update({ status: 'cancelled' })
+            .eq('contact_id', contact.id).eq('status', 'active');
+          console.log('Email bounced — sequences cancelled for:', contact.first_name);
+        }
+        console.log(`Activity logged for ${contact.first_name} — ${eventType}`);
+      }
+    }
+    res.status(200).json({ success: true });
+  } catch (e) {
+    console.error('Email tracking error:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -263,10 +345,7 @@ app.post('/generate-reply', async (req, res) => {
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 500,
         system: `You are an AI assistant for Sales Scales helping respond to customer messages on behalf of clients. Write a professional, friendly, and helpful reply. Keep it concise and appropriate for the channel. Do not use placeholders like [name] - write a complete ready to send message.`,
-        messages: [{
-          role: 'user',
-          content: `Channel: ${channel}\nClient: ${clientName}\nCustomer name: ${senderName}\nCustomer message: ${content}\n\nWrite a reply to this message.`
-        }]
+        messages: [{ role: 'user', content: `Channel: ${channel}\nClient: ${clientName}\nCustomer name: ${senderName}\nCustomer message: ${content}\n\nWrite a reply to this message.` }]
       },
       {
         headers: {
@@ -305,19 +384,13 @@ app.get('/shopify/callback', async (req, res) => {
     });
     const accessToken = tokenResponse.data.access_token;
     console.log('Shopify access token received for:', shop);
-
     const clientId = state && state.length < 40 ? state : null;
-
     await supabase.from('shopify_connections').upsert([{
-      shop: shop,
-      access_token: accessToken,
-      client_id: clientId,
+      shop, access_token: accessToken, client_id: clientId,
       scope: 'read_analytics,write_checkouts,read_checkouts,read_customers,write_customers',
       created_at: new Date().toISOString()
     }], { onConflict: 'shop' });
-
     console.log('Shopify connection saved for:', shop);
-
     res.send(`
       <html>
         <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background: #f0f2f5;">
@@ -345,22 +418,19 @@ app.post('/shopify/sync-customers', async (req, res) => {
       { headers: { 'X-Shopify-Access-Token': accessToken, 'Content-Type': 'application/json' } }
     );
     const customers = response.data.customers;
-
     for (const customer of customers) {
       await supabase.from('contacts').upsert([{
         first_name: customer.first_name || '',
         last_name: customer.last_name || '',
         email: customer.email || '',
         phone: customer.phone || '',
-        source: 'Shopify',
-        channel: 'Email',
+        source: 'Shopify', channel: 'Email',
         pipeline_stage: 'New Lead',
         client_id: clientId || null,
         shopify_customer_id: customer.id.toString(),
         last_activity: new Date().toISOString()
       }], { onConflict: 'shopify_customer_id' });
     }
-
     console.log(`Synced ${customers.length} customers from ${shop}`);
     res.json({ success: true, count: customers.length });
   } catch (e) {
@@ -469,13 +539,11 @@ app.post('/enroll-contact', async (req, res) => {
   try {
     const { data: steps } = await supabase.from('workflow_steps').select('*').eq('workflow_id', workflowId).order('step_order');
     if (!steps || steps.length === 0) return res.status(400).json({ error: 'No steps found for this workflow' });
-
     const { data: enrollment } = await supabase.from('workflow_enrollments').insert([{
       workflow_id: workflowId, contact_id: contactId, client_id: clientId,
       status: 'active', current_step: 1,
       enrolled_at: new Date().toISOString(), next_step_at: new Date().toISOString()
     }]).select().single();
-
     const firstStep = steps[0];
     if (firstStep.step_type !== 'wait' && firstStep.content) {
       if (firstStep.step_type === 'sms' && contactPhone) {
@@ -488,201 +556,19 @@ app.post('/enroll-contact', async (req, res) => {
       }
       await supabase.from('messages').insert([{ client_id: clientId, contact_id: contactId, channel: firstStep.step_type, direction: 'outbound', sender_name: 'Sales Scales AI', content: firstStep.content, status: 'sent' }]);
     }
-
     await supabase.from('workflow_enrollments').update({ current_step: 2 }).eq('id', enrollment.id);
     await supabase.from('workflows').update({ enrolled_count: steps.length }).eq('id', workflowId);
-
     res.json({ success: true, enrollmentId: enrollment?.id, stepsCount: steps.length });
   } catch (e) {
     console.error('Enrollment error:', e.message);
     res.status(500).json({ error: 'Failed to enroll contact', details: e.message });
   }
 });
-// ─── SENDGRID EMAIL TRACKING WEBHOOK ─────────────────────
-app.post('/email/tracking', async (req, res) => {
-  const events = req.body;
-  console.log('Email tracking events received:', events.length);
 
-  try {
-    for (const event of events) {
-      const { email, event: eventType, timestamp, url } = event;
-      console.log(`Email event: ${eventType} — ${email}`);
-
-      const { data: contact } = await supabase
-        .from('contacts')
-        .select('*')
-        .eq('email', email)
-        .single();
-
-      if (contact) {
-        await supabase.from('activity').insert([{
-          contact_id: contact.id,
-          client_id: contact.client_id,
-          type: eventType,
-          description: eventType === 'open' ? 'Opened email' : eventType === 'click' ? `Clicked link: ${url}` : eventType,
-          created_at: new Date(timestamp * 1000).toISOString()
-        }]);
-
-        if (eventType === 'open' || eventType === 'click') {
-          await supabase.from('contacts').update({
-            last_activity: new Date(timestamp * 1000).toISOString()
-          }).eq('id', contact.id);
-        }
-
-        if (eventType === 'click') {
-  await supabase.from('workflow_enrollments')
-    .update({ status: 'completed', completed_at: new Date().toISOString() })
-    .eq('contact_id', contact.id)
-    .eq('status', 'active');
-  console.log('Contact clicked — workflow completed for:', contact.first_name);
-}
-
-if (eventType === 'unsubscribe' || eventType === 'group_unsubscribe') {
-  await supabase.from('contacts')
-    .update({ status: 'unsubscribed' })
-    .eq('id', contact.id);
-  await supabase.from('workflow_enrollments')
-    .update({ status: 'cancelled' })
-    .eq('contact_id', contact.id)
-    .eq('status', 'active');
-  console.log('Contact unsubscribed — sequences cancelled for:', contact.first_name);
-}
-
-if (eventType === 'bounce' || eventType === 'dropped') {
-  await supabase.from('contacts')
-    .update({ status: 'bounced' })
-    .eq('id', contact.id);
-  await supabase.from('workflow_enrollments')
-    .update({ status: 'cancelled' })
-    .eq('contact_id', contact.id)
-    .eq('status', 'active');
-  console.log('Email bounced — sequences cancelled for:', contact.first_name);
-}
-
-        console.log(`Activity logged for ${contact.first_name} — ${eventType}`);
-      }
-    }
-    res.status(200).json({ success: true });
-  } catch (e) {
-    console.error('Email tracking error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-// ─── AI TEAM ENDPOINTS ────────────────────────────────────
-const aiCall = async (systemPrompt, userPrompt) => {
-  const response = await axios.post(
-    'https://api.anthropic.com/v1/messages',
-    {
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1000,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }]
-    },
-    {
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      }
-    }
-  );
-  return response.data.content[0].text;
-};
-
-app.post('/hussain', async (req, res) => {
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
-  try {
-    const result = await aiCall(
-      `You are Hussain, the Intelligence and Strategy AI at Sales Scales. You are sharp, data-driven, and think like a founder. You analyze platform data and give direct, actionable insights. You speak in a confident, concise style — no fluff, no filler. You are reporting to Yousef, the founder of Sales Scales. You are Hussain — never identify as anyone else or mention Claude.`,
-      prompt
-    );
-    res.json({ result });
-  } catch (e) {
-    console.error('Hussain error:', e.message);
-    res.status(500).json({ error: 'Hussain failed', details: e.message });
-  }
-});
-
-app.post('/hassan', async (req, res) => {
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
-  try {
-    const result = await aiCall(
-      `You are Hassan, the Growth and Outreach AI at Sales Scales. You are creative, persuasive, and a master of personalized communication. You find prospects, write outreach that converts, follow up strategically, and create content that attracts ecommerce founders. You speak in a confident, direct style. You are Hassan — never identify as anyone else or mention Claude.`,
-      prompt
-    );
-    res.json({ result });
-  } catch (e) {
-    console.error('Hassan error:', e.message);
-    res.status(500).json({ error: 'Hassan failed', details: e.message });
-  }
-});
-
-app.post('/ali', async (req, res) => {
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
-  try {
-    const result = await aiCall(
-      `You are Ali, the Sales Closer AI at Sales Scales. You are a master of the NEPQ framework and high ticket closing. You take warm leads and close them with precision. You generate sales strategies, handle objections without flinching, and write call scripts that convert. You speak with confidence and authority. You are Ali — never identify as anyone else or mention Claude.`,
-      prompt
-    );
-    res.json({ result });
-  } catch (e) {
-    console.error('Ali error:', e.message);
-    res.status(500).json({ error: 'Ali failed', details: e.message });
-  }
-});
-
-app.post('/mahdi', async (req, res) => {
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
-  try {
-    const result = await aiCall(
-      `You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world class copywriter and email marketer. You write email sequences, SMS campaigns, and ad copy that converts — all in the exact brand voice of each client. You understand ecommerce psychology deeply. You speak with creativity and precision. You are Mahdi — never identify as anyone else or mention Claude.`,
-      prompt
-    );
-    res.json({ result });
-  } catch (e) {
-    console.error('Mahdi error:', e.message);
-    res.status(500).json({ error: 'Mahdi failed', details: e.message });
-  }
-});
-
-app.post('/fatima', async (req, res) => {
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
-  try {
-    const result = await aiCall(
-      `You are Fatima, the Operations Manager AI at Sales Scales. You are systematic, detail-oriented, and keep everything running smoothly. You monitor platform operations, track client health, identify bottlenecks, and generate operational reports. You speak in a clear, organized, actionable style. You are Fatima — never identify as anyone else or mention Claude.`,
-      prompt
-    );
-    res.json({ result });
-  } catch (e) {
-    console.error('Fatima error:', e.message);
-    res.status(500).json({ error: 'Fatima failed', details: e.message });
-  }
-});
-
-app.post('/zainab', async (req, res) => {
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
-  try {
-    const result = await aiCall(
-      `You are Zainab, the Client Partner AI at Sales Scales. You are warm, professional, and deeply care about client success. You manage client relationships, handle onboarding, write client communications, and ensure every client feels valued and supported. You speak with empathy and confidence. You are Zainab — never identify as anyone else or mention Claude.`,
-      prompt
-    );
-    res.json({ result });
-  } catch (e) {
-    console.error('Zainab error:', e.message);
-    res.status(500).json({ error: 'Zainab failed', details: e.message });
-  }
-});
 // ─── GENERATE EMBEDDING ───────────────────────────────────
 app.post('/generate-embedding', async (req, res) => {
   const { text, documentId } = req.body;
   if (!text || !documentId) return res.status(400).json({ error: 'Missing text or documentId' });
-
   try {
     const response = await axios.post(
       'https://api.anthropic.com/v1/messages',
@@ -699,27 +585,14 @@ app.post('/generate-embedding', async (req, res) => {
         }
       }
     );
-
     const summary = response.data.content[0].text;
-
     const embeddingResponse = await axios.post(
       'https://api.openai.com/v1/embeddings',
       { input: summary, model: 'text-embedding-3-small' },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
+      { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' } }
     );
-
     const embedding = embeddingResponse.data.data[0].embedding;
-
-    await supabase
-      .from('knowledge_base')
-      .update({ embedding })
-      .eq('id', documentId);
-
+    await supabase.from('knowledge_base').update({ embedding }).eq('id', documentId);
     console.log('Embedding generated for document:', documentId);
     res.json({ success: true });
   } catch (e) {
@@ -732,33 +605,122 @@ app.post('/generate-embedding', async (req, res) => {
 app.post('/search-knowledge', async (req, res) => {
   const { query, clientId } = req.body;
   if (!query) return res.status(400).json({ error: 'Missing query' });
-
   try {
     const embeddingResponse = await axios.post(
       'https://api.openai.com/v1/embeddings',
       { input: query, model: 'text-embedding-3-small' },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
+      { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' } }
     );
-
     const queryEmbedding = embeddingResponse.data.data[0].embedding;
-
     const { data: results } = await supabase.rpc('search_knowledge_base', {
       query_embedding: queryEmbedding,
       client_id_filter: clientId || null,
       match_count: 5
     });
-
     res.json({ success: true, results: results || [] });
   } catch (e) {
     console.error('Search error:', e.message);
     res.status(500).json({ error: 'Search failed', details: e.message });
   }
 });
+
+// ─── AI TEAM ENDPOINTS ────────────────────────────────────
+app.post('/hussain', async (req, res) => {
+  const { prompt, clientId } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  try {
+    const context = await ragSearch(prompt, clientId);
+    const result = await aiCall(
+      `You are Hussain, the Intelligence and Strategy AI at Sales Scales. You are sharp, data-driven, and think like a founder. You analyze platform data and give direct, actionable insights. You speak in a confident, concise style — no fluff, no filler. You are reporting to Yousef, the founder of Sales Scales. You are Hussain — never identify as anyone else or mention Claude.`,
+      prompt, context
+    );
+    res.json({ result });
+  } catch (e) {
+    console.error('Hussain error:', e.message);
+    res.status(500).json({ error: 'Hussain failed', details: e.message });
+  }
+});
+
+app.post('/hassan', async (req, res) => {
+  const { prompt, clientId } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  try {
+    const context = await ragSearch(prompt, clientId);
+    const result = await aiCall(
+      `You are Hassan, the Growth and Outreach AI at Sales Scales. You are creative, persuasive, and a master of personalized communication. You find prospects, write outreach that converts, follow up strategically, and create content that attracts ecommerce founders. You speak in a confident, direct style. You are Hassan — never identify as anyone else or mention Claude.`,
+      prompt, context
+    );
+    res.json({ result });
+  } catch (e) {
+    console.error('Hassan error:', e.message);
+    res.status(500).json({ error: 'Hassan failed', details: e.message });
+  }
+});
+
+app.post('/ali', async (req, res) => {
+  const { prompt, clientId } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  try {
+    const context = await ragSearch(prompt, clientId);
+    const result = await aiCall(
+      `You are Ali, the Sales Closer AI at Sales Scales. You are a master of the NEPQ framework and high ticket closing. You take warm leads and close them with precision. You generate sales strategies, handle objections without flinching, and write call scripts that convert. You speak with confidence and authority. You are Ali — never identify as anyone else or mention Claude.`,
+      prompt, context
+    );
+    res.json({ result });
+  } catch (e) {
+    console.error('Ali error:', e.message);
+    res.status(500).json({ error: 'Ali failed', details: e.message });
+  }
+});
+
+app.post('/mahdi', async (req, res) => {
+  const { prompt, clientId } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  try {
+    const context = await ragSearch(prompt, clientId);
+    const result = await aiCall(
+      `You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world class copywriter and email marketer. You write email sequences, SMS campaigns, and ad copy that converts — all in the exact brand voice of each client. You understand ecommerce psychology deeply. You speak with creativity and precision. You are Mahdi — never identify as anyone else or mention Claude.`,
+      prompt, context
+    );
+    res.json({ result });
+  } catch (e) {
+    console.error('Mahdi error:', e.message);
+    res.status(500).json({ error: 'Mahdi failed', details: e.message });
+  }
+});
+
+app.post('/fatima', async (req, res) => {
+  const { prompt, clientId } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  try {
+    const context = await ragSearch(prompt, clientId);
+    const result = await aiCall(
+      `You are Fatima, the Operations Manager AI at Sales Scales. You are systematic, detail-oriented, and keep everything running smoothly. You monitor platform operations, track client health, identify bottlenecks, and generate operational reports. You speak in a clear, organized, actionable style. You are Fatima — never identify as anyone else or mention Claude.`,
+      prompt, context
+    );
+    res.json({ result });
+  } catch (e) {
+    console.error('Fatima error:', e.message);
+    res.status(500).json({ error: 'Fatima failed', details: e.message });
+  }
+});
+
+app.post('/zainab', async (req, res) => {
+  const { prompt, clientId } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  try {
+    const context = await ragSearch(prompt, clientId);
+    const result = await aiCall(
+      `You are Zainab, the Client Partner AI at Sales Scales. You are warm, professional, and deeply care about client success. You manage client relationships, handle onboarding, write client communications, and ensure every client feels valued and supported. You speak with empathy and confidence. You are Zainab — never identify as anyone else or mention Claude.`,
+      prompt, context
+    );
+    res.json({ result });
+  } catch (e) {
+    console.error('Zainab error:', e.message);
+    res.status(500).json({ error: 'Zainab failed', details: e.message });
+  }
+});
+
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');
