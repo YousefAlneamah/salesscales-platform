@@ -498,7 +498,54 @@ app.post('/enroll-contact', async (req, res) => {
     res.status(500).json({ error: 'Failed to enroll contact', details: e.message });
   }
 });
+// ─── SENDGRID EMAIL TRACKING WEBHOOK ─────────────────────
+app.post('/email/tracking', async (req, res) => {
+  const events = req.body;
+  console.log('Email tracking events received:', events.length);
 
+  try {
+    for (const event of events) {
+      const { email, event: eventType, timestamp, url } = event;
+      console.log(`Email event: ${eventType} — ${email}`);
+
+      const { data: contact } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('email', email)
+        .single();
+
+      if (contact) {
+        await supabase.from('activity').insert([{
+          contact_id: contact.id,
+          client_id: contact.client_id,
+          type: eventType,
+          description: eventType === 'open' ? 'Opened email' : eventType === 'click' ? `Clicked link: ${url}` : eventType,
+          created_at: new Date(timestamp * 1000).toISOString()
+        }]);
+
+        if (eventType === 'open' || eventType === 'click') {
+          await supabase.from('contacts').update({
+            last_activity: new Date(timestamp * 1000).toISOString()
+          }).eq('id', contact.id);
+        }
+
+        if (eventType === 'click') {
+          await supabase.from('workflow_enrollments')
+            .update({ status: 'completed', completed_at: new Date().toISOString() })
+            .eq('contact_id', contact.id)
+            .eq('status', 'active');
+          console.log('Contact clicked — workflow completed for:', contact.first_name);
+        }
+
+        console.log(`Activity logged for ${contact.first_name} — ${eventType}`);
+      }
+    }
+    res.status(200).json({ success: true });
+  } catch (e) {
+    console.error('Email tracking error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');
