@@ -29,6 +29,7 @@ app.use((req, res, next) => {
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
 // ─── SCHEDULER ────────────────────────────────────────────
 cron.schedule('*/15 * * * *', async () => {
@@ -154,6 +155,58 @@ cron.schedule('*/15 * * * *', async () => {
     }
   } catch (e) {
     console.error('Scheduler error:', e.message);
+  }
+});
+
+// ─── INBOUND SMS WEBHOOK ──────────────────────────────────
+app.post('/sms/inbound', async (req, res) => {
+  const { From, Body } = req.body;
+  console.log('Inbound SMS from:', From, '— Message:', Body);
+
+  try {
+    const { data: contact } = await supabase
+      .from('contacts')
+      .select('*')
+      .eq('phone', From)
+      .single();
+
+    if (contact) {
+      await supabase.from('messages').insert([{
+        client_id: contact.client_id,
+        contact_id: contact.id,
+        channel: 'SMS',
+        direction: 'inbound',
+        sender_name: contact.first_name + ' ' + contact.last_name,
+        sender_phone: From,
+        content: Body,
+        status: 'unread'
+      }]);
+
+      await supabase
+        .from('workflow_enrollments')
+        .update({ status: 'paused' })
+        .eq('contact_id', contact.id)
+        .eq('status', 'active');
+
+      console.log('Inbound SMS saved and workflow paused for:', contact.first_name);
+    } else {
+      await supabase.from('messages').insert([{
+        channel: 'SMS',
+        direction: 'inbound',
+        sender_name: From,
+        sender_phone: From,
+        content: Body,
+        status: 'unread'
+      }]);
+      console.log('Inbound SMS from unknown contact:', From);
+    }
+
+    res.set('Content-Type', 'text/xml');
+    res.send('<Response></Response>');
+  } catch (e) {
+    console.error('Inbound SMS error:', e.message);
+    res.set('Content-Type', 'text/xml');
+    res.send('<Response></Response>');
   }
 });
 
