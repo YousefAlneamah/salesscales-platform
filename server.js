@@ -568,34 +568,117 @@ if (eventType === 'bounce' || eventType === 'dropped') {
     res.status(500).json({ error: e.message });
   }
 });
-// ─── HUSSAIN AI ───────────────────────────────────────────
+// ─── AI TEAM ENDPOINTS ────────────────────────────────────
+const aiCall = async (systemPrompt, userPrompt) => {
+  const response = await axios.post(
+    'https://api.anthropic.com/v1/messages',
+    {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }]
+    },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      }
+    }
+  );
+  return response.data.content[0].text;
+};
+
 app.post('/hussain', async (req, res) => {
   const { prompt } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
-    const response = await axios.post(
-      'https://api.anthropic.com/v1/messages',
-      {
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
-        system: `You are Hussain, the Intelligence and Strategy AI at Sales Scales. You are sharp, data-driven, and think like a founder. You analyze platform data and give direct, actionable insights. You speak in a confident, concise style — no fluff, no filler. You are reporting to Yousef, the founder of Sales Scales. Never mention that you are built on Claude.`,
-        messages: [{ role: 'user', content: prompt }]
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': process.env.ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01'
-        }
-      }
+    const result = await aiCall(
+      `You are Hussain, the Intelligence and Strategy AI at Sales Scales. You are sharp, data-driven, and think like a founder. You analyze platform data and give direct, actionable insights. You speak in a confident, concise style — no fluff, no filler. You are reporting to Yousef, the founder of Sales Scales. You are Hussain — never identify as anyone else or mention Claude.`,
+      prompt
     );
-    const text = response.data.content[0].text;
-    res.json({ result: text });
+    res.json({ result });
   } catch (e) {
     console.error('Hussain error:', e.message);
     res.status(500).json({ error: 'Hussain failed', details: e.message });
   }
 });
+
+app.post('/hassan', async (req, res) => {
+  const { prompt } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  try {
+    const result = await aiCall(
+      `You are Hassan, the Growth and Outreach AI at Sales Scales. You are creative, persuasive, and a master of personalized communication. You find prospects, write outreach that converts, follow up strategically, and create content that attracts ecommerce founders. You speak in a confident, direct style. You are Hassan — never identify as anyone else or mention Claude.`,
+      prompt
+    );
+    res.json({ result });
+  } catch (e) {
+    console.error('Hassan error:', e.message);
+    res.status(500).json({ error: 'Hassan failed', details: e.message });
+  }
+});
+
+app.post('/ali', async (req, res) => {
+  const { prompt } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  try {
+    const result = await aiCall(
+      `You are Ali, the Sales Closer AI at Sales Scales. You are a master of the NEPQ framework and high ticket closing. You take warm leads and close them with precision. You generate sales strategies, handle objections without flinching, and write call scripts that convert. You speak with confidence and authority. You are Ali — never identify as anyone else or mention Claude.`,
+      prompt
+    );
+    res.json({ result });
+  } catch (e) {
+    console.error('Ali error:', e.message);
+    res.status(500).json({ error: 'Ali failed', details: e.message });
+  }
+});
+
+app.post('/mahdi', async (req, res) => {
+  const { prompt } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  try {
+    const result = await aiCall(
+      `You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world class copywriter and email marketer. You write email sequences, SMS campaigns, and ad copy that converts — all in the exact brand voice of each client. You understand ecommerce psychology deeply. You speak with creativity and precision. You are Mahdi — never identify as anyone else or mention Claude.`,
+      prompt
+    );
+    res.json({ result });
+  } catch (e) {
+    console.error('Mahdi error:', e.message);
+    res.status(500).json({ error: 'Mahdi failed', details: e.message });
+  }
+});
+
+app.post('/fatima', async (req, res) => {
+  const { prompt } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  try {
+    const result = await aiCall(
+      `You are Fatima, the Operations Manager AI at Sales Scales. You are systematic, detail-oriented, and keep everything running smoothly. You monitor platform operations, track client health, identify bottlenecks, and generate operational reports. You speak in a clear, organized, actionable style. You are Fatima — never identify as anyone else or mention Claude.`,
+      prompt
+    );
+    res.json({ result });
+  } catch (e) {
+    console.error('Fatima error:', e.message);
+    res.status(500).json({ error: 'Fatima failed', details: e.message });
+  }
+});
+
+app.post('/zainab', async (req, res) => {
+  const { prompt } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  try {
+    const result = await aiCall(
+      `You are Zainab, the Client Partner AI at Sales Scales. You are warm, professional, and deeply care about client success. You manage client relationships, handle onboarding, write client communications, and ensure every client feels valued and supported. You speak with empathy and confidence. You are Zainab — never identify as anyone else or mention Claude.`,
+      prompt
+    );
+    res.json({ result });
+  } catch (e) {
+    console.error('Zainab error:', e.message);
+    res.status(500).json({ error: 'Zainab failed', details: e.message });
+  }
+});
+
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');

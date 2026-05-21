@@ -73,7 +73,7 @@ export default function Fatima() {
   };
 
   const callFatima = async (prompt) => {
-    const response = await fetch('http://localhost:3001/hussain', {
+    const response = await fetch('http://localhost:3001/fatima', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt })

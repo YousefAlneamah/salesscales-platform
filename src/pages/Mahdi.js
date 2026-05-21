@@ -16,7 +16,7 @@ export default function Mahdi() {
   const [smsCount, setSmsCount] = useState('3');
 
   const callMahdi = async (prompt) => {
-    const response = await fetch('http://localhost:3001/hussain', {
+    const response = await fetch('http://localhost:3001/mahdi', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt })
