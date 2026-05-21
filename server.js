@@ -678,7 +678,87 @@ app.post('/zainab', async (req, res) => {
     res.status(500).json({ error: 'Zainab failed', details: e.message });
   }
 });
+// ─── GENERATE EMBEDDING ───────────────────────────────────
+app.post('/generate-embedding', async (req, res) => {
+  const { text, documentId } = req.body;
+  if (!text || !documentId) return res.status(400).json({ error: 'Missing text or documentId' });
 
+  try {
+    const response = await axios.post(
+      'https://api.anthropic.com/v1/messages',
+      {
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 100,
+        messages: [{ role: 'user', content: `Summarize this text in 2 sentences: ${text.substring(0, 1000)}` }]
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01'
+        }
+      }
+    );
+
+    const summary = response.data.content[0].text;
+
+    const embeddingResponse = await axios.post(
+      'https://api.openai.com/v1/embeddings',
+      { input: summary, model: 'text-embedding-3-small' },
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const embedding = embeddingResponse.data.data[0].embedding;
+
+    await supabase
+      .from('knowledge_base')
+      .update({ embedding })
+      .eq('id', documentId);
+
+    console.log('Embedding generated for document:', documentId);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Embedding error:', e.message);
+    res.status(500).json({ error: 'Embedding failed', details: e.message });
+  }
+});
+
+// ─── SEARCH KNOWLEDGE BASE ────────────────────────────────
+app.post('/search-knowledge', async (req, res) => {
+  const { query, clientId } = req.body;
+  if (!query) return res.status(400).json({ error: 'Missing query' });
+
+  try {
+    const embeddingResponse = await axios.post(
+      'https://api.openai.com/v1/embeddings',
+      { input: query, model: 'text-embedding-3-small' },
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const queryEmbedding = embeddingResponse.data.data[0].embedding;
+
+    const { data: results } = await supabase.rpc('search_knowledge_base', {
+      query_embedding: queryEmbedding,
+      client_id_filter: clientId || null,
+      match_count: 5
+    });
+
+    res.json({ success: true, results: results || [] });
+  } catch (e) {
+    console.error('Search error:', e.message);
+    res.status(500).json({ error: 'Search failed', details: e.message });
+  }
+});
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');

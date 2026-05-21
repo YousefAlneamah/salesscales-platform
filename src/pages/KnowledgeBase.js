@@ -17,13 +17,16 @@ export default function KnowledgeBase() {
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [pdfFile, setPdfFile] = useState(null);
   const [aiMember, setAiMember] = useState('All Team');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState(null);
+  const [searching, setSearching] = useState(false);
 
   const aiMembers = ['All Team', 'Ali', 'Hassan', 'Mahdi', 'Hussain', 'Zainab', 'Fatima'];
 
   useEffect(() => {
     fetchDocuments();
     fetchClients();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchDocuments = async () => {
     setLoading(true);
@@ -68,21 +71,56 @@ export default function KnowledgeBase() {
       } catch (e) { alert('PDF error: ' + e.message); setProcessing(false); return; }
     }
 
-    const { error } = await supabase.from('knowledge_base').insert([{
+    const { data, error } = await supabase.from('knowledge_base').insert([{
       title, content: finalContent, url, type,
       source: finalSource, client_id: clientId,
       status: 'trained', notes: aiMember
-    }]);
+    }]).select();
 
-    if (!error) {
+    if (!error && data) {
+      try {
+        await fetch('http://localhost:3001/generate-embedding', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: finalContent,
+            documentId: data[0].id
+          })
+        });
+        console.log('Embedding generated for:', title);
+      } catch (e) {
+        console.log('Embedding generation failed — document saved without embedding');
+      }
+
       fetchDocuments();
       setShowForm(false);
       setTitle(''); setContent(''); setUrl(''); setType('document');
       setClientId(''); setPdfFile(null); setAiMember('All Team');
     } else {
-      alert('Error: ' + error.message);
+      alert('Error: ' + error?.message);
     }
     setProcessing(false);
+  };
+
+  const searchKnowledge = async () => {
+    if (!searchQuery) return;
+    setSearching(true);
+    setSearchResults(null);
+    try {
+      const response = await fetch('http://localhost:3001/search-knowledge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: searchQuery,
+          clientId: filterClient !== 'All' ? filterClient : null
+        })
+      });
+      const data = await response.json();
+      if (data.success) setSearchResults(data.results);
+    } catch (e) {
+      console.error('Search error:', e.message);
+    }
+    setSearching(false);
   };
 
   const deleteDocument = async (id) => {
@@ -129,7 +167,7 @@ export default function KnowledgeBase() {
         {[
           { label: 'Total Documents', value: documents.length, sub: 'in knowledge base', color: '#c9a84c' },
           { label: 'AI Brains', value: clients.length, sub: 'active client brains', color: '#c9a84c' },
-          { label: 'Trained', value: documents.filter(d => d.status === 'trained').length, sub: 'ready for AI', color: '#10b981' },
+          { label: 'With Embeddings', value: documents.filter(d => d.embedding).length, sub: 'RAG ready', color: '#10b981' },
           { label: 'Processing', value: documents.filter(d => d.status === 'processing').length, sub: 'being ingested', color: '#d97706' },
         ].map(stat => (
           <div key={stat.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '16px 18px', borderTop: `2px solid ${stat.color}`, boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
@@ -138,6 +176,41 @@ export default function KnowledgeBase() {
             <div style={{ fontSize: '11px', color: stat.color, fontWeight: 500 }}>{stat.sub}</div>
           </div>
         ))}
+      </div>
+
+      {/* RAG SEARCH */}
+      <div style={{ background: 'linear-gradient(135deg, #0a1628, #112240)', borderRadius: '12px', padding: '18px 20px', marginBottom: '20px', border: '1px solid rgba(201,168,76,0.2)' }}>
+        <div style={{ fontSize: '9px', color: '#c9a84c', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>RAG Search — Search by Meaning</div>
+        <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginBottom: '12px' }}>Search your knowledge base using AI — finds relevant content even when exact words do not match</div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && searchKnowledge()}
+            placeholder="e.g. How to handle cart abandonment objections..."
+            style={{ flex: 1, border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: 'white', outline: 'none', background: 'rgba(255,255,255,0.08)', fontFamily: 'DM Sans, sans-serif' }} />
+          <button onClick={searchKnowledge} disabled={searching || !searchQuery}
+            style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            {searching ? 'Searching...' : '🔍 Search'}
+          </button>
+        </div>
+
+        {searchResults && (
+          <div style={{ marginTop: '14px' }}>
+            {searchResults.length === 0 ? (
+              <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', textAlign: 'center', padding: '10px' }}>No relevant documents found</div>
+            ) : searchResults.map((result, i) => (
+              <div key={result.id} style={{ background: 'rgba(255,255,255,0.06)', borderRadius: '8px', padding: '12px 14px', marginBottom: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'white' }}>{result.title}</div>
+                  <div style={{ fontSize: '10px', color: '#c9a84c', fontWeight: 600 }}>{Math.round(result.similarity * 100)}% match</div>
+                </div>
+                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', marginBottom: '6px' }}>{getClientName(result.client_id)} · {result.type}</div>
+                <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)', lineHeight: '1.5', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                  {result.content?.substring(0, 200)}...
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* CLIENT BRAINS */}
@@ -150,7 +223,7 @@ export default function KnowledgeBase() {
                 <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>🧠</div>
                 <div>
                   <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628' }}>{client.name}</div>
-                  <div style={{ fontSize: '10px', color: '#8896a8', marginTop: '2px' }}>{documents.filter(d => d.client_id === client.id).length} documents trained</div>
+                  <div style={{ fontSize: '10px', color: '#8896a8', marginTop: '2px' }}>{documents.filter(d => d.client_id === client.id).length} documents · {documents.filter(d => d.client_id === client.id && d.embedding).length} RAG ready</div>
                   <div style={{ fontSize: '9px', color: '#10b981', marginTop: '2px', fontWeight: 600 }}>● Active</div>
                 </div>
               </div>
@@ -215,7 +288,7 @@ export default function KnowledgeBase() {
           <div style={{ display: 'flex', gap: '8px' }}>
             <button onClick={addDocument} disabled={processing}
               style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
-              {processing ? 'Processing...' : 'Add to Knowledge Base'}
+              {processing ? 'Processing & Training...' : 'Add to Knowledge Base'}
             </button>
             <button onClick={() => setShowForm(false)}
               style={{ background: 'white', border: '1px solid #e4e9f0', color: '#8896a8', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', cursor: 'pointer' }}>
@@ -255,7 +328,11 @@ export default function KnowledgeBase() {
                 <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '4px' }}>
                   {getClientName(selectedDoc.client_id)} · {typeLabel(selectedDoc.type)} · {formatDate(selectedDoc.created_at)}
                 </div>
-                {selectedDoc.notes && <div style={{ fontSize: '10px', color: '#c9a84c', fontWeight: 600 }}>AI Member: {selectedDoc.notes}</div>}
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {selectedDoc.notes && <div style={{ fontSize: '10px', color: '#c9a84c', fontWeight: 600 }}>AI Member: {selectedDoc.notes}</div>}
+                  {selectedDoc.embedding && <div style={{ fontSize: '10px', color: '#10b981', fontWeight: 600 }}>● RAG Ready</div>}
+                  {!selectedDoc.embedding && <div style={{ fontSize: '10px', color: '#d97706', fontWeight: 600 }}>○ No Embedding</div>}
+                </div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: '6px' }}>
@@ -287,7 +364,7 @@ export default function KnowledgeBase() {
       ) : (
         <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 1.2fr 1fr 1fr 1fr 1fr', padding: '12px 18px', background: '#0a1628' }}>
-            {['DOCUMENT', 'STORE', 'TYPE', 'AI MEMBER', 'STATUS', 'ADDED'].map(h => (
+            {['DOCUMENT', 'STORE', 'TYPE', 'AI MEMBER', 'RAG', 'ADDED'].map(h => (
               <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px', fontWeight: 700 }}>{h}</div>
             ))}
           </div>
@@ -308,9 +385,11 @@ export default function KnowledgeBase() {
               <div style={{ fontSize: '11px', color: '#4a5568', display: 'flex', alignItems: 'center' }}>{typeLabel(doc.type)}</div>
               <div style={{ fontSize: '11px', color: '#c9a84c', fontWeight: 500, display: 'flex', alignItems: 'center' }}>{doc.notes || 'All Team'}</div>
               <div style={{ display: 'flex', alignItems: 'center' }}>
-                <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: doc.status === 'trained' ? '#ecfdf5' : '#fffbeb', color: doc.status === 'trained' ? '#059669' : '#d97706', border: `1px solid ${doc.status === 'trained' ? '#a7f3d0' : '#fde68a'}` }}>
-                  {doc.status === 'trained' ? '✓ Trained' : 'Processing'}
-                </span>
+                {doc.embedding ? (
+                  <span style={{ fontSize: '9px', color: '#10b981', fontWeight: 600 }}>● Ready</span>
+                ) : (
+                  <span style={{ fontSize: '9px', color: '#d97706', fontWeight: 600 }}>○ Pending</span>
+                )}
               </div>
               <div style={{ fontSize: '10px', color: '#8896a8', display: 'flex', alignItems: 'center' }}>{formatDate(doc.created_at)}</div>
             </div>
