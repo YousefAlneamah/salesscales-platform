@@ -30,6 +30,7 @@ import Hassan from "./pages/Hassan";
 import Ali from "./pages/Ali";
 import Mahdi from "./pages/Mahdi";
 import Fatima from "./pages/Fatima";
+import Zainab from "./pages/Zainab";
 
 const navItems = [
   { group: "MAIN", items: [
@@ -45,7 +46,7 @@ const navItems = [
     { id: "ali", label: "Ali AI", icon: "ti-phone" },
     { id: "mahdi", label: "Mahdi AI", icon: "ti-pencil" },
     { id: "fatima", label: "Fatima AI", icon: "ti-settings" },
-    { id: "ai", label: "Zainab AI", icon: "ti-robot" },
+    { id: "zainab", label: "Zainab AI", icon: "ti-robot" },
   ]},
   { group: "CLIENT MGMT", items: [
     { id: "approvals", label: "Approvals", icon: "ti-bell", badge: "4" },
@@ -85,6 +86,7 @@ const pageTitles = {
   ali: "Ali — Sales Closer",
   mahdi: "Mahdi — Marketing & Content",
   fatima: "Fatima — Operations Manager",
+  zainab: "Zainab — Client Partner",
   approvals: "Approval Queue",
   ai: "Zainab AI Engine",
   sequences: "Sequences",
@@ -137,6 +139,7 @@ function App() {
       case "ali": return <Ali />;
       case "mahdi": return <Mahdi />;
       case "fatima": return <Fatima />;
+      case "zainab": return <Zainab />;
       case "approvals": return <Approvals />;
       case "ai": return <AIEngine />;
       case "sequences": return <Sequences />;
