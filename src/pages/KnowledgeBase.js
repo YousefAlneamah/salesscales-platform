@@ -20,6 +20,7 @@ export default function KnowledgeBase() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [searching, setSearching] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
 
   const aiMembers = ['All Team', 'Ali', 'Hassan', 'Mahdi', 'Hussain', 'Zainab', 'Fatima'];
 
@@ -30,8 +31,13 @@ export default function KnowledgeBase() {
 
   const fetchDocuments = async () => {
     setLoading(true);
-    const { data } = await supabase.from('knowledge_base').select('*').order('created_at', { ascending: false });
+    const { data, count } = await supabase
+      .from('knowledge_base')
+      .select('id, title, type, source, client_id, status, notes, created_at, embedding', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .limit(100);
     if (data) setDocuments(data);
+    if (count) setTotalCount(count);
     setLoading(false);
   };
 
@@ -45,62 +51,75 @@ export default function KnowledgeBase() {
     if (!content && !url && !pdfFile) { alert('Please add content, a URL, or upload a PDF'); return; }
     setProcessing(true);
 
-    let finalContent = content;
-    let finalSource = 'Manual';
-
-    if (url && url.includes('youtube.com') && !pdfFile) {
-      try {
-        const response = await fetch('http://localhost:3001/youtube-transcript', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url })
-        });
-        const data = await response.json();
-        if (data.success) { finalContent = data.text; finalSource = 'YouTube'; }
-        else { alert('YouTube transcript failed: ' + data.error); setProcessing(false); return; }
-      } catch (e) { alert('YouTube error: ' + e.message); setProcessing(false); return; }
-    }
-
-    if (pdfFile) {
-      try {
+    try {
+      // PDF upload — server handles everything server-side
+      if (pdfFile) {
         const formData = new FormData();
         formData.append('pdf', pdfFile);
-        const response = await fetch('http://localhost:3001/upload-pdf', { method: 'POST', body: formData });
-        const data = await response.json();
-        if (data.success) { finalContent = data.text; finalSource = 'PDF Upload'; }
-        else { alert('PDF failed: ' + data.error); setProcessing(false); return; }
-      } catch (e) { alert('PDF error: ' + e.message); setProcessing(false); return; }
-    }
+        formData.append('title', title);
+        formData.append('clientId', clientId);
+        formData.append('type', type);
+        formData.append('aiMember', aiMember);
 
-    const { data, error } = await supabase.from('knowledge_base').insert([{
-      title, content: finalContent, url, type,
-      source: finalSource, client_id: clientId,
-      status: 'trained', notes: aiMember
-    }]).select();
-
-    if (!error && data) {
-      try {
-        await fetch('http://localhost:3001/chunk-document', {
+        const response = await fetch('http://localhost:3001/upload-pdf', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            documentId: data[0].id,
-            content: finalContent,
-            title: title,
-            clientId: clientId,
-            type: type,
-            aiMember: aiMember
-          })
+          body: formData
         });
-        console.log('Document chunked and embedded:', title);
-      } catch (e) {
-        console.log('Chunking failed — document saved without embedding');
+        const data = await response.json();
+        if (data.success) {
+          alert(`✅ ${data.chunks} chunks are being processed in the background. Refresh the page in a few minutes to see them.`);
+          setShowForm(false);
+          setTitle(''); setContent(''); setUrl(''); setType('document');
+          setClientId(''); setPdfFile(null); setAiMember('All Team');
+        } else {
+          alert('PDF upload failed: ' + (data.error || 'Unknown error'));
+        }
+        setProcessing(false);
+        return;
       }
-      fetchDocuments();
-      setShowForm(false);
-      setTitle(''); setContent(''); setUrl(''); setType('document');
-      setClientId(''); setPdfFile(null); setAiMember('All Team');
-    } else {
-      alert('Error: ' + error?.message);
+
+      // YouTube transcript
+      let finalContent = content;
+      let finalSource = 'Manual';
+
+      if (url && url.includes('youtube.com')) {
+        try {
+          const response = await fetch('http://localhost:3001/youtube-transcript', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+          });
+          const data = await response.json();
+          if (data.success) { finalContent = data.text; finalSource = 'YouTube'; }
+          else { alert('YouTube transcript failed: ' + data.error); setProcessing(false); return; }
+        } catch (e) { alert('YouTube error: ' + e.message); setProcessing(false); return; }
+      }
+
+      // Manual text content
+      const { data, error } = await supabase.from('knowledge_base').insert([{
+        title, content: finalContent, url, type,
+        source: finalSource, client_id: clientId,
+        status: 'trained', notes: aiMember
+      }]).select();
+
+      if (!error && data) {
+        try {
+          await fetch('http://localhost:3001/generate-embedding', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: finalContent, documentId: data[0].id })
+          });
+        } catch (e) {
+          console.log('Embedding failed — document saved without embedding');
+        }
+        fetchDocuments();
+        setShowForm(false);
+        setTitle(''); setContent(''); setUrl(''); setType('document');
+        setClientId(''); setPdfFile(null); setAiMember('All Team');
+      } else {
+        alert('Error: ' + error?.message);
+      }
+    } catch (e) {
+      alert('Error: ' + e.message);
     }
     setProcessing(false);
   };
@@ -157,7 +176,7 @@ export default function KnowledgeBase() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <div>
           <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Knowledge Base</div>
-          <div style={{ fontSize: '13px', color: '#0a1628', fontWeight: 600 }}>{documents.length} documents · {clients.length} AI brains active</div>
+          <div style={{ fontSize: '13px', color: '#0a1628', fontWeight: 600 }}>{totalCount.toLocaleString()} total chunks · {clients.length} AI brains active</div>
         </div>
         <button onClick={() => setShowForm(!showForm)}
           style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
@@ -168,10 +187,10 @@ export default function KnowledgeBase() {
       {/* STATS */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
         {[
-          { label: 'Total Documents', value: documents.length, sub: 'in knowledge base', color: '#c9a84c' },
+          { label: 'Total Chunks', value: totalCount.toLocaleString(), sub: 'in knowledge base', color: '#c9a84c' },
           { label: 'AI Brains', value: clients.length, sub: 'active client brains', color: '#c9a84c' },
-          { label: 'With Embeddings', value: documents.filter(d => d.embedding).length, sub: 'RAG ready', color: '#10b981' },
-          { label: 'Processing', value: documents.filter(d => d.status === 'processing').length, sub: 'being ingested', color: '#d97706' },
+          { label: 'RAG Ready', value: documents.filter(d => d.embedding).length, sub: 'of last 100 shown', color: '#10b981' },
+          { label: 'Books Uploaded', value: documents.filter(d => d.source === 'PDF Upload').length, sub: 'PDF chunks', color: '#3b82f6' },
         ].map(stat => (
           <div key={stat.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '16px 18px', borderTop: `2px solid ${stat.color}`, boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
             <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>{stat.label}</div>
@@ -184,11 +203,11 @@ export default function KnowledgeBase() {
       {/* RAG SEARCH */}
       <div style={{ background: 'linear-gradient(135deg, #0a1628, #112240)', borderRadius: '12px', padding: '18px 20px', marginBottom: '20px', border: '1px solid rgba(201,168,76,0.2)' }}>
         <div style={{ fontSize: '9px', color: '#c9a84c', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>RAG Search — Search by Meaning</div>
-        <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginBottom: '12px' }}>Search your knowledge base using AI — finds relevant content even when exact words do not match</div>
+        <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginBottom: '12px' }}>Search across all {totalCount.toLocaleString()} chunks using AI semantic search</div>
         <div style={{ display: 'flex', gap: '10px' }}>
           <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && searchKnowledge()}
-            placeholder="e.g. How to handle cart abandonment objections..."
+            placeholder="e.g. How to handle price objections using NEPQ..."
             style={{ flex: 1, border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: 'white', outline: 'none', background: 'rgba(255,255,255,0.08)', fontFamily: 'DM Sans, sans-serif' }} />
           <button onClick={searchKnowledge} disabled={searching || !searchQuery}
             style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
@@ -199,8 +218,8 @@ export default function KnowledgeBase() {
         {searchResults && (
           <div style={{ marginTop: '14px' }}>
             {searchResults.length === 0 ? (
-              <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', textAlign: 'center', padding: '10px' }}>No relevant documents found</div>
-            ) : searchResults.map((result, i) => (
+              <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', textAlign: 'center', padding: '10px' }}>No relevant chunks found</div>
+            ) : searchResults.map((result) => (
               <div key={result.id} style={{ background: 'rgba(255,255,255,0.06)', borderRadius: '8px', padding: '12px 14px', marginBottom: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                   <div style={{ fontSize: '12px', fontWeight: 600, color: 'white' }}>{result.title}</div>
@@ -226,7 +245,7 @@ export default function KnowledgeBase() {
                 <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>🧠</div>
                 <div>
                   <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628' }}>{client.name}</div>
-                  <div style={{ fontSize: '10px', color: '#8896a8', marginTop: '2px' }}>{documents.filter(d => d.client_id === client.id).length} documents · {documents.filter(d => d.client_id === client.id && d.embedding).length} RAG ready</div>
+                  <div style={{ fontSize: '10px', color: '#8896a8', marginTop: '2px' }}>{documents.filter(d => d.client_id === client.id).length} chunks visible</div>
                   <div style={{ fontSize: '9px', color: '#10b981', marginTop: '2px', fontWeight: 600 }}>● Active</div>
                 </div>
               </div>
@@ -270,28 +289,32 @@ export default function KnowledgeBase() {
               </select>
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
-              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>YouTube or Website URL</div>
-              <input type="text" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://youtube.com/watch?v=... or https://example.com" style={inputStyle} />
-              {url && url.includes('youtube.com') && (
-                <div style={{ fontSize: '10px', color: '#10b981', marginTop: '4px', fontWeight: 500 }}>✓ YouTube URL — transcript will be pulled automatically</div>
-              )}
-            </div>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Upload PDF</div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Upload PDF — server handles chunking automatically</div>
               <input type="file" accept=".pdf" onChange={e => setPdfFile(e.target.files[0])} style={{ ...inputStyle, padding: '7px 12px', cursor: 'pointer' }} />
-              {pdfFile && <div style={{ fontSize: '10px', color: '#10b981', marginTop: '4px', fontWeight: 500 }}>✓ {pdfFile.name} selected</div>}
+              {pdfFile && <div style={{ fontSize: '10px', color: '#10b981', marginTop: '4px', fontWeight: 500 }}>✓ {pdfFile.name} selected — will be chunked automatically</div>}
             </div>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Content — paste text directly</div>
-              <textarea value={content} onChange={e => setContent(e.target.value)}
-                placeholder="Paste content here — brand guidelines, FAQs, scripts, or anything the AI should know..."
-                rows={5} style={{ ...inputStyle, resize: 'vertical' }} />
-            </div>
+            {!pdfFile && (
+              <>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>YouTube URL</div>
+                  <input type="text" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://youtube.com/watch?v=..." style={inputStyle} />
+                  {url && url.includes('youtube.com') && (
+                    <div style={{ fontSize: '10px', color: '#10b981', marginTop: '4px', fontWeight: 500 }}>✓ YouTube URL — transcript will be pulled automatically</div>
+                  )}
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Content — paste text directly</div>
+                  <textarea value={content} onChange={e => setContent(e.target.value)}
+                    placeholder="Paste content here — brand guidelines, FAQs, scripts, or anything the AI should know..."
+                    rows={5} style={{ ...inputStyle, resize: 'vertical' }} />
+                </div>
+              </>
+            )}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button onClick={addDocument} disabled={processing}
               style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
-              {processing ? 'Processing & Training...' : 'Add to Knowledge Base'}
+              {processing ? 'Uploading...' : pdfFile ? 'Upload & Chunk PDF' : 'Add to Knowledge Base'}
             </button>
             <button onClick={() => setShowForm(false)}
               style={{ background: 'white', border: '1px solid #e4e9f0', color: '#8896a8', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', cursor: 'pointer' }}>
@@ -317,7 +340,7 @@ export default function KnowledgeBase() {
           <option value="script">Script</option>
           <option value="case_study">Case Study</option>
         </select>
-        <div style={{ marginLeft: 'auto', fontSize: '11px', color: '#8896a8' }}>{filtered.length} documents</div>
+        <div style={{ marginLeft: 'auto', fontSize: '11px', color: '#8896a8' }}>Showing {filtered.length} of {totalCount.toLocaleString()} total</div>
       </div>
 
       {/* DOCUMENT DETAIL */}
@@ -333,8 +356,11 @@ export default function KnowledgeBase() {
                 </div>
                 <div style={{ display: 'flex', gap: '6px' }}>
                   {selectedDoc.notes && <div style={{ fontSize: '10px', color: '#c9a84c', fontWeight: 600 }}>AI Member: {selectedDoc.notes}</div>}
-                  {selectedDoc.embedding && <div style={{ fontSize: '10px', color: '#10b981', fontWeight: 600 }}>● RAG Ready</div>}
-                  {!selectedDoc.embedding && <div style={{ fontSize: '10px', color: '#d97706', fontWeight: 600 }}>○ No Embedding</div>}
+                  {selectedDoc.embedding ? (
+                    <div style={{ fontSize: '10px', color: '#10b981', fontWeight: 600 }}>● RAG Ready</div>
+                  ) : (
+                    <div style={{ fontSize: '10px', color: '#d97706', fontWeight: 600 }}>○ No Embedding</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -347,11 +373,6 @@ export default function KnowledgeBase() {
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '20px', lineHeight: 1 }}>×</button>
             </div>
           </div>
-          {selectedDoc.content && (
-            <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '14px', fontSize: '11px', color: '#475569', lineHeight: '1.7', maxHeight: '200px', overflowY: 'auto', border: '1px solid #f0f3f8' }}>
-              {selectedDoc.content}
-            </div>
-          )}
         </div>
       )}
 
@@ -362,7 +383,7 @@ export default function KnowledgeBase() {
         <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '60px', textAlign: 'center' }}>
           <div style={{ fontSize: '32px', marginBottom: '12px' }}>🧠</div>
           <div style={{ fontWeight: 600, color: '#0a1628', marginBottom: '6px', fontSize: '14px' }}>Knowledge base is empty</div>
-          <div style={{ fontSize: '12px', color: '#8896a8' }}>Add documents, PDFs, or paste content to train the AI team</div>
+          <div style={{ fontSize: '12px', color: '#8896a8' }}>Upload PDFs or paste content to train the AI team</div>
         </div>
       ) : (
         <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
@@ -379,10 +400,7 @@ export default function KnowledgeBase() {
               onMouseLeave={e => { if (selectedDoc?.id !== doc.id) e.currentTarget.style.background = 'white'; }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{ fontSize: '20px', flexShrink: 0 }}>{typeIcon(doc.type)}</div>
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628' }}>{doc.title}</div>
-                  {doc.content && <div style={{ fontSize: '10px', color: '#8896a8', marginTop: '1px' }}>{doc.content.substring(0, 50)}...</div>}
-                </div>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title}</div>
               </div>
               <div style={{ fontSize: '11px', color: '#4a5568', display: 'flex', alignItems: 'center' }}>{getClientName(doc.client_id)}</div>
               <div style={{ fontSize: '11px', color: '#4a5568', display: 'flex', alignItems: 'center' }}>{typeLabel(doc.type)}</div>

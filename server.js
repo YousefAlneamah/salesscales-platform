@@ -28,8 +28,8 @@ app.use((req, res, next) => {
 });
 
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 
 // ─── HELPER: AI CALL WITH RAG CONTEXT ────────────────────
 const aiCall = async (systemPrompt, userPrompt, context = '') => {
@@ -260,29 +260,27 @@ app.post('/email/tracking', async (req, res) => {
           created_at: new Date(timestamp * 1000).toISOString()
         }]);
         if (eventType === 'open' || eventType === 'click') {
-          await supabase.from('contacts').update({ last_activity: new Date(timestamp * 1000).toISOString() }).eq('id', contact.id);
+          await supabase.from('contacts').update({
+            last_activity: new Date(timestamp * 1000).toISOString()
+          }).eq('id', contact.id);
         }
         if (eventType === 'click') {
           await supabase.from('workflow_enrollments')
             .update({ status: 'completed', completed_at: new Date().toISOString() })
             .eq('contact_id', contact.id).eq('status', 'active');
-          console.log('Contact clicked — workflow completed for:', contact.first_name);
         }
         if (eventType === 'unsubscribe' || eventType === 'group_unsubscribe') {
           await supabase.from('contacts').update({ status: 'unsubscribed' }).eq('id', contact.id);
           await supabase.from('workflow_enrollments')
             .update({ status: 'cancelled' })
             .eq('contact_id', contact.id).eq('status', 'active');
-          console.log('Contact unsubscribed — sequences cancelled for:', contact.first_name);
         }
         if (eventType === 'bounce' || eventType === 'dropped') {
           await supabase.from('contacts').update({ status: 'bounced' }).eq('id', contact.id);
           await supabase.from('workflow_enrollments')
             .update({ status: 'cancelled' })
             .eq('contact_id', contact.id).eq('status', 'active');
-          console.log('Email bounced — sequences cancelled for:', contact.first_name);
         }
-        console.log(`Activity logged for ${contact.first_name} — ${eventType}`);
       }
     }
     res.status(200).json({ success: true });
@@ -383,7 +381,6 @@ app.get('/shopify/callback', async (req, res) => {
       code: code
     });
     const accessToken = tokenResponse.data.access_token;
-    console.log('Shopify access token received for:', shop);
     const clientId = state && state.length < 40 ? state : null;
     await supabase.from('shopify_connections').upsert([{
       shop, access_token: accessToken, client_id: clientId,
@@ -439,33 +436,102 @@ app.post('/shopify/sync-customers', async (req, res) => {
   }
 });
 
-// ─── PDF UPLOAD ───────────────────────────────────────────
+// ─── PDF UPLOAD + AUTO CHUNK + EMBED ─────────────────────
 app.post('/upload-pdf', upload.single('pdf'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const { title, clientId, type, aiMember } = req.body;
+
     const pdfParser = new PDF2Json();
-    pdfParser.on('pdfParser_dataError', () => res.status(500).json({ error: 'Failed to parse PDF' }));
-    pdfParser.on('pdfParser_dataReady', pdfData => {
-      const pages = pdfData.Pages || [];
-      let text = '';
-      pages.forEach(page => {
-        if (!page.Texts) return;
-        page.Texts.forEach(textItem => {
-          if (!textItem.R) return;
-          textItem.R.forEach(run => {
-            let word = run.T || '';
-            try { word = decodeURIComponent(word); } catch (e) {}
-            text += word + ' ';
-          });
-          text += '\n';
-        });
-      });
-      text = text.trim();
-      res.json({ success: true, filename: req.file.originalname, pageCount: pages.length, wordCount: text.split(/\s+/).length, text: text.substring(0, 500000) });
+
+    pdfParser.on('pdfParser_dataError', () => {
+      res.status(500).json({ error: 'Failed to parse PDF' });
     });
+
+    pdfParser.on('pdfParser_dataReady', async (pdfData) => {
+      try {
+        const pages = pdfData.Pages || [];
+        let text = '';
+        pages.forEach(page => {
+          if (!page.Texts) return;
+          page.Texts.forEach(textItem => {
+            if (!textItem.R) return;
+            textItem.R.forEach(run => {
+              let word = run.T || '';
+              try { word = decodeURIComponent(word); } catch (e) {}
+              text += word + ' ';
+            });
+            text += '\n';
+          });
+        });
+        text = text.trim();
+
+        if (!text || text.length < 50) {
+          return res.json({ success: true, message: 'PDF parsed but no text extracted', chunks: 0 });
+        }
+
+        console.log(`PDF parsed: ${pages.length} pages, ${text.length} characters`);
+
+        const chunkSize = 1000;
+        const overlap = 100;
+        const chunks = [];
+
+        for (let i = 0; i < text.length; i += chunkSize - overlap) {
+          const chunk = text.substring(i, i + chunkSize);
+          if (chunk.trim().length > 50) chunks.push(chunk);
+        }
+
+        console.log(`Chunking into ${chunks.length} chunks for: ${title}`);
+
+        res.json({
+          success: true,
+          message: `Processing ${chunks.length} chunks in background`,
+          chunks: chunks.length,
+          pageCount: pages.length
+        });
+
+        let embedded = 0;
+        for (let i = 0; i < chunks.length; i++) {
+          try {
+            const { data: newDoc } = await supabase.from('knowledge_base').insert([{
+              title: `${title} — Part ${i + 1}`,
+              content: chunks[i],
+              type: type || 'document',
+              source: 'PDF Upload',
+              client_id: clientId || null,
+              status: 'trained',
+              notes: aiMember || 'All Team'
+            }]).select().single();
+
+            if (newDoc) {
+              const embeddingResponse = await axios.post(
+                'https://api.openai.com/v1/embeddings',
+                { input: chunks[i].substring(0, 500), model: 'text-embedding-3-small' },
+                { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' } }
+              );
+              const embedding = embeddingResponse.data.data[0].embedding;
+              await supabase.from('knowledge_base').update({ embedding }).eq('id', newDoc.id);
+              embedded++;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 150));
+          } catch (e) {
+            console.error(`Chunk ${i + 1} failed:`, e.message);
+          }
+        }
+
+        console.log(`✅ Complete: ${embedded} of ${chunks.length} chunks embedded for: ${title}`);
+
+      } catch (e) {
+        console.error('PDF processing error:', e.message);
+      }
+    });
+
     pdfParser.parseBuffer(req.file.buffer);
+
   } catch (e) {
-    res.status(500).json({ error: 'Failed to parse PDF', details: e.message });
+    res.status(500).json({ error: 'Failed to process PDF', details: e.message });
   }
 });
 
@@ -476,7 +542,7 @@ app.post('/youtube-transcript', async (req, res) => {
   try {
     const transcript = await YoutubeTranscript.fetchTranscript(url);
     const text = transcript.map(t => t.text).join(' ').trim();
-    res.json({ success: true, wordCount: text.split(/\s+/).length, text: text.substring(0, 50000) });
+    res.json({ success: true, wordCount: text.split(/\s+/).length, text: text.substring(0, 1000000) });
   } catch (e) {
     res.status(500).json({ error: 'Failed to fetch transcript', details: e.message });
   }
@@ -549,10 +615,8 @@ app.post('/enroll-contact', async (req, res) => {
       if (firstStep.step_type === 'sms' && contactPhone) {
         const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await twilioClient.messages.create({ body: firstStep.content.replace('{{first_name}}', contactName || 'there'), from: process.env.TWILIO_PHONE_NUMBER, to: contactPhone });
-        console.log('Step 1 SMS sent to:', contactPhone);
       } else if (firstStep.step_type === 'email' && contactEmail) {
         await sgMail.send({ to: contactEmail, from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' }, subject: firstStep.subject || 'Message for you', html: `<p>${firstStep.content.replace('{{first_name}}', contactName || 'there')}</p>` });
-        console.log('Step 1 email sent to:', contactEmail);
       }
       await supabase.from('messages').insert([{ client_id: clientId, contact_id: contactId, channel: firstStep.step_type, direction: 'outbound', sender_name: 'Sales Scales AI', content: firstStep.content, status: 'sent' }]);
     }
@@ -593,7 +657,6 @@ app.post('/generate-embedding', async (req, res) => {
     );
     const embedding = embeddingResponse.data.data[0].embedding;
     await supabase.from('knowledge_base').update({ embedding }).eq('id', documentId);
-    console.log('Embedding generated for document:', documentId);
     res.json({ success: true });
   } catch (e) {
     console.error('Embedding error:', e.message);
@@ -630,10 +693,7 @@ app.post('/hussain', async (req, res) => {
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
     const context = await ragSearch(prompt, clientId);
-    const result = await aiCall(
-      `You are Hussain, the Intelligence and Strategy AI at Sales Scales. You are sharp, data-driven, and think like a founder. You analyze platform data and give direct, actionable insights. You speak in a confident, concise style — no fluff, no filler. You are reporting to Yousef, the founder of Sales Scales. You are Hussain — never identify as anyone else or mention Claude.`,
-      prompt, context
-    );
+    const result = await aiCall(`You are Hussain, the Intelligence and Strategy AI at Sales Scales. You are sharp, data-driven, and think like a founder. You analyze platform data and give direct, actionable insights. You speak in a confident, concise style — no fluff, no filler. You are Hussain — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
     console.error('Hussain error:', e.message);
@@ -646,10 +706,7 @@ app.post('/hassan', async (req, res) => {
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
     const context = await ragSearch(prompt, clientId);
-    const result = await aiCall(
-      `You are Hassan, the Growth and Outreach AI at Sales Scales. You are creative, persuasive, and a master of personalized communication. You find prospects, write outreach that converts, follow up strategically, and create content that attracts ecommerce founders. You speak in a confident, direct style. You are Hassan — never identify as anyone else or mention Claude.`,
-      prompt, context
-    );
+    const result = await aiCall(`You are Hassan, the Growth and Outreach AI at Sales Scales. You are creative, persuasive, and a master of personalized communication. You find prospects, write outreach that converts, follow up strategically, and create content that attracts ecommerce founders. You are Hassan — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
     console.error('Hassan error:', e.message);
@@ -662,10 +719,7 @@ app.post('/ali', async (req, res) => {
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
     const context = await ragSearch(prompt, clientId);
-    const result = await aiCall(
-      `You are Ali, the Sales Closer AI at Sales Scales. You are a master of the NEPQ framework and high ticket closing. You take warm leads and close them with precision. You generate sales strategies, handle objections without flinching, and write call scripts that convert. You speak with confidence and authority. You are Ali — never identify as anyone else or mention Claude.`,
-      prompt, context
-    );
+    const result = await aiCall(`You are Ali, the Sales Closer AI at Sales Scales. You are a master of the NEPQ framework and high ticket closing. You take warm leads and close them with precision. You generate sales strategies, handle objections without flinching, and write call scripts that convert. You are Ali — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
     console.error('Ali error:', e.message);
@@ -678,10 +732,7 @@ app.post('/mahdi', async (req, res) => {
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
     const context = await ragSearch(prompt, clientId);
-    const result = await aiCall(
-      `You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world class copywriter and email marketer. You write email sequences, SMS campaigns, and ad copy that converts — all in the exact brand voice of each client. You understand ecommerce psychology deeply. You speak with creativity and precision. You are Mahdi — never identify as anyone else or mention Claude.`,
-      prompt, context
-    );
+    const result = await aiCall(`You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world class copywriter and email marketer. You write email sequences, SMS campaigns, and ad copy that converts — all in the exact brand voice of each client. You are Mahdi — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
     console.error('Mahdi error:', e.message);
@@ -694,10 +745,7 @@ app.post('/fatima', async (req, res) => {
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
     const context = await ragSearch(prompt, clientId);
-    const result = await aiCall(
-      `You are Fatima, the Operations Manager AI at Sales Scales. You are systematic, detail-oriented, and keep everything running smoothly. You monitor platform operations, track client health, identify bottlenecks, and generate operational reports. You speak in a clear, organized, actionable style. You are Fatima — never identify as anyone else or mention Claude.`,
-      prompt, context
-    );
+    const result = await aiCall(`You are Fatima, the Operations Manager AI at Sales Scales. You are systematic, detail-oriented, and keep everything running smoothly. You monitor platform operations, track client health, identify bottlenecks, and generate operational reports. You are Fatima — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
     console.error('Fatima error:', e.message);
@@ -710,72 +758,14 @@ app.post('/zainab', async (req, res) => {
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
     const context = await ragSearch(prompt, clientId);
-    const result = await aiCall(
-      `You are Zainab, the Client Partner AI at Sales Scales. You are warm, professional, and deeply care about client success. You manage client relationships, handle onboarding, write client communications, and ensure every client feels valued and supported. You speak with empathy and confidence. You are Zainab — never identify as anyone else or mention Claude.`,
-      prompt, context
-    );
+    const result = await aiCall(`You are Zainab, the Client Partner AI at Sales Scales. You are warm, professional, and deeply care about client success. You manage client relationships, handle onboarding, write client communications, and ensure every client feels valued and supported. You are Zainab — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
     console.error('Zainab error:', e.message);
     res.status(500).json({ error: 'Zainab failed', details: e.message });
   }
 });
-// ─── CHUNK AND EMBED DOCUMENT ─────────────────────────────
-app.post('/chunk-document', async (req, res) => {
-  const { documentId, content, title, clientId, type, aiMember } = req.body;
-  if (!content || !documentId) return res.status(400).json({ error: 'Missing content or documentId' });
 
-  try {
-    const chunkSize = 1000;
-    const overlap = 100;
-    const chunks = [];
-
-    for (let i = 0; i < content.length; i += chunkSize - overlap) {
-      const chunk = content.substring(i, i + chunkSize);
-      if (chunk.trim().length > 50) chunks.push(chunk);
-    }
-
-    console.log(`Chunking document into ${chunks.length} chunks`);
-
-    let embedded = 0;
-    for (let i = 0; i < chunks.length; i++) {
-      try {
-        const { data: newDoc } = await supabase.from('knowledge_base').insert([{
-          title: `${title} — Part ${i + 1}`,
-          content: chunks[i],
-          type: type || 'document',
-          source: 'PDF Chunk',
-          client_id: clientId || null,
-          status: 'trained',
-          notes: aiMember || 'All Team'
-        }]).select().single();
-
-        if (newDoc) {
-          const embeddingResponse = await axios.post(
-            'https://api.openai.com/v1/embeddings',
-            { input: chunks[i].substring(0, 500), model: 'text-embedding-3-small' },
-            { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' } }
-          );
-          const embedding = embeddingResponse.data.data[0].embedding;
-          await supabase.from('knowledge_base').update({ embedding }).eq('id', newDoc.id);
-          embedded++;
-        }
-
-        await new Promise(resolve => setTimeout(resolve, 200));
-      } catch (e) {
-        console.error(`Chunk ${i} embedding failed:`, e.message);
-      }
-    }
-
-    await supabase.from('knowledge_base').delete().eq('id', documentId);
-
-    console.log(`Chunking complete: ${embedded} of ${chunks.length} chunks embedded`);
-    res.json({ success: true, chunks: chunks.length, embedded });
-  } catch (e) {
-    console.error('Chunking error:', e.message);
-    res.status(500).json({ error: 'Chunking failed', details: e.message });
-  }
-});
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');
