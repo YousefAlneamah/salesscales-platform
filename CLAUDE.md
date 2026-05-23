@@ -24,6 +24,7 @@ There is no `concurrently` setup — open two terminals.
 - **Database**: Supabase (Postgres) via `@supabase/supabase-js`
 - **AI**: Anthropic Claude API (`claude-sonnet-4-6` for AI team, `claude-haiku-4-5-20251001` for utility endpoints)
 - **Embeddings / RAG**: OpenAI `text-embedding-3-small`
+- **Voice**: ElevenLabs Conversational AI (Phase 6) — agents created via `/v1/convai/agents`, outbound calls via Twilio integration
 - **SMS**: Twilio
 - **Email**: SendGrid
 - **PDF parsing**: pdf2json (server-side, streams buffer — never pdf-parse for large files)
@@ -78,6 +79,8 @@ All in `.env` at project root. Server reads them with `dotenv`. React reads `REA
 ANTHROPIC_API_KEY=          # Claude API — used server-side only
 REACT_APP_SUPABASE_URL=     # Supabase project URL
 REACT_APP_SUPABASE_ANON_KEY=# Supabase anon key — used by both client and server
+ELEVENLABS_API_KEY=         # ElevenLabs API key — voice agent creation and outbound calls
+ELEVENLABS_PHONE_NUMBER_ID= # ElevenLabs phone number ID — required for outbound call initiation
 OPENAI_API_KEY=             # Embeddings (text-embedding-3-small) — server-side only
 SHOPIFY_CLIENT_ID=          # Shopify OAuth app
 SHOPIFY_CLIENT_SECRET=
@@ -126,6 +129,9 @@ Single Express file, port 3001. All AI calls go through the `aiCall()` helper wh
 | POST | `/send-email` | Send email via SendGrid |
 | POST | `/generate-embedding` | Embed a knowledge_base document by ID |
 | POST | `/search-knowledge` | Semantic search the knowledge base |
+| GET  | `/voice-agent/voices` | Fetch ElevenLabs voice list |
+| POST | `/voice-agent/save-agent` | Create or update an ElevenLabs conversational agent |
+| POST | `/voice-agent/outbound-call` | Initiate outbound call via ElevenLabs + Twilio |
 | POST | `/execute-step` | Execute one workflow step (sms or email) |
 | POST | `/enroll-contact` | Enroll a contact in a workflow and fire first step |
 | POST | `/sms/inbound` | Twilio webhook for inbound SMS |

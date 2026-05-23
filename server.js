@@ -766,6 +766,85 @@ app.post('/zainab', async (req, res) => {
   }
 });
 
+// ─── VOICE AGENT (ELEVENLABS) ─────────────────────────────
+app.get('/voice-agent/voices', async (req, res) => {
+  try {
+    const response = await axios.get('https://api.elevenlabs.io/v1/voices', {
+      headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY }
+    });
+    const voices = (response.data.voices || []).map(v => ({
+      voice_id: v.voice_id,
+      name: v.name,
+      category: v.category
+    }));
+    res.json({ voices });
+  } catch (e) {
+    console.error('ElevenLabs voices error:', e.message);
+    res.status(500).json({ error: 'Failed to fetch voices', details: e.message });
+  }
+});
+
+app.post('/voice-agent/save-agent', async (req, res) => {
+  const { agentId, name, voiceId, firstMessage, systemPrompt } = req.body;
+  if (!name || !firstMessage || !systemPrompt) return res.status(400).json({ error: 'Missing required fields' });
+  try {
+    const payload = {
+      name,
+      conversation_config: {
+        agent: {
+          prompt: { prompt: systemPrompt },
+          first_message: firstMessage,
+          language: 'en'
+        },
+        tts: { voice_id: voiceId }
+      }
+    };
+    if (agentId) {
+      await axios.patch(
+        `https://api.elevenlabs.io/v1/convai/agents/${agentId}`,
+        payload,
+        { headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY, 'Content-Type': 'application/json' } }
+      );
+      console.log('ElevenLabs agent updated:', agentId);
+      res.json({ success: true, agentId });
+    } else {
+      const response = await axios.post(
+        'https://api.elevenlabs.io/v1/convai/agents/create',
+        payload,
+        { headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY, 'Content-Type': 'application/json' } }
+      );
+      const newAgentId = response.data.agent_id;
+      console.log('ElevenLabs agent created:', newAgentId);
+      res.json({ success: true, agentId: newAgentId });
+    }
+  } catch (e) {
+    console.error('Save agent error:', e.response?.data || e.message);
+    res.status(500).json({ error: 'Failed to save agent', details: e.response?.data?.detail || e.message });
+  }
+});
+
+app.post('/voice-agent/outbound-call', async (req, res) => {
+  const { phone, agentId } = req.body;
+  if (!phone || !agentId) return res.status(400).json({ error: 'Missing phone or agentId' });
+  try {
+    const response = await axios.post(
+      'https://api.elevenlabs.io/v1/convai/twilio/outbound-call',
+      {
+        agent_id: agentId,
+        agent_phone_number_id: process.env.ELEVENLABS_PHONE_NUMBER_ID,
+        to_number: phone
+      },
+      { headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY, 'Content-Type': 'application/json' } }
+    );
+    const callId = response.data.callsid || response.data.call_sid || response.data.call_id;
+    console.log('ElevenLabs outbound call initiated:', callId, '→', phone);
+    res.json({ success: true, callId });
+  } catch (e) {
+    console.error('Outbound call error:', e.response?.data || e.message);
+    res.status(500).json({ error: 'Failed to initiate call', details: e.response?.data?.detail || e.message });
+  }
+});
+
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');
