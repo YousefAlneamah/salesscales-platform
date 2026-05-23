@@ -461,7 +461,7 @@ app.post('/upload-pdf', upload.single('pdf'), async (req, res) => {
         });
       });
       text = text.trim();
-      res.json({ success: true, filename: req.file.originalname, pageCount: pages.length, wordCount: text.split(/\s+/).length, text: text.substring(0, 50000) });
+      res.json({ success: true, filename: req.file.originalname, pageCount: pages.length, wordCount: text.split(/\s+/).length, text: text.substring(0, 500000) });
     });
     pdfParser.parseBuffer(req.file.buffer);
   } catch (e) {
@@ -720,7 +720,62 @@ app.post('/zainab', async (req, res) => {
     res.status(500).json({ error: 'Zainab failed', details: e.message });
   }
 });
+// ─── CHUNK AND EMBED DOCUMENT ─────────────────────────────
+app.post('/chunk-document', async (req, res) => {
+  const { documentId, content, title, clientId, type, aiMember } = req.body;
+  if (!content || !documentId) return res.status(400).json({ error: 'Missing content or documentId' });
 
+  try {
+    const chunkSize = 1000;
+    const overlap = 100;
+    const chunks = [];
+
+    for (let i = 0; i < content.length; i += chunkSize - overlap) {
+      const chunk = content.substring(i, i + chunkSize);
+      if (chunk.trim().length > 50) chunks.push(chunk);
+    }
+
+    console.log(`Chunking document into ${chunks.length} chunks`);
+
+    let embedded = 0;
+    for (let i = 0; i < chunks.length; i++) {
+      try {
+        const { data: newDoc } = await supabase.from('knowledge_base').insert([{
+          title: `${title} — Part ${i + 1}`,
+          content: chunks[i],
+          type: type || 'document',
+          source: 'PDF Chunk',
+          client_id: clientId || null,
+          status: 'trained',
+          notes: aiMember || 'All Team'
+        }]).select().single();
+
+        if (newDoc) {
+          const embeddingResponse = await axios.post(
+            'https://api.openai.com/v1/embeddings',
+            { input: chunks[i].substring(0, 500), model: 'text-embedding-3-small' },
+            { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' } }
+          );
+          const embedding = embeddingResponse.data.data[0].embedding;
+          await supabase.from('knowledge_base').update({ embedding }).eq('id', newDoc.id);
+          embedded++;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } catch (e) {
+        console.error(`Chunk ${i} embedding failed:`, e.message);
+      }
+    }
+
+    await supabase.from('knowledge_base').delete().eq('id', documentId);
+
+    console.log(`Chunking complete: ${embedded} of ${chunks.length} chunks embedded`);
+    res.json({ success: true, chunks: chunks.length, embedded });
+  } catch (e) {
+    console.error('Chunking error:', e.message);
+    res.status(500).json({ error: 'Chunking failed', details: e.message });
+  }
+});
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');

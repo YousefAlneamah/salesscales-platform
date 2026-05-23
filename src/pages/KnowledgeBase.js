@@ -79,19 +79,22 @@ export default function KnowledgeBase() {
 
     if (!error && data) {
       try {
-        await fetch('http://localhost:3001/generate-embedding', {
+        await fetch('http://localhost:3001/chunk-document', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            text: finalContent,
-            documentId: data[0].id
+            documentId: data[0].id,
+            content: finalContent,
+            title: title,
+            clientId: clientId,
+            type: type,
+            aiMember: aiMember
           })
         });
-        console.log('Embedding generated for:', title);
+        console.log('Document chunked and embedded:', title);
       } catch (e) {
-        console.log('Embedding generation failed — document saved without embedding');
+        console.log('Chunking failed — document saved without embedding');
       }
-
       fetchDocuments();
       setShowForm(false);
       setTitle(''); setContent(''); setUrl(''); setType('document');
