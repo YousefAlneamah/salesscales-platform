@@ -28,7 +28,7 @@ app.use((req, res, next) => {
 });
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '50mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 
 // ─── HELPER: AI CALL WITH RAG CONTEXT ────────────────────
@@ -64,18 +64,168 @@ const ragSearch = async (query, clientId = null) => {
       { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' } }
     );
     const queryEmbedding = embeddingResponse.data.data[0].embedding;
-    const { data: results } = await supabase.rpc('search_knowledge_base', {
+
+    const allResults = [];
+
+    // Client-specific knowledge first
+    if (clientId) {
+      const { data: clientResults } = await supabase.rpc('search_knowledge_base', {
+        query_embedding: queryEmbedding,
+        client_id_filter: clientId,
+        match_count: 20
+      });
+      if (clientResults) allResults.push(...clientResults);
+    }
+
+    // Global brain (client_id = null)
+    const { data: globalResults } = await supabase.rpc('search_knowledge_base', {
       query_embedding: queryEmbedding,
-      client_id_filter: clientId || null,
-      match_count: 3
+      client_id_filter: null,
+      match_count: 20
     });
-    if (results && results.length > 0) {
-      return results.map(r => `${r.title}:\n${r.content?.substring(0, 500)}`).join('\n\n');
+    if (globalResults) allResults.push(...globalResults);
+
+    // Deduplicate by id, sort by similarity, take top 5
+    const seen = new Set();
+    const combined = allResults.filter(r => {
+      if (seen.has(r.id)) return false;
+      seen.add(r.id);
+      return true;
+    });
+    combined.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+    const top5 = combined.slice(0, 5);
+
+    if (top5.length > 0) {
+      return top5.map(r => `${r.title}:\n${r.content?.substring(0, 800)}`).join('\n\n');
     }
   } catch (e) {
     console.log('RAG search skipped:', e.message);
   }
   return '';
+};
+
+// ─── HELPER: ENROLL CONTACT IN WORKFLOW ──────────────────
+const enrollContactInWorkflow = async (workflowId, contactId, clientId, contactEmail, contactPhone, contactName) => {
+  const { data: steps } = await supabase.from('workflow_steps')
+    .select('*').eq('workflow_id', workflowId).order('step_order');
+  if (!steps || steps.length === 0) return null;
+
+  // Skip if already actively enrolled
+  const { data: existing } = await supabase.from('workflow_enrollments')
+    .select('id').eq('workflow_id', workflowId).eq('contact_id', contactId).eq('status', 'active').maybeSingle();
+  if (existing) return null;
+
+  const { data: enrollment } = await supabase.from('workflow_enrollments').insert([{
+    workflow_id: workflowId, contact_id: contactId, client_id: clientId,
+    status: 'active', current_step: 1,
+    enrolled_at: new Date().toISOString(), next_step_at: new Date().toISOString()
+  }]).select().single();
+
+  if (!enrollment) return null;
+
+  const firstStep = steps[0];
+  if (firstStep.step_type !== 'wait' && firstStep.content) {
+    if (firstStep.step_type === 'sms' && contactPhone) {
+      const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      await twilioClient.messages.create({
+        body: firstStep.content.replace('{{first_name}}', contactName || 'there'),
+        from: process.env.TWILIO_PHONE_NUMBER, to: contactPhone
+      });
+    } else if (firstStep.step_type === 'email' && contactEmail) {
+      await sgMail.send({
+        to: contactEmail,
+        from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+        subject: firstStep.subject || 'Message for you',
+        html: `<p>${firstStep.content.replace('{{first_name}}', contactName || 'there')}</p>`
+      });
+    }
+    await supabase.from('messages').insert([{
+      client_id: clientId, contact_id: contactId,
+      channel: firstStep.step_type, direction: 'outbound',
+      sender_name: 'Sales Scales AI', content: firstStep.content, status: 'sent'
+    }]);
+  }
+  await supabase.from('workflow_enrollments').update({ current_step: 2 }).eq('id', enrollment.id);
+  return enrollment;
+};
+
+// ─── HELPER: PROCESS SHOPIFY WEBHOOK EVENT ───────────────
+const TOPIC_TRIGGER_MAP = {
+  'checkouts/create': 'cart_abandoned',
+  'orders/create': 'order_placed',
+  'orders/fulfilled': 'order_fulfilled',
+};
+
+const processWebhookEvent = async (topic, shop, payload) => {
+  const { data: connection } = await supabase
+    .from('shopify_connections').select('*').eq('shop', shop).single();
+  if (!connection) { console.log('No Shopify connection for shop:', shop); return; }
+
+  const clientId = connection.client_id;
+
+  let triggerType = TOPIC_TRIGGER_MAP[topic] || null;
+  let customerData = null;
+
+  if (topic === 'checkouts/create') {
+    if (!payload.email) return;
+    customerData = {
+      email: payload.email,
+      first_name: payload.billing_address?.first_name || payload.shipping_address?.first_name || '',
+      last_name: payload.billing_address?.last_name || payload.shipping_address?.last_name || '',
+      phone: payload.phone || ''
+    };
+  } else if (topic === 'orders/create' || topic === 'orders/fulfilled') {
+    customerData = payload.customer;
+  } else if (topic === 'orders/updated') {
+    const failedStatuses = ['pending', 'partially_paid', 'voided'];
+    if (!failedStatuses.includes(payload.financial_status)) return;
+    triggerType = 'payment_failed';
+    customerData = payload.customer;
+  }
+
+  if (!customerData || !customerData.email || !triggerType) return;
+
+  // Find or create contact
+  let { data: contact } = await supabase.from('contacts')
+    .select('*').eq('email', customerData.email).eq('client_id', clientId).maybeSingle();
+
+  if (!contact) {
+    const { data: newContact } = await supabase.from('contacts').insert([{
+      first_name: customerData.first_name || '',
+      last_name: customerData.last_name || '',
+      email: customerData.email,
+      phone: customerData.phone || customerData.default_address?.phone || '',
+      source: 'Shopify', channel: 'Email',
+      pipeline_stage: 'New Lead',
+      client_id: clientId,
+      shopify_customer_id: customerData.id?.toString() || null,
+      last_activity: new Date().toISOString()
+    }]).select().single();
+    contact = newContact;
+  }
+
+  if (!contact) return;
+
+  // Find active workflow matching trigger type
+  const { data: workflows } = await supabase.from('workflows')
+    .select('*').eq('client_id', clientId).eq('trigger_type', triggerType).eq('status', 'active');
+
+  if (!workflows || workflows.length === 0) {
+    console.log(`No active ${triggerType} workflow for client ${clientId}`);
+    return;
+  }
+
+  const workflow = workflows[0];
+  await enrollContactInWorkflow(workflow.id, contact.id, clientId, contact.email, contact.phone, contact.first_name);
+
+  await supabase.from('activity').insert([{
+    contact_id: contact.id, client_id: clientId,
+    type: 'webhook_trigger',
+    description: `Shopify webhook: ${triggerType.replace(/_/g, ' ')} — enrolled in "${workflow.name}"`,
+    created_at: new Date().toISOString()
+  }]);
+
+  console.log(`Webhook processed: ${contact.email} → ${triggerType} → ${workflow.name}`);
 };
 
 // ─── SCHEDULER ────────────────────────────────────────────
@@ -433,6 +583,88 @@ app.post('/shopify/sync-customers', async (req, res) => {
   } catch (e) {
     console.error('Sync error:', e.message);
     res.status(500).json({ error: 'Sync failed', details: e.message });
+  }
+});
+
+// ─── SHOPIFY WEBHOOKS ────────────────────────────────────
+app.post('/shopify/webhook', async (req, res) => {
+  const hmac = req.headers['x-shopify-hmac-sha256'];
+  const topic = req.headers['x-shopify-topic'];
+  const shop = req.headers['x-shopify-shop-domain'];
+
+  if (!hmac || !topic || !shop) return res.status(401).json({ error: 'Missing webhook headers' });
+
+  const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body));
+  const hash = crypto.createHmac('sha256', process.env.SHOPIFY_CLIENT_SECRET)
+    .update(rawBody, 'utf8').digest('base64');
+
+  if (hash !== hmac) {
+    console.log('Shopify webhook HMAC verification failed for:', shop);
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+
+  // Acknowledge immediately — Shopify requires sub-5s response
+  res.status(200).json({ received: true });
+
+  processWebhookEvent(topic, shop, req.body).catch(e => {
+    console.error(`Webhook error [${topic}]:`, e.message);
+  });
+});
+
+app.post('/shopify/register-webhooks', async (req, res) => {
+  const { shop, accessToken } = req.body;
+  if (!shop || !accessToken) return res.status(400).json({ error: 'Missing shop or accessToken' });
+
+  const baseUrl = process.env.WEBHOOK_BASE_URL ||
+    (process.env.SHOPIFY_REDIRECT_URI ? process.env.SHOPIFY_REDIRECT_URI.replace('/shopify/callback', '') : null);
+
+  if (!baseUrl) return res.status(400).json({ error: 'WEBHOOK_BASE_URL not set in environment' });
+
+  const topics = [
+    'checkouts/create',
+    'orders/create',
+    'orders/updated',
+    'orders/fulfilled',
+  ];
+
+  const registered = [];
+  const failed = [];
+
+  for (const topic of topics) {
+    try {
+      await axios.post(
+        `https://${shop}/admin/api/2026-01/webhooks.json`,
+        { webhook: { topic, address: `${baseUrl}/shopify/webhook`, format: 'json' } },
+        { headers: { 'X-Shopify-Access-Token': accessToken, 'Content-Type': 'application/json' } }
+      );
+      registered.push(topic);
+      console.log(`Webhook registered: ${topic} → ${shop}`);
+    } catch (e) {
+      const errDetail = e.response?.data?.errors || e.message;
+      // Shopify returns 422 if webhook already exists — treat as success
+      if (e.response?.status === 422) {
+        registered.push(topic);
+      } else {
+        failed.push({ topic, error: errDetail });
+      }
+    }
+  }
+
+  res.json({ success: true, registered, failed });
+});
+
+app.post('/shopify/list-webhooks', async (req, res) => {
+  const { shop, accessToken } = req.body;
+  if (!shop || !accessToken) return res.status(400).json({ error: 'Missing shop or accessToken' });
+  try {
+    const response = await axios.get(
+      `https://${shop}/admin/api/2026-01/webhooks.json`,
+      { headers: { 'X-Shopify-Access-Token': accessToken, 'Content-Type': 'application/json' } }
+    );
+    res.json({ success: true, webhooks: response.data.webhooks || [] });
+  } catch (e) {
+    console.error('List webhooks error:', e.message);
+    res.status(500).json({ error: 'Failed to fetch webhooks', details: e.message });
   }
 });
 
