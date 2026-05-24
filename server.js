@@ -1077,6 +1077,199 @@ app.post('/voice-agent/outbound-call', async (req, res) => {
   }
 });
 
+// ─── SOCIAL MEDIA AUTOMATION ─────────────────────────────
+let socialConfig = {
+  verifyToken: process.env.META_VERIFY_TOKEN || 'salesscales_meta_verify',
+  instagram: { pageId: process.env.INSTAGRAM_PAGE_ID || null, accessToken: process.env.INSTAGRAM_ACCESS_TOKEN || null },
+  facebook: { pageId: process.env.FACEBOOK_PAGE_ID || null, accessToken: process.env.FACEBOOK_PAGE_ACCESS_TOKEN || null },
+  dm: { enabled: true, tone: 'friendly', customReply: '', workflowId: null, enrollContacts: true },
+  comments: { enabled: true, tone: 'friendly', customReply: '' }
+};
+
+const generateSocialReply = async (message, tone = 'friendly', customReply = '') => {
+  if (customReply && customReply.trim()) return customReply.trim();
+  const tones = {
+    friendly: 'warm, casual, and genuinely helpful',
+    professional: 'polished, business-focused, and respectful',
+    casual: 'relaxed, fun, and conversational',
+    enthusiastic: 'energetic, positive, and exciting'
+  };
+  const response = await axios.post(
+    'https://api.anthropic.com/v1/messages',
+    {
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 200,
+      system: `You are a social media manager. Tone: ${tones[tone] || tones.friendly}. Reply in 1-2 sentences max. Be genuine and direct. No hashtags unless the original message used them. No filler openers.`,
+      messages: [{ role: 'user', content: `Reply to this social media message: "${message}"` }]
+    },
+    { headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' } }
+  );
+  return response.data.content[0].text.trim();
+};
+
+const sendGraphDM = async (recipientId, message, accessToken) => {
+  await axios.post(
+    'https://graph.facebook.com/v18.0/me/messages',
+    { recipient: { id: recipientId }, message: { text: message } },
+    { params: { access_token: accessToken } }
+  );
+};
+
+const replyToGraphComment = async (commentId, message, accessToken) => {
+  await axios.post(
+    `https://graph.facebook.com/v18.0/${commentId}/replies`,
+    { message },
+    { params: { access_token: accessToken } }
+  );
+};
+
+const processSocialEvent = async (platform, payload) => {
+  const entries = payload.entry || [];
+  for (const entry of entries) {
+    // Handle DMs
+    if (entry.messaging && socialConfig.dm.enabled) {
+      for (const event of entry.messaging) {
+        if (!event.message || event.message.is_echo || !event.message.text) continue;
+        const senderId = event.sender.id;
+        const messageText = event.message.text;
+        const accessToken = platform === 'instagram' ? socialConfig.instagram.accessToken : socialConfig.facebook.accessToken;
+        if (!accessToken) continue;
+        try {
+          const reply = await generateSocialReply(messageText, socialConfig.dm.tone, socialConfig.dm.customReply);
+          await sendGraphDM(senderId, reply, accessToken);
+          await supabase.from('messages').insert([
+            { channel: platform, direction: 'inbound', sender_name: senderId, sender_phone: senderId, content: messageText, status: 'read' },
+            { channel: platform, direction: 'outbound', sender_name: 'Sales Scales AI', content: reply, status: 'sent' }
+          ]);
+          if (socialConfig.dm.enrollContacts && socialConfig.dm.workflowId) {
+            let { data: contact } = await supabase.from('contacts').select('*').eq('phone', senderId).maybeSingle();
+            if (!contact) {
+              const { data: nc } = await supabase.from('contacts').insert([{
+                first_name: platform === 'instagram' ? 'Instagram' : 'Facebook',
+                last_name: 'User',
+                phone: senderId,
+                source: platform === 'instagram' ? 'Instagram' : 'Facebook',
+                channel: platform === 'instagram' ? 'Instagram' : 'Facebook',
+                pipeline_stage: 'New Lead',
+                last_activity: new Date().toISOString()
+              }]).select().single();
+              contact = nc;
+            }
+            if (contact) {
+              await enrollContactInWorkflow(socialConfig.dm.workflowId, contact.id, null, contact.email, null, contact.first_name);
+            }
+          }
+          console.log(`Social DM auto-replied [${platform}]: ${senderId}`);
+        } catch (e) {
+          console.error(`Social DM error [${platform}]:`, e.response?.data || e.message);
+        }
+      }
+    }
+
+    // Handle comments
+    if (entry.changes && socialConfig.comments.enabled) {
+      for (const change of entry.changes) {
+        const val = change.value;
+        if (!val || val.item !== 'comment' || !val.message || !val.comment_id) continue;
+        const accessToken = platform === 'instagram' ? socialConfig.instagram.accessToken : socialConfig.facebook.accessToken;
+        if (!accessToken) continue;
+        try {
+          const reply = await generateSocialReply(val.message, socialConfig.comments.tone, socialConfig.comments.customReply);
+          await replyToGraphComment(val.comment_id, reply, accessToken);
+          await supabase.from('messages').insert([
+            { channel: `${platform}_comment`, direction: 'inbound', sender_name: val.from?.name || 'Unknown', content: val.message, status: 'read' },
+            { channel: `${platform}_comment`, direction: 'outbound', sender_name: 'Sales Scales AI', content: reply, status: 'sent' }
+          ]);
+          console.log(`Comment auto-replied [${platform}]: ${val.comment_id}`);
+        } catch (e) {
+          console.error(`Comment reply error [${platform}]:`, e.response?.data || e.message);
+        }
+      }
+    }
+  }
+};
+
+// Meta webhook verification (GET) + event receiver (POST)
+app.get('/social/instagram-webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && token === socialConfig.verifyToken) {
+    console.log('Instagram webhook verified');
+    return res.status(200).send(challenge);
+  }
+  res.status(403).send('Forbidden');
+});
+
+app.post('/social/instagram-webhook', async (req, res) => {
+  res.status(200).json({ status: 'ok' });
+  processSocialEvent('instagram', req.body).catch(e => console.error('IG webhook error:', e.message));
+});
+
+app.get('/social/facebook-webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && token === socialConfig.verifyToken) {
+    console.log('Facebook webhook verified');
+    return res.status(200).send(challenge);
+  }
+  res.status(403).send('Forbidden');
+});
+
+app.post('/social/facebook-webhook', async (req, res) => {
+  res.status(200).json({ status: 'ok' });
+  processSocialEvent('facebook', req.body).catch(e => console.error('FB webhook error:', e.message));
+});
+
+app.post('/social/send-dm', async (req, res) => {
+  const { recipientId, message, platform } = req.body;
+  if (!recipientId || !message || !platform) return res.status(400).json({ error: 'Missing fields' });
+  const accessToken = platform === 'instagram' ? socialConfig.instagram.accessToken : socialConfig.facebook.accessToken;
+  if (!accessToken) return res.status(400).json({ error: `${platform} not connected` });
+  try {
+    await sendGraphDM(recipientId, message, accessToken);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Send DM error:', e.response?.data || e.message);
+    res.status(500).json({ error: 'Failed to send DM', details: e.response?.data || e.message });
+  }
+});
+
+app.post('/social/reply-comment', async (req, res) => {
+  const { commentId, message, platform } = req.body;
+  if (!commentId || !message || !platform) return res.status(400).json({ error: 'Missing fields' });
+  const accessToken = platform === 'instagram' ? socialConfig.instagram.accessToken : socialConfig.facebook.accessToken;
+  if (!accessToken) return res.status(400).json({ error: `${platform} not connected` });
+  try {
+    await replyToGraphComment(commentId, message, accessToken);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Reply comment error:', e.response?.data || e.message);
+    res.status(500).json({ error: 'Failed to reply to comment', details: e.response?.data || e.message });
+  }
+});
+
+app.get('/social/config', (req, res) => {
+  res.json({
+    verifyToken: socialConfig.verifyToken,
+    dm: socialConfig.dm,
+    comments: socialConfig.comments,
+    instagramConnected: !!socialConfig.instagram.accessToken,
+    facebookConnected: !!socialConfig.facebook.accessToken
+  });
+});
+
+app.post('/social/config', (req, res) => {
+  const { instagram, facebook, dm, comments } = req.body;
+  if (instagram) socialConfig.instagram = { ...socialConfig.instagram, ...instagram };
+  if (facebook) socialConfig.facebook = { ...socialConfig.facebook, ...facebook };
+  if (dm) socialConfig.dm = { ...socialConfig.dm, ...dm };
+  if (comments) socialConfig.comments = { ...socialConfig.comments, ...comments };
+  console.log('Social config updated');
+  res.json({ success: true });
+});
+
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');
