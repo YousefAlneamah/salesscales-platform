@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import "./styles/global.css";
+import { supabase } from "./supabase";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Clients from "./pages/Clients";
@@ -26,6 +27,7 @@ import Marketplace from "./pages/Marketplace";
 import WhiteLabel from "./pages/WhiteLabel";
 import Settings from "./pages/Settings";
 import ClientDashboard from "./pages/ClientDashboard";
+import ClientOnboardingFlow from "./pages/ClientOnboardingFlow";
 import Hussain from "./pages/Hussain";
 import Hassan from "./pages/Hassan";
 import Ali from "./pages/Ali";
@@ -116,11 +118,28 @@ const pageTitles = {
 function App() {
   const [user, setUser] = useState(null);
   const [currentPage, setCurrentPage] = useState("dashboard");
+  const [clientOnboarded, setClientOnboarded] = useState(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("user");
     if (saved) setUser(JSON.parse(saved));
   }, []);
+
+  useEffect(() => {
+    if (!user || user.role !== 'client') {
+      setClientOnboarded(null);
+      return;
+    }
+    setClientOnboarded(null);
+    supabase
+      .from('client_onboarding')
+      .select('id, completed_at')
+      .eq('client_id', user.clientId)
+      .maybeSingle()
+      .then(({ data }) => {
+        setClientOnboarded(!!(data && data.completed_at));
+      });
+  }, [user]);
 
   const handleLogin = (userData) => setUser(userData);
 
@@ -131,7 +150,19 @@ function App() {
 
   if (!user) return <Login onLogin={handleLogin} />;
 
-  if (user.role === 'client') return <ClientDashboard user={user} onLogout={handleLogout} />;
+  if (user.role === 'client') {
+    if (clientOnboarded === null) {
+      return (
+        <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: '#0a1628', fontFamily: 'DM Sans, sans-serif' }}>
+          <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: '13px', letterSpacing: '1px' }}>Loading...</div>
+        </div>
+      );
+    }
+    if (!clientOnboarded) {
+      return <ClientOnboardingFlow user={user} onComplete={() => setClientOnboarded(true)} />;
+    }
+    return <ClientDashboard user={user} onLogout={handleLogout} />;
+  }
 
   const renderPage = () => {
     switch(currentPage) {
