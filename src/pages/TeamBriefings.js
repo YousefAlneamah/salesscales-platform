@@ -64,7 +64,7 @@ export default function TeamBriefings() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchBriefings(); }, [filter]);
+  useEffect(() => { fetchBriefings(); }, [filter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSubmit = async (e) => {
     e.preventDefault();
