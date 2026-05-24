@@ -104,6 +104,28 @@ const ragSearch = async (query, clientId = null) => {
   return '';
 };
 
+// ─── HELPER: TEAM BRIEFINGS CONTEXT ──────────────────────
+const getBriefingsContext = async (memberName) => {
+  try {
+    const { data: briefings } = await supabase
+      .from('team_briefings')
+      .select('from_member, subject, content, priority, created_at')
+      .eq('to_member', memberName)
+      .eq('is_read', false)
+      .order('created_at', { ascending: false })
+      .limit(5);
+    if (!briefings || briefings.length === 0) return '';
+    const lines = briefings.map(b => {
+      const ageHours = Math.round((Date.now() - new Date(b.created_at)) / 3_600_000);
+      return `[Briefing from ${b.from_member} — ${b.priority.toUpperCase()} — ${ageHours}h ago]\nSubject: ${b.subject}\n${b.content}`;
+    });
+    return `Recent team briefings for you:\n${lines.join('\n\n')}`;
+  } catch (e) {
+    console.log('Briefings context skipped:', e.message);
+    return '';
+  }
+};
+
 // ─── HELPER: ENROLL CONTACT IN WORKFLOW ──────────────────
 const enrollContactInWorkflow = async (workflowId, contactId, clientId, contactEmail, contactPhone, contactName) => {
   const { data: steps } = await supabase.from('workflow_steps')
@@ -919,12 +941,57 @@ app.post('/search-knowledge', async (req, res) => {
   }
 });
 
+// ─── TEAM BRIEFING ENDPOINTS ─────────────────────────────
+app.post('/team/brief', async (req, res) => {
+  const { from_member, to_member, subject, content, priority, client_id } = req.body;
+  if (!from_member || !to_member || !subject || !content) {
+    return res.status(400).json({ error: 'Missing required fields: from_member, to_member, subject, content' });
+  }
+  try {
+    const { data: briefing, error } = await supabase.from('team_briefings').insert([{
+      from_member,
+      to_member,
+      subject,
+      content,
+      priority: priority || 'normal',
+      client_id: client_id || null,
+      is_read: false,
+      created_at: new Date().toISOString()
+    }]).select().single();
+    if (error) throw error;
+    console.log(`Team briefing: ${from_member} → ${to_member} [${priority || 'normal'}] "${subject}"`);
+    res.json({ success: true, briefing });
+  } catch (e) {
+    console.error('Create briefing error:', e.message);
+    res.status(500).json({ error: 'Failed to create briefing', details: e.message });
+  }
+});
+
+app.get('/team/briefings', async (req, res) => {
+  const { recipient, sender } = req.query;
+  try {
+    let query = supabase.from('team_briefings').select('*').order('created_at', { ascending: false });
+    if (recipient && recipient !== 'all') query = query.eq('to_member', recipient);
+    if (sender) query = query.eq('from_member', sender);
+    const { data: briefings, error } = await query;
+    if (error) throw error;
+    res.json({ briefings: briefings || [] });
+  } catch (e) {
+    console.error('Briefings fetch error:', e.message);
+    res.status(500).json({ error: 'Failed to fetch briefings', details: e.message });
+  }
+});
+
 // ─── AI TEAM ENDPOINTS ────────────────────────────────────
 app.post('/hussain', async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
-    const context = await ragSearch(prompt, clientId);
+    const [ragContext, briefingsCtx] = await Promise.all([
+      ragSearch(prompt, clientId),
+      getBriefingsContext('hussain')
+    ]);
+    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
     const result = await aiCall(`You are Hussain, the Intelligence and Strategy AI at Sales Scales. You are sharp, data-driven, and think like a founder. You analyze platform data and give direct, actionable insights. You speak in a confident, concise style — no fluff, no filler. You are Hussain — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
@@ -937,7 +1004,11 @@ app.post('/hassan', async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
-    const context = await ragSearch(prompt, clientId);
+    const [ragContext, briefingsCtx] = await Promise.all([
+      ragSearch(prompt, clientId),
+      getBriefingsContext('hassan')
+    ]);
+    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
     const result = await aiCall(`You are Hassan, the Growth and Outreach AI at Sales Scales. You are creative, persuasive, and a master of personalized communication. You find prospects, write outreach that converts, follow up strategically, and create content that attracts ecommerce founders. You are Hassan — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
@@ -950,7 +1021,11 @@ app.post('/ali', async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
-    const context = await ragSearch(prompt, clientId);
+    const [ragContext, briefingsCtx] = await Promise.all([
+      ragSearch(prompt, clientId),
+      getBriefingsContext('ali')
+    ]);
+    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
     const result = await aiCall(`You are Ali, the Sales Closer AI at Sales Scales. You are a master of the NEPQ framework and high ticket closing. You take warm leads and close them with precision. You generate sales strategies, handle objections without flinching, and write call scripts that convert. You are Ali — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
@@ -963,7 +1038,11 @@ app.post('/mahdi', async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
-    const context = await ragSearch(prompt, clientId);
+    const [ragContext, briefingsCtx] = await Promise.all([
+      ragSearch(prompt, clientId),
+      getBriefingsContext('mahdi')
+    ]);
+    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
     const result = await aiCall(`You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world class copywriter and email marketer. You write email sequences, SMS campaigns, and ad copy that converts — all in the exact brand voice of each client. You are Mahdi — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
@@ -976,7 +1055,11 @@ app.post('/fatima', async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
-    const context = await ragSearch(prompt, clientId);
+    const [ragContext, briefingsCtx] = await Promise.all([
+      ragSearch(prompt, clientId),
+      getBriefingsContext('fatima')
+    ]);
+    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
     const result = await aiCall(`You are Fatima, the Operations Manager AI at Sales Scales. You are systematic, detail-oriented, and keep everything running smoothly. You monitor platform operations, track client health, identify bottlenecks, and generate operational reports. You are Fatima — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
@@ -989,7 +1072,11 @@ app.post('/zainab', async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
-    const context = await ragSearch(prompt, clientId);
+    const [ragContext, briefingsCtx] = await Promise.all([
+      ragSearch(prompt, clientId),
+      getBriefingsContext('zainab')
+    ]);
+    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
     const result = await aiCall(`You are Zainab, the Client Partner AI at Sales Scales. You are warm, professional, and deeply care about client success. You manage client relationships, handle onboarding, write client communications, and ensure every client feels valued and supported. You are Zainab — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
