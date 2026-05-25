@@ -87,7 +87,8 @@ SHOPIFY_CLIENT_SECRET=
 SHOPIFY_REDIRECT_URI=       # ngrok or prod URL for /shopify/callback
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
-TWILIO_PHONE_NUMBER=        # +1... format
+TWILIO_PHONE_NUMBER=        # +1... format — used for SMS
+TWILIO_WHATSAPP_NUMBER=     # +1... format — Twilio WhatsApp sender (sandbox or approved number)
 SENDGRID_API_KEY=
 SENDGRID_FROM_EMAIL=        # Verified sender address
 YOUTUBE_API_KEY=            # YouTube Data API v3 — bulk channel import (server-side only)
@@ -102,7 +103,7 @@ YOUTUBE_API_KEY=            # YouTube Data API v3 — bulk channel import (serve
 | `contacts` | CRM contacts. Fields: `id, first_name, last_name, email, phone, source, channel, pipeline_stage, client_id, shopify_customer_id, last_activity, status` |
 | `pipeline_deals` | Sales pipeline deals. Fields: `id, value, stage, client_id` |
 | `workflows` | Sequence definitions. Fields: `id, name, client_id, trigger_type, status, enrolled_count` |
-| `workflow_steps` | Steps in a workflow. Fields: `id, workflow_id, step_order, step_type (email/sms/wait), content, subject, wait_hours` |
+| `workflow_steps` | Steps in a workflow. Fields: `id, workflow_id, step_order, step_type (email/sms/whatsapp/wait), content, subject, wait_hours` |
 | `workflow_enrollments` | Contact enrollment in a workflow. Fields: `id, workflow_id, contact_id, client_id, status (active/paused/completed/cancelled), current_step, enrolled_at, next_step_at, completed_at` |
 | `messages` | Unified inbox messages. Fields: `id, client_id, contact_id, channel, direction (inbound/outbound), sender_name, sender_phone, content, status (unread/read/sent)` |
 | `approvals` | Content pending owner approval. Fields: `id, status (pending/approved/rejected), client_id, created_at` |
@@ -127,6 +128,7 @@ Single Express file, port 3001. All AI calls go through the `aiCall()` helper wh
 | POST | `/upload-pdf` | PDF → chunks → embeddings → knowledge_base (background after response) |
 | POST | `/youtube-transcript` | Fetch YouTube transcript text |
 | POST | `/send-sms` | Send SMS via Twilio |
+| POST | `/send-whatsapp` | Send WhatsApp message via Twilio (`whatsapp:` prefix) |
 | POST | `/send-email` | Send email via SendGrid |
 | POST | `/generate-embedding` | Embed a knowledge_base document by ID |
 | POST | `/search-knowledge` | Semantic search the knowledge base |
@@ -136,6 +138,7 @@ Single Express file, port 3001. All AI calls go through the `aiCall()` helper wh
 | POST | `/execute-step` | Execute one workflow step (sms or email) |
 | POST | `/enroll-contact` | Enroll a contact in a workflow and fire first step |
 | POST | `/sms/inbound` | Twilio webhook for inbound SMS |
+| POST | `/whatsapp/inbound` | Twilio webhook for inbound WhatsApp messages |
 | POST | `/email/tracking` | SendGrid event webhook (opens, clicks, bounces, unsubscribes) |
 | GET | `/shopify/install` | Initiate Shopify OAuth |
 | GET | `/shopify/callback` | Complete Shopify OAuth, save token |
@@ -158,7 +161,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 
 ### Scheduler
 
-`node-cron` runs every 15 minutes. Finds `workflow_enrollments` with `status = 'active'` and `next_step_at <= now`. Processes `wait`, `sms`, and `email` step types. Pauses enrollment on inbound SMS reply. Completes enrollment when all steps are done.
+`node-cron` runs every 15 minutes. Finds `workflow_enrollments` with `status = 'active'` and `next_step_at <= now`. Processes `wait`, `sms`, `whatsapp`, and `email` step types. Pauses enrollment on inbound SMS or WhatsApp reply. Completes enrollment when all steps are done.
 
 ## All Pages (37 total)
 

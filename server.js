@@ -156,6 +156,13 @@ const enrollContactInWorkflow = async (workflowId, contactId, clientId, contactE
         body: firstStep.content.replace('{{first_name}}', contactName || 'there'),
         from: process.env.TWILIO_PHONE_NUMBER, to: contactPhone
       });
+    } else if (firstStep.step_type === 'whatsapp' && contactPhone) {
+      const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      await twilioClient.messages.create({
+        body: firstStep.content.replace('{{first_name}}', contactName || 'there'),
+        from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER,
+        to: 'whatsapp:' + contactPhone
+      });
     } else if (firstStep.step_type === 'email' && contactEmail) {
       await sgMail.send({
         to: contactEmail,
@@ -331,6 +338,35 @@ cron.schedule('*/15 * * * *', async () => {
           content: currentStep.content, status: 'sent'
         }]);
 
+      } else if (currentStep.step_type === 'whatsapp' && contact.phone && currentStep.content) {
+        try {
+          const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+          await twilioClient.messages.create({
+            body: currentStep.content.replace('{{first_name}}', contact.first_name || 'there'),
+            from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER,
+            to: 'whatsapp:' + contact.phone
+          });
+          console.log(`WhatsApp sent to ${contact.first_name} — step ${enrollment.current_step}`);
+        } catch (e) {
+          console.error('WhatsApp step error:', e.message);
+        }
+        const nextStep = steps[enrollment.current_step];
+        const nextStepAt = new Date();
+        if (nextStep && nextStep.step_type === 'wait') {
+          nextStepAt.setHours(nextStepAt.getHours() + (nextStep.wait_hours || 1));
+        }
+        await supabase.from('workflow_enrollments').update({
+          current_step: enrollment.current_step + 1,
+          next_step_at: nextStepAt.toISOString()
+        }).eq('id', enrollment.id);
+        await supabase.from('messages').insert([{
+          client_id: enrollment.client_id,
+          contact_id: enrollment.contact_id,
+          channel: 'WhatsApp', direction: 'outbound',
+          sender_name: 'Sales Scales AI',
+          content: currentStep.content, status: 'sent'
+        }]);
+
       } else if (currentStep.step_type === 'email' && contact.email && currentStep.content) {
         try {
           await sgMail.send({
@@ -412,6 +448,44 @@ app.post('/sms/inbound', async (req, res) => {
     res.send('<Response></Response>');
   } catch (e) {
     console.error('Inbound SMS error:', e.message);
+    res.set('Content-Type', 'text/xml');
+    res.send('<Response></Response>');
+  }
+});
+
+// ─── INBOUND WHATSAPP WEBHOOK ──────────────────────────────
+app.post('/whatsapp/inbound', async (req, res) => {
+  const { From, Body } = req.body;
+  const phone = From.replace('whatsapp:', '');
+  console.log('Inbound WhatsApp from:', phone, '— Message:', Body);
+  try {
+    const { data: contact } = await supabase
+      .from('contacts').select('*').eq('phone', phone).single();
+    if (contact) {
+      await supabase.from('messages').insert([{
+        client_id: contact.client_id,
+        contact_id: contact.id,
+        channel: 'WhatsApp', direction: 'inbound',
+        sender_name: contact.first_name + ' ' + contact.last_name,
+        sender_phone: phone, content: Body, status: 'unread'
+      }]);
+      await supabase.from('workflow_enrollments')
+        .update({ status: 'paused' })
+        .eq('contact_id', contact.id)
+        .eq('status', 'active');
+      console.log('Inbound WhatsApp saved and workflow paused for:', contact.first_name);
+    } else {
+      await supabase.from('messages').insert([{
+        channel: 'WhatsApp', direction: 'inbound',
+        sender_name: phone, sender_phone: phone,
+        content: Body, status: 'unread'
+      }]);
+      console.log('Inbound WhatsApp from unknown contact:', phone);
+    }
+    res.set('Content-Type', 'text/xml');
+    res.send('<Response></Response>');
+  } catch (e) {
+    console.error('Inbound WhatsApp error:', e.message);
     res.set('Content-Type', 'text/xml');
     res.send('<Response></Response>');
   }
@@ -820,6 +894,25 @@ app.post('/send-sms', async (req, res) => {
   }
 });
 
+// ─── SEND WHATSAPP ────────────────────────────────────────
+app.post('/send-whatsapp', async (req, res) => {
+  const { to, message } = req.body;
+  if (!to || !message) return res.status(400).json({ error: 'Missing to or message' });
+  try {
+    const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    const result = await client.messages.create({
+      body: message,
+      from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER,
+      to: 'whatsapp:' + to
+    });
+    console.log('WhatsApp sent:', result.sid);
+    res.json({ success: true, sid: result.sid });
+  } catch (e) {
+    console.error('WhatsApp error:', e.message);
+    res.status(500).json({ error: 'Failed to send WhatsApp message', details: e.message });
+  }
+});
+
 // ─── SEND EMAIL ───────────────────────────────────────────
 app.post('/send-email', async (req, res) => {
   const { to, subject, html, from, fromName } = req.body;
@@ -843,6 +936,10 @@ app.post('/execute-step', async (req, res) => {
       const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
       const result = await client.messages.create({ body: message, from: process.env.TWILIO_PHONE_NUMBER, to });
       res.json({ success: true, channel: 'sms', sid: result.sid });
+    } else if (stepType === 'whatsapp') {
+      const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      const result = await client.messages.create({ body: message, from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER, to: 'whatsapp:' + to });
+      res.json({ success: true, channel: 'whatsapp', sid: result.sid });
     } else if (stepType === 'email') {
       await sgMail.send({ to, from: { email: process.env.SENDGRID_FROM_EMAIL, name: clientName || 'Sales Scales' }, subject: subject || 'Message from ' + (clientName || 'Sales Scales'), html: `<p>Hi ${contactName || 'there'},</p><p>${message}</p>` });
       res.json({ success: true, channel: 'email' });
@@ -872,6 +969,9 @@ app.post('/enroll-contact', async (req, res) => {
       if (firstStep.step_type === 'sms' && contactPhone) {
         const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await twilioClient.messages.create({ body: firstStep.content.replace('{{first_name}}', contactName || 'there'), from: process.env.TWILIO_PHONE_NUMBER, to: contactPhone });
+      } else if (firstStep.step_type === 'whatsapp' && contactPhone) {
+        const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        await twilioClient.messages.create({ body: firstStep.content.replace('{{first_name}}', contactName || 'there'), from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER, to: 'whatsapp:' + contactPhone });
       } else if (firstStep.step_type === 'email' && contactEmail) {
         await sgMail.send({ to: contactEmail, from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' }, subject: firstStep.subject || 'Message for you', html: `<p>${firstStep.content.replace('{{first_name}}', contactName || 'there')}</p>` });
       }
