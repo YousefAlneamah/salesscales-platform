@@ -42,7 +42,6 @@ const navItems = [
     { id: "dashboard", label: "Dashboard", icon: "ti-layout-dashboard" },
     { id: "clients", label: "Clients", icon: "ti-users" },
     { id: "contacts", label: "Contacts", icon: "ti-user" },
-    { id: "audit", label: "Audit Tool", icon: "ti-search" },
     { id: "analytics", label: "Analytics", icon: "ti-chart-bar" },
   ]},
   { group: "AI TEAM", items: [
@@ -88,7 +87,6 @@ const pageTitles = {
   dashboard: "Owner Dashboard",
   clients: "Ecommerce Clients",
   contacts: "Contacts",
-  audit: "Audit Tool",
   analytics: "Analytics",
   hussain: "Hussain — Intelligence & Strategy",
   hassan: "Hassan — Growth & Outreach",
@@ -174,7 +172,6 @@ function App() {
       case "dashboard": return <Dashboard />;
       case "clients": return <Clients />;
       case "contacts": return <Contacts />;
-      case "audit": return <AuditTool />;
       case "analytics": return <Analytics />;
       case "hussain": return <Hussain />;
       case "hassan": return <Hassan />;
