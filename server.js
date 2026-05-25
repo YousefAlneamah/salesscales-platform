@@ -1694,6 +1694,138 @@ app.post('/social/config', (req, res) => {
   res.json({ success: true });
 });
 
+// ─── REVENUE STATS ────────────────────────────────────────
+app.get('/revenue/stats', async (req, res) => {
+  try {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+
+    const [
+      { data: deals },
+      { data: allEnrollments },
+      { data: workflows },
+      { data: outboundMessages },
+      { data: clients },
+    ] = await Promise.all([
+      supabase.from('pipeline_deals').select('id, value, stage, client_id, created_at'),
+      supabase.from('workflow_enrollments').select('id, workflow_id, client_id, status, enrolled_at, completed_at'),
+      supabase.from('workflows').select('id, name, trigger_type, client_id'),
+      supabase.from('messages').select('id, channel, client_id, created_at').eq('direction', 'outbound').gte('created_at', monthStart),
+      supabase.from('clients').select('id, name'),
+    ]);
+
+    const convertedDeals = (deals || []).filter(d => d.stage === 'Converted');
+    const thisMonthDeals = convertedDeals.filter(d => d.created_at && d.created_at >= monthStart);
+    const lastMonthDeals = convertedDeals.filter(d => d.created_at && d.created_at >= lastMonthStart && d.created_at < monthStart);
+    const totalRevenue = thisMonthDeals.reduce((s, d) => s + (Number(d.value) || 0), 0);
+    const lastMonthRevenue = lastMonthDeals.reduce((s, d) => s + (Number(d.value) || 0), 0);
+
+    const thisMonthEnrollments = (allEnrollments || []).filter(e => e.enrolled_at && e.enrolled_at >= monthStart);
+    const completedThisMonth = thisMonthEnrollments.filter(e => e.status === 'completed').length;
+
+    // Channel breakdown — outbound message counts → proportional revenue attribution
+    const channelCounts = {};
+    for (const m of (outboundMessages || [])) {
+      const ch = (m.channel || 'other').toLowerCase();
+      channelCounts[ch] = (channelCounts[ch] || 0) + 1;
+    }
+    const CHANNELS = ['email', 'sms', 'whatsapp', 'voice'];
+    const totalTracked = CHANNELS.reduce((s, ch) => s + (channelCounts[ch] || 0), 0) || 1;
+    const byChannel = CHANNELS.map(ch => ({
+      channel: ch.charAt(0).toUpperCase() + ch.slice(1),
+      sent: channelCounts[ch] || 0,
+      revenue: Math.round((channelCounts[ch] || 0) / totalTracked * totalRevenue),
+    }));
+
+    // Trigger breakdown — group all enrollments by workflow trigger_type
+    const triggerMap = {};
+    for (const e of (allEnrollments || [])) {
+      const wf = (workflows || []).find(w => w.id === e.workflow_id);
+      const t = wf?.trigger_type || 'Manual';
+      if (!triggerMap[t]) triggerMap[t] = { trigger: t, enrolled: 0, completed: 0 };
+      triggerMap[t].enrolled++;
+      if (e.status === 'completed') triggerMap[t].completed++;
+    }
+    const byTrigger = Object.values(triggerMap)
+      .sort((a, b) => b.enrolled - a.enrolled)
+      .slice(0, 7)
+      .map(t => ({ ...t, conversionRate: t.enrolled > 0 ? Math.round((t.completed / t.enrolled) * 100) : 0 }));
+
+    // Top sequences — by conversion rate, min 1 enrollment
+    const topSequences = (workflows || []).map(wf => {
+      const wfEnrollments = (allEnrollments || []).filter(e => e.workflow_id === wf.id);
+      const completed = wfEnrollments.filter(e => e.status === 'completed').length;
+      const enrolled = wfEnrollments.length;
+      const client = (clients || []).find(c => c.id === wf.client_id);
+      return {
+        id: wf.id,
+        name: wf.name,
+        trigger: wf.trigger_type,
+        clientName: client?.name || '—',
+        enrolled,
+        completed,
+        conversionRate: enrolled > 0 ? Math.round((completed / enrolled) * 100) : 0,
+      };
+    })
+      .filter(s => s.enrolled > 0)
+      .sort((a, b) => b.conversionRate - a.conversionRate || b.enrolled - a.enrolled)
+      .slice(0, 8);
+
+    // Per client breakdown — pipeline revenue + enrollment stats
+    const clientRevenueMap = {};
+    for (const d of convertedDeals) {
+      if (!clientRevenueMap[d.client_id]) clientRevenueMap[d.client_id] = { revenue: 0, deals: 0 };
+      clientRevenueMap[d.client_id].revenue += Number(d.value) || 0;
+      clientRevenueMap[d.client_id].deals++;
+    }
+    const clientEnrollMap = {};
+    for (const e of (allEnrollments || [])) {
+      if (!clientEnrollMap[e.client_id]) clientEnrollMap[e.client_id] = { enrolled: 0, completed: 0 };
+      clientEnrollMap[e.client_id].enrolled++;
+      if (e.status === 'completed') clientEnrollMap[e.client_id].completed++;
+    }
+    const byClient = (clients || [])
+      .map(c => ({
+        id: c.id,
+        name: c.name,
+        revenue: clientRevenueMap[c.id]?.revenue || 0,
+        deals: clientRevenueMap[c.id]?.deals || 0,
+        enrolled: clientEnrollMap[c.id]?.enrolled || 0,
+        completed: clientEnrollMap[c.id]?.completed || 0,
+        conversionRate: clientEnrollMap[c.id]?.enrolled > 0
+          ? Math.round((clientEnrollMap[c.id].completed / clientEnrollMap[c.id].enrolled) * 100)
+          : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue || b.enrolled - a.enrolled);
+
+    const maxRevenue = byClient.reduce((m, c) => Math.max(m, c.revenue), 0) || 1;
+
+    res.json({
+      thisMonth: {
+        totalRevenue,
+        totalDeals: thisMonthDeals.length,
+        completedEnrollments: completedThisMonth,
+        totalEnrollments: thisMonthEnrollments.length,
+        revenueChange: lastMonthRevenue > 0
+          ? Math.round(((totalRevenue - lastMonthRevenue) / lastMonthRevenue) * 100)
+          : null,
+        conversionRate: thisMonthEnrollments.length > 0
+          ? Math.round((completedThisMonth / thisMonthEnrollments.length) * 100)
+          : 0,
+      },
+      byChannel,
+      byTrigger,
+      topSequences,
+      byClient,
+      maxRevenue,
+    });
+  } catch (e) {
+    console.error('Revenue stats error:', e.message);
+    res.status(500).json({ error: 'Failed to fetch revenue stats', details: e.message });
+  }
+});
+
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');

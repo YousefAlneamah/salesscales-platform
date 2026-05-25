@@ -21,6 +21,7 @@ import Integrations from "./pages/Integrations";
 import MyPipeline from "./pages/MyPipeline";
 import SocialAutomation from "./pages/SocialAutomation";
 import Reports from "./pages/Reports";
+import RevenueDashboard from "./pages/RevenueDashboard";
 import CaseStudies from "./pages/CaseStudies";
 import Onboarding from "./pages/Onboarding";
 import Marketplace from "./pages/Marketplace";
@@ -72,6 +73,7 @@ const navItems = [
     { id: "socialautomation", label: "Social Automation", icon: "ti-device-mobile" },
     { id: "reports", label: "Reports", icon: "ti-file-analytics" },
     { id: "casestudies", label: "Case Studies", icon: "ti-trophy" },
+    { id: "revenue-dashboard", label: "Revenue Dashboard", icon: "ti-cash" },
   ]},
   { group: "PLATFORM", items: [
     { id: "onboarding", label: "Onboarding", icon: "ti-rocket" },
@@ -109,6 +111,7 @@ const pageTitles = {
   socialautomation: "Social Automation",
   reports: "Reports",
   casestudies: "Case Studies",
+  "revenue-dashboard": "Revenue Dashboard",
   onboarding: "Onboarding",
   marketplace: "Marketplace",
   whitelabel: "White Label",
@@ -193,6 +196,7 @@ function App() {
       case "socialautomation": return <SocialAutomation />;
       case "reports": return <Reports />;
       case "casestudies": return <CaseStudies />;
+      case "revenue-dashboard": return <RevenueDashboard />;
       case "onboarding": return <Onboarding />;
       case "marketplace": return <Marketplace />;
       case "whitelabel": return <WhiteLabel />;

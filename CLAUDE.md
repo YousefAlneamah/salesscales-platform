@@ -143,6 +143,7 @@ Single Express file, port 3001. All AI calls go through the `aiCall()` helper wh
 | GET | `/shopify/install` | Initiate Shopify OAuth |
 | GET | `/shopify/callback` | Complete Shopify OAuth, save token |
 | POST | `/shopify/sync-customers` | Pull customers from Shopify → contacts table |
+| GET  | `/revenue/stats` | Revenue stats — pipeline deals, enrollment conversion rates, per-client and per-channel breakdowns |
 
 ### AI Team Endpoints (6 members, all identical pattern)
 
@@ -202,6 +203,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 - **SocialAutomation** (`SocialAutomation.js`) — DM / social automation
 - **Reports** (`Reports.js`) — reporting and analytics
 - **CaseStudies** (`CaseStudies.js`) — case study library
+- **RevenueDashboard** (`RevenueDashboard.js`) — revenue stats: by channel, sequence type, top sequences, per-client breakdown
 
 ### PLATFORM Group
 - **Onboarding** (`Onboarding.js`) — client onboarding flows
