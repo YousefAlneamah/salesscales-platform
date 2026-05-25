@@ -1194,59 +1194,96 @@ const runChannelImport = async (jobId, channelUrl, clientId, aiMember) => {
     job.videos = scored;
     log(`Scoring complete. ${qualifying.length} of ${scored.length} videos scored 7+ and will be imported.`);
 
-    for (let i = 0; i < qualifying.length; i++) {
-      const video = qualifying[i];
-      log(`[${i + 1}/${qualifying.length}] "${video.title}" (score: ${video.score}/10) — fetching transcript...`);
-      try {
-        const transcript = await YoutubeTranscript.fetchTranscript(
-          `https://www.youtube.com/watch?v=${video.videoId}`
-        );
-        const text = transcript.map(t => t.text).join(' ').trim();
-        if (!text || text.length < 100) {
-          log(`  ↳ No transcript — skipped`);
-          job.videosProcessed++;
-          continue;
-        }
-        const chunkSize = 1000;
-        const overlap = 100;
-        const chunks = [];
-        for (let pos = 0; pos < text.length; pos += chunkSize - overlap) {
-          const chunk = text.substring(pos, pos + chunkSize);
-          if (chunk.trim().length > 50) chunks.push(chunk);
-        }
-        log(`  ↳ ${text.length} chars → ${chunks.length} chunks → embedding...`);
-        let saved = 0;
-        for (let c = 0; c < chunks.length; c++) {
-          try {
-            const { data: doc } = await supabase.from('knowledge_base').insert([{
-              title: `${video.title} — Part ${c + 1}`,
-              content: chunks[c],
-              type: 'video',
-              source: 'YouTube Channel Import',
-              client_id: clientId || null,
-              status: 'trained',
-              notes: aiMember || 'All Team',
-            }]).select().single();
-            if (doc) {
-              const embRes = await axios.post(
-                'https://api.openai.com/v1/embeddings',
-                { input: chunks[c].substring(0, 500), model: 'text-embedding-3-small' },
-                { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' } }
-              );
-              await supabase.from('knowledge_base').update({ embedding: embRes.data.data[0].embedding }).eq('id', doc.id);
-              job.chunksAdded++;
-              saved++;
-            }
-            await new Promise(r => setTimeout(r, 150));
-          } catch (e) {
-            console.error(`Chunk error:`, e.message);
+    // Phase 1: Fetch transcripts in parallel batches of 10
+    const TRANSCRIPT_BATCH = 10;
+    const videoChunksMap = [];
+
+    for (let i = 0; i < qualifying.length; i += TRANSCRIPT_BATCH) {
+      const batch = qualifying.slice(i, i + TRANSCRIPT_BATCH);
+      log(`Fetching transcripts ${i + 1}–${Math.min(i + TRANSCRIPT_BATCH, qualifying.length)} of ${qualifying.length}...`);
+
+      const results = await Promise.all(batch.map(async (video) => {
+        try {
+          const transcript = await YoutubeTranscript.fetchTranscript(
+            `https://www.youtube.com/watch?v=${video.videoId}`
+          );
+          const text = transcript.map(t => t.text).join(' ').trim();
+          if (!text || text.length < 100) return { video, chunks: null };
+          const chunkSize = 1000, overlap = 100;
+          const chunks = [];
+          for (let pos = 0; pos < text.length; pos += chunkSize - overlap) {
+            const chunk = text.substring(pos, pos + chunkSize);
+            if (chunk.trim().length > 50) chunks.push(chunk);
           }
+          return { video, chunks };
+        } catch (e) {
+          return { video, chunks: null, error: e.message };
         }
+      }));
+
+      for (const r of results) {
+        if (r.error) log(`  ↳ "${r.video.title}" — Error: ${r.error}`);
+        else if (!r.chunks) log(`  ↳ "${r.video.title}" — No transcript`);
+        else videoChunksMap.push(r);
         job.videosProcessed++;
-        log(`  ↳ Saved ${saved} chunks to knowledge base`);
+      }
+    }
+
+    log(`Transcripts done. ${videoChunksMap.length} videos with content.`);
+
+    // Flatten all chunks into one array for batch processing
+    const allChunks = [];
+    for (const { video, chunks } of videoChunksMap) {
+      for (let c = 0; c < chunks.length; c++) {
+        allChunks.push({
+          row: {
+            title: `${video.title} — Part ${c + 1}`,
+            content: chunks[c],
+            type: 'video',
+            source: 'YouTube Channel Import',
+            client_id: clientId || null,
+            status: 'trained',
+            notes: aiMember || 'All Team',
+          },
+          content: chunks[c],
+        });
+      }
+    }
+
+    // Phase 2: Insert in batches of 50
+    const INSERT_BATCH = 50;
+    log(`Inserting ${allChunks.length} chunks in batches of ${INSERT_BATCH}...`);
+    const insertedDocs = [];
+    for (let i = 0; i < allChunks.length; i += INSERT_BATCH) {
+      const batch = allChunks.slice(i, i + INSERT_BATCH);
+      try {
+        const { data: docs } = await supabase.from('knowledge_base').insert(batch.map(c => c.row)).select();
+        if (docs) {
+          docs.forEach((doc, idx) => insertedDocs.push({ id: doc.id, content: batch[idx].content }));
+        }
       } catch (e) {
-        log(`  ↳ Error: ${e.message} — skipped`);
-        job.videosProcessed++;
+        console.error('Batch insert error:', e.message);
+      }
+    }
+
+    // Phase 3: Generate embeddings in batches of 20 (OpenAI supports array input)
+    const EMBED_BATCH = 20;
+    log(`Generating embeddings for ${insertedDocs.length} chunks in batches of ${EMBED_BATCH}...`);
+    for (let i = 0; i < insertedDocs.length; i += EMBED_BATCH) {
+      const batch = insertedDocs.slice(i, i + EMBED_BATCH);
+      try {
+        const embRes = await axios.post(
+          'https://api.openai.com/v1/embeddings',
+          { input: batch.map(d => d.content.substring(0, 500)), model: 'text-embedding-3-small' },
+          { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' } }
+        );
+        await Promise.all(batch.map((doc, idx) =>
+          supabase.from('knowledge_base').update({ embedding: embRes.data.data[idx].embedding }).eq('id', doc.id)
+        ));
+        job.chunksAdded += batch.length;
+        log(`  ↳ Embedded chunks ${i + 1}–${Math.min(i + EMBED_BATCH, insertedDocs.length)} of ${insertedDocs.length}`);
+      } catch (e) {
+        console.error('Batch embed error:', e.message);
       }
     }
 
