@@ -1,8 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../supabase';
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState('profile');
   const [saved, setSaved] = useState(false);
+  const [clients, setClients] = useState([]);
+  const [emailConfig, setEmailConfig] = useState({});
+  const [emailSaving, setEmailSaving] = useState(null);
+  const [emailSaved, setEmailSaved] = useState(null);
 
   const [profile, setProfile] = useState({
     businessName: 'Sales Scales',
@@ -44,11 +49,31 @@ export default function Settings() {
     auditFee: 300,
   });
 
+  useEffect(() => {
+    supabase.from('clients').select('id, name, from_email, from_name').order('name').then(({ data }) => {
+      if (!data) return;
+      setClients(data);
+      const cfg = {};
+      data.forEach(c => { cfg[c.id] = { from_email: c.from_email || '', from_name: c.from_name || '' }; });
+      setEmailConfig(cfg);
+    });
+  }, []);
+
+  const saveEmailConfig = async (clientId) => {
+    setEmailSaving(clientId);
+    const { from_email, from_name } = emailConfig[clientId] || {};
+    await supabase.from('clients').update({ from_email: from_email || null, from_name: from_name || null }).eq('id', clientId);
+    setEmailSaving(null);
+    setEmailSaved(clientId);
+    setTimeout(() => setEmailSaved(null), 2000);
+  };
+
   const tabs = [
     { id: 'profile', label: 'Business Profile', icon: '🏢' },
     { id: 'notifications', label: 'Notifications', icon: '🔔' },
     { id: 'integrations', label: 'Integrations', icon: '🔌' },
     { id: 'pricing', label: 'Pricing', icon: '💰' },
+    { id: 'email-domains', label: 'Email Domains', icon: '📧' },
     { id: 'ai', label: 'AI Team', icon: '🤖' },
     { id: 'security', label: 'Security', icon: '🔒' },
   ];
@@ -242,6 +267,59 @@ export default function Settings() {
                     <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', fontWeight: 600, flexShrink: 0 }}>● Active</span>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* EMAIL DOMAINS */}
+          {activeTab === 'email-domains' && (
+            <div>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628', marginBottom: '6px' }}>Per-Client Email Sender</div>
+              <div style={{ fontSize: '11px', color: '#8896a8', marginBottom: '20px', lineHeight: '1.6' }}>
+                Set a custom From email and name for each client. Emails sent via sequences and workflows will use these instead of the default SendGrid address. The from_email must be verified in SendGrid.
+              </div>
+              {clients.length === 0 && (
+                <div style={{ fontSize: '12px', color: '#8896a8', textAlign: 'center', padding: '40px 0' }}>No clients found.</div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {clients.map(client => {
+                  const cfg = emailConfig[client.id] || { from_email: '', from_name: '' };
+                  const isSaving = emailSaving === client.id;
+                  const isDone = emailSaved === client.id;
+                  return (
+                    <div key={client.id} style={{ background: '#f8fafc', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '14px 16px' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', marginBottom: '12px' }}>{client.name}</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '10px', alignItems: 'end' }}>
+                        <div>
+                          <label style={labelStyle}>From Email</label>
+                          <input
+                            type="email"
+                            value={cfg.from_email}
+                            onChange={e => setEmailConfig(prev => ({ ...prev, [client.id]: { ...prev[client.id], from_email: e.target.value } }))}
+                            placeholder="hello@clientbrand.com"
+                            style={inputStyle}
+                          />
+                        </div>
+                        <div>
+                          <label style={labelStyle}>From Name</label>
+                          <input
+                            type="text"
+                            value={cfg.from_name}
+                            onChange={e => setEmailConfig(prev => ({ ...prev, [client.id]: { ...prev[client.id], from_name: e.target.value } }))}
+                            placeholder="Client Brand"
+                            style={inputStyle}
+                          />
+                        </div>
+                        <button
+                          onClick={() => saveEmailConfig(client.id)}
+                          disabled={isSaving}
+                          style={{ background: isDone ? '#10b981' : '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 16px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', transition: 'background 0.2s' }}>
+                          {isSaving ? 'Saving...' : isDone ? '✓ Saved' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

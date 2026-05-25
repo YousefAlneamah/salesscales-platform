@@ -98,7 +98,7 @@ YOUTUBE_API_KEY=            # YouTube Data API v3 — bulk channel import (serve
 
 | Table | Purpose |
 |-------|---------|
-| `clients` | Agency clients (ecommerce stores). Fields: `id, name, business_type, niche, tier, status, health_score` |
+| `clients` | Agency clients (ecommerce stores). Fields: `id, name, business_type, niche, tier, status, health_score, from_email, from_name` |
 | `client_users` | Login credentials for client portal. Fields: `id, name, email, password, client_id, last_login` |
 | `contacts` | CRM contacts. Fields: `id, first_name, last_name, email, phone, source, channel, pipeline_stage, client_id, shopify_customer_id, last_activity, status` |
 | `pipeline_deals` | Sales pipeline deals. Fields: `id, value, stage, client_id` |
@@ -262,6 +262,8 @@ Auth state stored in `localStorage` as `"user"` key containing `{ name, email, r
 **Team briefings context injection**: `getBriefingsContext(memberName)` runs in `Promise.all` alongside `ragSearch` in every AI team endpoint. The two strings are joined with `'\n\n'` and filtered for empty values before being passed as context.
 
 **Client onboarding gate**: `App.js` checks `client_onboarding.completed_at` for client-role users before rendering. `null` = loading, `false` = show `ClientOnboardingFlow`, `true` = show `ClientDashboard`.
+
+**Per-client email sender**: `getClientSender(clientId)` helper in server.js queries `clients.from_email` and `clients.from_name`. Falls back to `SENDGRID_FROM_EMAIL` env var if the client has none configured. Called at all 5 email-sending spots: `enrollContactInWorkflow` helper, scheduler cron, `/send-email`, `/execute-step`, and `/enroll-contact` endpoint. Configured per client in Settings → Email Domains tab.
 
 **Models in use**:
 - `claude-sonnet-4-6` — all 6 AI team member endpoints (via `aiCall` helper)

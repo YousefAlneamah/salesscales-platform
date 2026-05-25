@@ -129,6 +129,21 @@ const getBriefingsContext = async (memberName) => {
   }
 };
 
+// ─── HELPER: GET CLIENT EMAIL SENDER ─────────────────────
+const getClientSender = async (clientId) => {
+  const fallback = { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' };
+  if (!clientId) return fallback;
+  try {
+    const { data: client } = await supabase.from('clients').select('from_email, from_name').eq('id', clientId).maybeSingle();
+    return {
+      email: client?.from_email || fallback.email,
+      name: client?.from_name || fallback.name,
+    };
+  } catch {
+    return fallback;
+  }
+};
+
 // ─── HELPER: ENROLL CONTACT IN WORKFLOW ──────────────────
 const enrollContactInWorkflow = async (workflowId, contactId, clientId, contactEmail, contactPhone, contactName) => {
   const { data: steps } = await supabase.from('workflow_steps')
@@ -164,9 +179,10 @@ const enrollContactInWorkflow = async (workflowId, contactId, clientId, contactE
         to: 'whatsapp:' + contactPhone
       });
     } else if (firstStep.step_type === 'email' && contactEmail) {
+      const sender = await getClientSender(clientId);
       await sgMail.send({
         to: contactEmail,
-        from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+        from: sender,
         subject: firstStep.subject || 'Message for you',
         html: `<p>${firstStep.content.replace('{{first_name}}', contactName || 'there')}</p>`
       });
@@ -369,9 +385,10 @@ cron.schedule('*/15 * * * *', async () => {
 
       } else if (currentStep.step_type === 'email' && contact.email && currentStep.content) {
         try {
+          const sender = await getClientSender(enrollment.client_id);
           await sgMail.send({
             to: contact.email,
-            from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+            from: sender,
             subject: currentStep.subject || 'Message for you',
             html: `<p>${currentStep.content.replace('{{first_name}}', contact.first_name || 'there')}</p>`
           });
@@ -915,10 +932,11 @@ app.post('/send-whatsapp', async (req, res) => {
 
 // ─── SEND EMAIL ───────────────────────────────────────────
 app.post('/send-email', async (req, res) => {
-  const { to, subject, html, from, fromName } = req.body;
+  const { to, subject, html, from, fromName, clientId } = req.body;
   if (!to || !subject || !html) return res.status(400).json({ error: 'Missing to, subject, or html' });
   try {
-    await sgMail.send({ to, from: { email: from || process.env.SENDGRID_FROM_EMAIL, name: fromName || 'Sales Scales' }, subject, html });
+    const fallbackSender = await getClientSender(clientId);
+    await sgMail.send({ to, from: { email: from || fallbackSender.email, name: fromName || fallbackSender.name }, subject, html });
     console.log('Email sent to:', to);
     res.json({ success: true, message: 'Email sent successfully' });
   } catch (e) {
@@ -929,7 +947,7 @@ app.post('/send-email', async (req, res) => {
 
 // ─── EXECUTE WORKFLOW STEP ────────────────────────────────
 app.post('/execute-step', async (req, res) => {
-  const { stepType, to, subject, message, contactName, clientName } = req.body;
+  const { stepType, to, subject, message, contactName, clientName, clientId } = req.body;
   if (!to || !message) return res.status(400).json({ error: 'Missing to or message' });
   try {
     if (stepType === 'sms') {
@@ -941,7 +959,8 @@ app.post('/execute-step', async (req, res) => {
       const result = await client.messages.create({ body: message, from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER, to: 'whatsapp:' + to });
       res.json({ success: true, channel: 'whatsapp', sid: result.sid });
     } else if (stepType === 'email') {
-      await sgMail.send({ to, from: { email: process.env.SENDGRID_FROM_EMAIL, name: clientName || 'Sales Scales' }, subject: subject || 'Message from ' + (clientName || 'Sales Scales'), html: `<p>Hi ${contactName || 'there'},</p><p>${message}</p>` });
+      const sender = await getClientSender(clientId);
+      await sgMail.send({ to, from: { email: sender.email, name: clientName || sender.name }, subject: subject || 'Message from ' + (clientName || sender.name), html: `<p>Hi ${contactName || 'there'},</p><p>${message}</p>` });
       res.json({ success: true, channel: 'email' });
     } else {
       res.json({ success: true, channel: stepType, note: 'Channel logged' });
@@ -973,7 +992,8 @@ app.post('/enroll-contact', async (req, res) => {
         const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await twilioClient.messages.create({ body: firstStep.content.replace('{{first_name}}', contactName || 'there'), from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER, to: 'whatsapp:' + contactPhone });
       } else if (firstStep.step_type === 'email' && contactEmail) {
-        await sgMail.send({ to: contactEmail, from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' }, subject: firstStep.subject || 'Message for you', html: `<p>${firstStep.content.replace('{{first_name}}', contactName || 'there')}</p>` });
+        const sender = await getClientSender(clientId);
+        await sgMail.send({ to: contactEmail, from: sender, subject: firstStep.subject || 'Message for you', html: `<p>${firstStep.content.replace('{{first_name}}', contactName || 'there')}</p>` });
       }
       await supabase.from('messages').insert([{ client_id: clientId, contact_id: contactId, channel: firstStep.step_type, direction: 'outbound', sender_name: 'Sales Scales AI', content: firstStep.content, status: 'sent' }]);
     }
