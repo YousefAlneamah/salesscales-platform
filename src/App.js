@@ -74,6 +74,7 @@ const navItems = [
     { id: "reports", label: "Reports", icon: "ti-file-analytics" },
     { id: "casestudies", label: "Case Studies", icon: "ti-trophy" },
     { id: "revenue-dashboard", label: "Revenue Dashboard", icon: "ti-cash" },
+    { id: "store-audit", label: "Store Audit", icon: "ti-search" },
   ]},
   { group: "PLATFORM", items: [
     { id: "onboarding", label: "Onboarding", icon: "ti-rocket" },
@@ -112,6 +113,7 @@ const pageTitles = {
   reports: "Reports",
   casestudies: "Case Studies",
   "revenue-dashboard": "Revenue Dashboard",
+  "store-audit": "Store Audit Tool",
   onboarding: "Onboarding",
   marketplace: "Marketplace",
   whitelabel: "White Label",
@@ -197,6 +199,7 @@ function App() {
       case "reports": return <Reports />;
       case "casestudies": return <CaseStudies />;
       case "revenue-dashboard": return <RevenueDashboard />;
+      case "store-audit": return <AuditTool />;
       case "onboarding": return <Onboarding />;
       case "marketplace": return <Marketplace />;
       case "whitelabel": return <WhiteLabel />;
