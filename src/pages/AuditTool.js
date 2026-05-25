@@ -203,9 +203,24 @@ Be specific, be direct, think like a revenue strategist. This audit is used by S
 
   const copyPitch = () => {
     if (!report?.pitchAngle) return;
-    navigator.clipboard.writeText(report.pitchAngle);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const text = report.pitchAngle;
+    const confirm = () => { setCopied(true); setTimeout(() => setCopied(false), 2000); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(confirm).catch(() => fallbackCopy(text, confirm));
+    } else {
+      fallbackCopy(text, confirm);
+    }
+  };
+
+  const fallbackCopy = (text, onSuccess) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try { document.execCommand('copy'); onSuccess(); } catch {}
+    document.body.removeChild(ta);
   };
 
   const reset = () => { setReport(null); setError(null); setUrl(''); setNiche(''); };
