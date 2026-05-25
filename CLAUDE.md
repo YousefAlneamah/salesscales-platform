@@ -148,6 +148,7 @@ Single Express file, port 3001. All AI calls go through the `aiCall()` helper wh
 | GET  | `/revenue/stats` | Revenue stats — pipeline deals, enrollment conversion rates, per-client and per-channel breakdowns |
 | POST | `/team/brief` | Create a team briefing from one AI member to another — inserts into `team_briefings` |
 | GET  | `/team/briefings` | Fetch all briefings; filter by `?recipient=` or `?sender=` query params |
+| POST | `/test/trigger-webhook` | Simulate a Shopify abandoned cart webhook for a given `email`, `client_id`, and `first_name`. Runs the full flow end-to-end: verify client → find/create contact → find active cart_abandoned workflow → enroll contact → fire first step. Returns `{ ok, log[], contact_id, enrollment_id, workflow }` with a step-by-step log of every action taken. |
 
 ### AI Team Endpoints (6 members, all identical pattern)
 

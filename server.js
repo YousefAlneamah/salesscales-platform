@@ -1883,6 +1883,134 @@ app.get('/revenue/stats', async (req, res) => {
   }
 });
 
+// ─── TEST: SIMULATE ABANDONED CART WEBHOOK ───────────────
+app.post('/test/trigger-webhook', async (req, res) => {
+  const { email, client_id, first_name } = req.body;
+  const log = [];
+  const step = (msg, data) => {
+    const entry = { msg, ...(data ? { data } : {}) };
+    log.push(entry);
+    console.log(`[TEST WEBHOOK] ${msg}`, data ? JSON.stringify(data) : '');
+  };
+
+  if (!email || !client_id) {
+    return res.status(400).json({ ok: false, error: 'email and client_id are required', log });
+  }
+
+  step('Starting abandoned cart webhook simulation', { email, client_id, first_name });
+
+  try {
+    // Step 1: Verify client exists
+    const { data: client } = await supabase.from('clients').select('id, name').eq('id', client_id).maybeSingle();
+    if (!client) {
+      step('ERROR: Client not found', { client_id });
+      return res.status(404).json({ ok: false, error: 'Client not found', log });
+    }
+    step('Client verified', { name: client.name });
+
+    // Step 2: Find or create contact
+    let { data: contact } = await supabase.from('contacts')
+      .select('*').eq('email', email).eq('client_id', client_id).maybeSingle();
+
+    if (contact) {
+      step('Existing contact found', { id: contact.id, name: contact.first_name, email: contact.email });
+    } else {
+      const { data: newContact, error: insertErr } = await supabase.from('contacts').insert([{
+        first_name: first_name || '',
+        last_name: '',
+        email,
+        phone: '',
+        source: 'Test',
+        channel: 'Email',
+        pipeline_stage: 'New Lead',
+        client_id,
+        last_activity: new Date().toISOString()
+      }]).select().single();
+      if (insertErr || !newContact) {
+        step('ERROR: Failed to create contact', { error: insertErr?.message });
+        return res.status(500).json({ ok: false, error: 'Failed to create contact', log });
+      }
+      contact = newContact;
+      step('New contact created', { id: contact.id, email: contact.email });
+    }
+
+    // Step 3: Find active cart_abandoned workflow
+    const { data: workflows } = await supabase.from('workflows')
+      .select('id, name, trigger_type, status')
+      .eq('client_id', client_id)
+      .eq('trigger_type', 'cart_abandoned')
+      .eq('status', 'active');
+
+    if (!workflows || workflows.length === 0) {
+      step('ERROR: No active cart_abandoned workflow found for this client', { client_id });
+      return res.status(404).json({ ok: false, error: 'No active cart_abandoned workflow for this client. Create a workflow with trigger_type = cart_abandoned and status = active.', log });
+    }
+
+    const workflow = workflows[0];
+    step('Workflow found', { id: workflow.id, name: workflow.name, trigger_type: workflow.trigger_type });
+
+    // Step 4: Load workflow steps for preview
+    const { data: steps } = await supabase.from('workflow_steps')
+      .select('step_order, step_type, subject, content, wait_hours')
+      .eq('workflow_id', workflow.id)
+      .order('step_order');
+    step(`Workflow has ${steps?.length || 0} steps`, (steps || []).map(s => ({
+      order: s.step_order, type: s.step_type,
+      subject: s.subject || null,
+      wait_hours: s.wait_hours || null
+    })));
+
+    // Step 5: Enroll contact (fires first step immediately)
+    const firstStep = steps?.[0];
+    step('Enrolling contact and firing first step', {
+      step_type: firstStep?.step_type,
+      subject: firstStep?.subject || null,
+      to: contact.email
+    });
+
+    const enrollment = await enrollContactInWorkflow(
+      workflow.id, contact.id, client_id,
+      contact.email, contact.phone, contact.first_name
+    );
+
+    if (!enrollment) {
+      step('Enrollment skipped — contact is already actively enrolled in this workflow');
+      return res.json({ ok: true, skipped: true, reason: 'already_enrolled', log });
+    }
+
+    step('Contact enrolled successfully', { enrollment_id: enrollment.id });
+
+    // Step 6: Log activity
+    await supabase.from('activity').insert([{
+      contact_id: contact.id, client_id,
+      type: 'test_webhook',
+      description: `Test webhook: cart_abandoned — enrolled in "${workflow.name}"`,
+      created_at: new Date().toISOString()
+    }]);
+    step('Activity logged');
+
+    // Step 7: Confirm first step result
+    const emailSent = firstStep?.step_type === 'email' && contact.email;
+    const smsSent = firstStep?.step_type === 'sms' && contact.phone;
+    const wasSent = firstStep?.step_type === 'whatsapp' && contact.phone;
+    const wasWait = firstStep?.step_type === 'wait';
+
+    if (emailSent) step('First step: email fired', { to: contact.email, subject: firstStep.subject });
+    else if (smsSent) step('First step: SMS fired', { to: contact.phone });
+    else if (wasSent) step('First step: WhatsApp fired', { to: contact.phone });
+    else if (wasWait) step('First step: wait — no message sent yet, scheduler will advance on schedule');
+    else step('First step: no message sent (missing contact info or unhandled step type)');
+
+    step('Test complete — full flow executed successfully');
+    res.json({ ok: true, contact_id: contact.id, enrollment_id: enrollment.id, workflow: workflow.name, log });
+
+  } catch (e) {
+    step('FATAL ERROR', { message: e.message });
+    console.error('[TEST WEBHOOK] Fatal:', e.message);
+    res.status(500).json({ ok: false, error: e.message, log });
+  }
+});
+
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');
