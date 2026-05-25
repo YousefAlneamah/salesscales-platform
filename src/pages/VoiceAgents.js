@@ -71,6 +71,14 @@ export default function VoiceAgents() {
     }
   };
 
+  const errStr = (data, fallback) => {
+    const d = data.details || data.error || data.message;
+    if (!d) return fallback;
+    if (typeof d === 'string') return d;
+    if (d.message && typeof d.message === 'string') return d.message;
+    return JSON.stringify(d);
+  };
+
   const saveAgent = async (type) => {
     setSaving(true);
     setTestResult(null);
@@ -95,7 +103,7 @@ export default function VoiceAgents() {
         else setOutbound(p => ({ ...p, agentId: data.agentId }));
         setTestResult({ ok: true, message: `${type === 'inbound' ? 'Inbound' : 'Outbound'} agent saved. Agent ID: ${data.agentId}` });
       } else {
-        setTestResult({ ok: false, message: data.details || data.error || 'Failed to save agent' });
+        setTestResult({ ok: false, message: errStr(data, 'Failed to save agent') });
       }
     } catch {
       setTestResult({ ok: false, message: 'Failed to connect to server.' });
@@ -118,7 +126,7 @@ export default function VoiceAgents() {
       if (data.success) {
         setTestResult({ ok: true, message: `Call initiated to ${testPhone}!${data.callId ? ` Call ID: ${data.callId}` : ''}` });
       } else {
-        setTestResult({ ok: false, message: data.details || data.error || 'Failed to initiate call' });
+        setTestResult({ ok: false, message: errStr(data, 'Failed to initiate call') });
       }
     } catch {
       setTestResult({ ok: false, message: 'Call failed — check ElevenLabs + Twilio configuration.' });
