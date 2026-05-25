@@ -19,6 +19,9 @@ const supabase = createClient(
   process.env.REACT_APP_SUPABASE_ANON_KEY
 );
 
+// In-memory store for channel import jobs
+const importJobs = new Map();
+
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -980,6 +983,240 @@ app.get('/team/briefings', async (req, res) => {
     console.error('Briefings fetch error:', e.message);
     res.status(500).json({ error: 'Failed to fetch briefings', details: e.message });
   }
+});
+
+// ─── YOUTUBE CHANNEL IMPORT ──────────────────────────────
+
+const resolveChannelId = async (channelUrl) => {
+  // Direct channel ID: /channel/UCxxxxx
+  const directMatch = channelUrl.match(/youtube\.com\/channel\/(UC[\w-]+)/);
+  if (directMatch) return directMatch[1];
+
+  // Handle: /@handle or /c/name or /user/name
+  const handleMatch = channelUrl.match(/youtube\.com\/@([\w.-]+)/);
+  if (handleMatch) {
+    const res = await axios.get('https://www.googleapis.com/youtube/v3/channels', {
+      params: { part: 'id', forHandle: handleMatch[1], key: process.env.YOUTUBE_API_KEY }
+    });
+    return res.data.items?.[0]?.id || null;
+  }
+  const customMatch = channelUrl.match(/youtube\.com\/(?:c|user)\/([\w.-]+)/);
+  if (customMatch) {
+    const res = await axios.get('https://www.googleapis.com/youtube/v3/channels', {
+      params: { part: 'id', forUsername: customMatch[1], key: process.env.YOUTUBE_API_KEY }
+    });
+    return res.data.items?.[0]?.id || null;
+  }
+  return null;
+};
+
+const fetchChannelVideos = async (channelId) => {
+  // Get uploads playlist ID first (more reliable than search)
+  const chRes = await axios.get('https://www.googleapis.com/youtube/v3/channels', {
+    params: { part: 'contentDetails', id: channelId, key: process.env.YOUTUBE_API_KEY }
+  });
+  const uploadsId = chRes.data.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+  if (!uploadsId) return [];
+
+  const videos = [];
+  let nextPageToken = null;
+  do {
+    const params = { part: 'snippet', playlistId: uploadsId, maxResults: 50, key: process.env.YOUTUBE_API_KEY };
+    if (nextPageToken) params.pageToken = nextPageToken;
+    const res = await axios.get('https://www.googleapis.com/youtube/v3/playlistItems', { params });
+    for (const item of res.data.items || []) {
+      const vid = item.snippet.resourceId?.videoId;
+      if (vid) videos.push({
+        videoId: vid,
+        title: item.snippet.title,
+        description: (item.snippet.description || '').substring(0, 400),
+        publishedAt: item.snippet.publishedAt,
+      });
+    }
+    nextPageToken = res.data.nextPageToken || null;
+  } while (nextPageToken && videos.length < 500);
+
+  return videos;
+};
+
+const scoreVideosWithClaude = async (videos) => {
+  const BATCH = 15;
+  const scored = [];
+  for (let i = 0; i < videos.length; i += BATCH) {
+    const batch = videos.slice(i, i + BATCH);
+    const list = batch.map((v, idx) =>
+      `${idx + 1}. "${v.title}" — ${v.description.substring(0, 150)}`
+    ).join('\n');
+    try {
+      const res = await axios.post(
+        'https://api.anthropic.com/v1/messages',
+        {
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 200,
+          system: 'You are a content relevance scorer for an ecommerce sales agency. Return ONLY a JSON array of integers (1-10), one per video, in order. No explanation.',
+          messages: [{ role: 'user', content: `Score each video 1-10 for relevance to ecommerce sales, email/SMS marketing, paid ads, copywriting, customer retention, or business growth. Return ONLY a JSON array like [8,3,9,...] — ${batch.length} numbers:\n\n${list}` }]
+        },
+        { headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' } }
+      );
+      const text = res.data.content[0].text.trim();
+      const arrMatch = text.match(/\[[\d\s,]+\]/);
+      const scores = arrMatch ? JSON.parse(arrMatch[0]) : [];
+      batch.forEach((v, idx) => scored.push({ ...v, score: scores[idx] ?? 0 }));
+    } catch (e) {
+      batch.forEach(v => scored.push({ ...v, score: 0 }));
+    }
+    await new Promise(r => setTimeout(r, 400));
+  }
+  return scored;
+};
+
+const runChannelImport = async (jobId, channelUrl, clientId, aiMember) => {
+  const job = importJobs.get(jobId);
+  const log = (msg) => {
+    job.log.push({ time: new Date().toISOString(), msg });
+    console.log(`[Import ${jobId.slice(0, 6)}] ${msg}`);
+  };
+
+  try {
+    log('Resolving channel URL...');
+    const channelId = await resolveChannelId(channelUrl.trim());
+    if (!channelId) throw new Error('Cannot resolve channel ID. Check URL format — try https://youtube.com/@ChannelName');
+    log(`Channel resolved → ${channelId}`);
+
+    log('Fetching video list from YouTube Data API...');
+    const videos = await fetchChannelVideos(channelId);
+    if (videos.length === 0) throw new Error('No videos found on this channel. Check the API key and channel URL.');
+    job.videosQueued = videos.length;
+    log(`Found ${videos.length} videos. Scoring all for relevance with Claude Haiku...`);
+
+    const scored = await scoreVideosWithClaude(videos);
+    const qualifying = scored.filter(v => v.score >= 7);
+    job.videos = scored;
+    log(`Scoring complete. ${qualifying.length} of ${scored.length} videos scored 7+ and will be imported.`);
+
+    for (let i = 0; i < qualifying.length; i++) {
+      const video = qualifying[i];
+      log(`[${i + 1}/${qualifying.length}] "${video.title}" (score: ${video.score}/10) — fetching transcript...`);
+      try {
+        const transcript = await YoutubeTranscript.fetchTranscript(
+          `https://www.youtube.com/watch?v=${video.videoId}`
+        );
+        const text = transcript.map(t => t.text).join(' ').trim();
+        if (!text || text.length < 100) {
+          log(`  ↳ No transcript — skipped`);
+          job.videosProcessed++;
+          continue;
+        }
+        const chunkSize = 1000;
+        const overlap = 100;
+        const chunks = [];
+        for (let pos = 0; pos < text.length; pos += chunkSize - overlap) {
+          const chunk = text.substring(pos, pos + chunkSize);
+          if (chunk.trim().length > 50) chunks.push(chunk);
+        }
+        log(`  ↳ ${text.length} chars → ${chunks.length} chunks → embedding...`);
+        let saved = 0;
+        for (let c = 0; c < chunks.length; c++) {
+          try {
+            const { data: doc } = await supabase.from('knowledge_base').insert([{
+              title: `${video.title} — Part ${c + 1}`,
+              content: chunks[c],
+              type: 'video',
+              source: 'YouTube Channel Import',
+              client_id: clientId || null,
+              status: 'trained',
+              notes: aiMember || 'All Team',
+            }]).select().single();
+            if (doc) {
+              const embRes = await axios.post(
+                'https://api.openai.com/v1/embeddings',
+                { input: chunks[c].substring(0, 500), model: 'text-embedding-3-small' },
+                { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' } }
+              );
+              await supabase.from('knowledge_base').update({ embedding: embRes.data.data[0].embedding }).eq('id', doc.id);
+              job.chunksAdded++;
+              saved++;
+            }
+            await new Promise(r => setTimeout(r, 150));
+          } catch (e) {
+            console.error(`Chunk error:`, e.message);
+          }
+        }
+        job.videosProcessed++;
+        log(`  ↳ Saved ${saved} chunks to knowledge base`);
+      } catch (e) {
+        log(`  ↳ Error: ${e.message} — skipped`);
+        job.videosProcessed++;
+      }
+    }
+
+    job.status = 'complete';
+    log(`✅ Done — ${job.videosProcessed} videos processed, ${job.chunksAdded} chunks added to knowledge base.`);
+    setTimeout(() => importJobs.delete(jobId), 3_600_000); // clean up after 1h
+  } catch (e) {
+    job.status = 'error';
+    job.error = e.message;
+    log(`❌ ${e.message}`);
+  }
+};
+
+app.post('/knowledge/import-channel', async (req, res) => {
+  const { channelUrl, clientId, aiMember } = req.body;
+  if (!channelUrl) return res.status(400).json({ error: 'Missing channelUrl' });
+  if (!process.env.YOUTUBE_API_KEY) return res.status(500).json({ error: 'YOUTUBE_API_KEY not set in environment' });
+
+  const jobId = crypto.randomBytes(8).toString('hex');
+  importJobs.set(jobId, {
+    status: 'running',
+    log: [],
+    videos: [],
+    videosQueued: 0,
+    videosProcessed: 0,
+    chunksAdded: 0,
+    error: null,
+  });
+
+  res.json({ jobId });
+
+  runChannelImport(jobId, channelUrl, clientId, aiMember).catch(e => {
+    const job = importJobs.get(jobId);
+    if (job) { job.status = 'error'; job.error = e.message; }
+  });
+});
+
+app.get('/knowledge/import-channel/progress', (req, res) => {
+  const { jobId } = req.query;
+  const job = importJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  let lastLogIdx = 0;
+
+  const push = () => {
+    const newLogs = job.log.slice(lastLogIdx);
+    lastLogIdx = job.log.length;
+    res.write(`data: ${JSON.stringify({
+      status: job.status,
+      newLogs,
+      videos: job.videos,
+      videosQueued: job.videosQueued,
+      videosProcessed: job.videosProcessed,
+      chunksAdded: job.chunksAdded,
+      error: job.error,
+    })}\n\n`);
+    if (job.status === 'complete' || job.status === 'error') {
+      clearInterval(timer);
+      res.end();
+    }
+  };
+
+  push();
+  const timer = setInterval(push, 1000);
+  req.on('close', () => clearInterval(timer));
 });
 
 // ─── AI TEAM ENDPOINTS ────────────────────────────────────

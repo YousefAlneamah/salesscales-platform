@@ -90,6 +90,7 @@ TWILIO_AUTH_TOKEN=
 TWILIO_PHONE_NUMBER=        # +1... format
 SENDGRID_API_KEY=
 SENDGRID_FROM_EMAIL=        # Verified sender address
+YOUTUBE_API_KEY=            # YouTube Data API v3 — bulk channel import (server-side only)
 ```
 
 ## Supabase Tables
