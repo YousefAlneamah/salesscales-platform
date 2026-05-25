@@ -159,10 +159,35 @@ Be specific, be direct, think like a revenue strategist. This audit is used by S
       const data = await res.json();
       if (!data.result) throw new Error('No response from Hussain');
 
-      const jsonMatch = data.result.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error('Could not parse audit report — response was not valid JSON');
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (typeof parsed.totalScore !== 'number') throw new Error('Audit report missing required fields');
+      // Strip markdown code fences, then extract outermost JSON object
+      const cleaned = data.result
+        .replace(/```json\s*/gi, '')
+        .replace(/```\s*/g, '')
+        .trim();
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('Hussain returned a response but no JSON was found. Try running the audit again.');
+
+      let parsed;
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch {
+        // Last-resort: try to fix truncated JSON by closing open braces
+        const raw = jsonMatch[0];
+        const opens = (raw.match(/\{/g) || []).length;
+        const closes = (raw.match(/\}/g) || []).length;
+        const padded = raw + '}'.repeat(Math.max(0, opens - closes));
+        try {
+          parsed = JSON.parse(padded);
+        } catch {
+          throw new Error('The audit response contained malformed JSON. Please try again — Hussain occasionally formats responses differently.');
+        }
+      }
+
+      // Ensure minimum viable shape — fill missing fields with safe defaults
+      parsed.totalScore = typeof parsed.totalScore === 'number' ? parsed.totalScore
+        : ['email','cartAbandonment','sms','social','ads'].reduce((s, k) => s + (parsed[k]?.score || 0), 0);
+      parsed.grade = parsed.grade || (parsed.totalScore >= 86 ? 'A+' : parsed.totalScore >= 76 ? 'A' : parsed.totalScore >= 66 ? 'B' : parsed.totalScore >= 56 ? 'C' : parsed.totalScore >= 41 ? 'D' : 'F');
+      parsed.storeName = parsed.storeName || trimmed;
 
       setReport(parsed);
 
