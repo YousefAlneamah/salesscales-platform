@@ -110,6 +110,8 @@ YOUTUBE_API_KEY=            # YouTube Data API v3 — bulk channel import (serve
 | `knowledge_base` | RAG documents. Fields: `id, title, content, type, source, client_id, status, notes (AI member assignment), embedding (vector), created_at` |
 | `shopify_connections` | OAuth tokens per shop. Fields: `id, shop, access_token, client_id, scope, created_at` |
 | `activity` | Contact activity log. Fields: `id, contact_id, client_id, type, description, created_at` |
+| `client_onboarding` | Client questionnaire answers. Fields: `id, client_id, store_url, monthly_revenue, average_order_value, main_products, brand_voice, target_customer, biggest_challenge, current_tools (array), main_competitors, goals, created_at, completed_at`. One row per client (`onConflict: 'client_id'`). |
+| `team_briefings` | AI team member cross-briefings. Fields: `id, from_member, to_member, subject, content, priority (normal/high/urgent/low), status (unread/read), created_at`. |
 
 ### Supabase RPC Functions
 
@@ -144,6 +146,8 @@ Single Express file, port 3001. All AI calls go through the `aiCall()` helper wh
 | GET | `/shopify/callback` | Complete Shopify OAuth, save token |
 | POST | `/shopify/sync-customers` | Pull customers from Shopify → contacts table |
 | GET  | `/revenue/stats` | Revenue stats — pipeline deals, enrollment conversion rates, per-client and per-channel breakdowns |
+| POST | `/team/brief` | Create a team briefing from one AI member to another — inserts into `team_briefings` |
+| GET  | `/team/briefings` | Fetch all briefings; filter by `?recipient=` or `?sender=` query params |
 
 ### AI Team Endpoints (6 members, all identical pattern)
 
@@ -164,7 +168,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 
 `node-cron` runs every 15 minutes. Finds `workflow_enrollments` with `status = 'active'` and `next_step_at <= now`. Processes `wait`, `sms`, `whatsapp`, and `email` step types. Pauses enrollment on inbound SMS or WhatsApp reply. Completes enrollment when all steps are done.
 
-## All Pages (37 total)
+## All Pages (40 total)
 
 ### Authentication
 - **Login** (`Login.js`) — owner hardcoded credentials, client login via `client_users` table
@@ -174,7 +178,6 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 - **Dashboard** (`Dashboard.js`) — owner overview, stats from all tables
 - **Clients** (`Clients.js`) — agency client management
 - **Contacts** (`Contacts.js`) — CRM contacts, pipeline stages
-- **AuditTool** (`AuditTool.js`) — enter a Shopify URL, AI audits the store, returns score + pitch
 - **Analytics** (`Analytics.js`) — platform analytics
 
 ### AI TEAM Group
@@ -184,18 +187,19 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 - **Mahdi** (`Mahdi.js`) — chat interface for Marketing & Content AI
 - **Fatima** (`Fatima.js`) — chat interface for Operations Manager AI
 - **Zainab** (`Zainab.js`) — chat interface for Client Partner AI
+- **TeamBriefings** (`TeamBriefings.js`) — create and view briefings between AI team members; briefings are injected into each member's context on every chat request
 
 ### CLIENT MGMT Group
 - **Approvals** (`Approvals.js`) — content approval queue
-- **Sequences** (`Sequences.js`) — workflow/sequence builder with step editor
+- **Sequences** (`Sequences.js`) — workflow/sequence builder; step types: email, sms, whatsapp, wait, tag, pipeline, notify
 - **Pipeline** (`Pipeline.js`) — deals pipeline view
-- **Inbox** (`Inbox.js`) — unified inbox (SMS + email), AI reply generation
-- **KnowledgeBase** (`KnowledgeBase.js`) — RAG document manager, PDF upload, YouTube import, semantic search
+- **Inbox** (`Inbox.js`) — unified inbox with channel filter tabs: All, Email, SMS, WhatsApp, Instagram, Facebook; AI reply generation
+- **KnowledgeBase** (`KnowledgeBase.js`) — RAG document manager, PDF upload, YouTube bulk channel import (SSE progress), semantic search
 
 ### INTEGRATIONS Group
 - **Shopify** (`Shopify.js`) — connect stores via OAuth, sync customers
 - **SocialMedia** (`SocialMedia.js`) — social media management
-- **VoiceAgents** (`VoiceAgents.js`) — AI voice agent configuration
+- **VoiceAgents** (`VoiceAgents.js`) — ElevenLabs voice agent config; inbound + outbound agents, test call panel. Error details from API are always coerced to string via `errStr()` helper before rendering.
 - **Integrations** (`Integrations.js`) — all third-party integrations hub
 
 ### SALES SCALES Group
@@ -203,19 +207,27 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 - **SocialAutomation** (`SocialAutomation.js`) — DM / social automation
 - **Reports** (`Reports.js`) — reporting and analytics
 - **CaseStudies** (`CaseStudies.js`) — case study library
-- **RevenueDashboard** (`RevenueDashboard.js`) — revenue stats: by channel, sequence type, top sequences, per-client breakdown
+- **RevenueDashboard** (`RevenueDashboard.js`) — revenue stats: by channel, sequence type, top sequences, per-client breakdown. Calls `GET /revenue/stats`.
+- **AuditTool** (`AuditTool.js`) — full AI-powered store audit at route `store-audit`. Sends a structured JSON prompt to `/hussain`, parses the response (strips markdown fences, brace-padding recovery, safe defaults), and displays a scored report across 5 categories (email/cart abandonment/SMS/social/ads, each /20, total /100 with letter grade). Includes animated loading steps, localStorage audit history (last 5), and copy-to-clipboard pitch with execCommand fallback.
 
 ### PLATFORM Group
-- **Onboarding** (`Onboarding.js`) — client onboarding flows
+- **Onboarding** (`Onboarding.js`) — admin view of all `client_onboarding` responses (expandable rows, stats)
 - **Marketplace** (`Marketplace.js`) — service/tool marketplace
 - **WhiteLabel** (`WhiteLabel.js`) — white-label configuration
 - **Settings** (`Settings.js`) — platform settings
+
+### Authentication / Onboarding Flow
+- **ClientOnboardingFlow** (`ClientOnboardingFlow.js`) — full-screen 4-step questionnaire shown to clients on first login before the dashboard. Stores answers in `client_onboarding` table. Shown when `client_onboarding.completed_at` is null.
 
 Also imported but routed via `case "ai"`: **AIEngine** (`AIEngine.js`) — legacy Zainab AI Engine page.
 
 ## Navigation Structure
 
 Sidebar is defined inline in `App.js` as the `navItems` array, grouped into: MAIN, AI TEAM, CLIENT MGMT, INTEGRATIONS, SALES SCALES, PLATFORM.
+
+Current SALES SCALES nav items: My Pipeline (`mypipeline`), Social Automation (`socialautomation`), Reports (`reports`), Case Studies (`casestudies`), Revenue Dashboard (`revenue-dashboard`), Store Audit (`store-audit`).
+
+The old `audit` route (MAIN group) has been removed — `store-audit` is the only audit entry point.
 
 State management is `useState` in `App.js` — `currentPage` string drives which component renders. No React Router `<Route>` — single-page switch statement in `renderPage()`.
 
@@ -241,7 +253,17 @@ Auth state stored in `localStorage` as `"user"` key containing `{ name, email, r
 
 **No React Router** — navigation is a `currentPage` string + switch statement in App.js.
 
+**AI JSON parsing from team endpoints**: When asking an AI team endpoint (e.g. `/hussain`) to return JSON, strip markdown code fences before parsing: `result.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()`. Extract the JSON object with `/\{[\s\S]*\}/`. If `JSON.parse` fails, attempt brace-padding recovery (count `{` vs `}`, append missing `}`). Always fill missing fields with safe defaults rather than throwing.
+
+**Clipboard copy pattern**: Try `navigator.clipboard.writeText(text).then(...).catch(...)` first. Fallback: create a `<textarea>`, append to body off-screen, select, `document.execCommand('copy')`, then remove.
+
+**WhatsApp via Twilio**: Always prefix both `from` and `to` with `whatsapp:` — e.g. `from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER, to: 'whatsapp:' + phone`. The inbound webhook strips the prefix with `.replace('whatsapp:', '')` before looking up the contact by phone.
+
+**Team briefings context injection**: `getBriefingsContext(memberName)` runs in `Promise.all` alongside `ragSearch` in every AI team endpoint. The two strings are joined with `'\n\n'` and filtered for empty values before being passed as context.
+
+**Client onboarding gate**: `App.js` checks `client_onboarding.completed_at` for client-role users before rendering. `null` = loading, `false` = show `ClientOnboardingFlow`, `true` = show `ClientDashboard`.
+
 **Models in use**:
 - `claude-sonnet-4-6` — all 6 AI team member endpoints (via `aiCall` helper)
-- `claude-haiku-4-5-20251001` — audit, generate-reply, generate-embedding (utility, fast/cheap)
+- `claude-haiku-4-5-20251001` — audit (legacy `/audit` endpoint), generate-reply, generate-embedding (utility, fast/cheap)
 - `text-embedding-3-small` — all embeddings (OpenAI)
