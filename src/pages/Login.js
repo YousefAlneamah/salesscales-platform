@@ -20,30 +20,36 @@ export default function Login({ onLogin }) {
       return;
     }
 
-    // Client login
+    // Client login — two queries to avoid join dependency on FK constraints
     try {
-      const { data, error: dbError } = await supabase
+      const { data: clientUser } = await supabase
         .from("client_users")
-        .select("*, clients(id, name, business_type, niche, tier, status, health_score)")
+        .select("id, name, email, client_id")
         .eq("email", email)
         .eq("password", password)
-        .single();
+        .maybeSingle();
 
-      if (dbError || !data) {
+      if (!clientUser) {
         setError("Invalid email or password. Please try again.");
         setLoading(false);
         return;
       }
 
-      await supabase.from("client_users").update({ last_login: new Date().toISOString() }).eq("id", data.id);
+      const { data: client } = await supabase
+        .from("clients")
+        .select("name, tier")
+        .eq("id", clientUser.client_id)
+        .maybeSingle();
+
+      await supabase.from("client_users").update({ last_login: new Date().toISOString() }).eq("id", clientUser.id);
 
       const user = {
-        name: data.name,
-        email: data.email,
+        name: clientUser.name,
+        email: clientUser.email,
         role: "client",
-        clientId: data.client_id,
-        clientName: data.clients?.name || "Your Store",
-        tier: data.clients?.tier || "starter"
+        clientId: clientUser.client_id,
+        clientName: client?.name || "Your Store",
+        tier: client?.tier || "starter"
       };
 
       localStorage.setItem("user", JSON.stringify(user));
