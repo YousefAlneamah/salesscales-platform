@@ -1034,7 +1034,7 @@ const fetchChannelVideos = async (channelId) => {
       });
     }
     nextPageToken = res.data.nextPageToken || null;
-  } while (nextPageToken && videos.length < 500);
+  } while (nextPageToken && videos.length < 10000);
 
   return videos;
 };
