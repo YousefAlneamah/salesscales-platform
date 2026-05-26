@@ -1883,7 +1883,12 @@ app.get('/revenue/stats', async (req, res) => {
   }
 });
 
-// ─── TEST: SIMULATE ABANDONED CART WEBHOOK ───────────────
+// ─── TEST ENDPOINTS ───────────────────────────────────────
+// Hit GET /test/ping first — if it 404s, the server process is stale and needs restart.
+app.get('/test/ping', (req, res) => {
+  res.json({ ok: true, msg: 'Server is running the current build', ts: new Date().toISOString() });
+});
+
 app.post('/test/trigger-webhook', async (req, res) => {
   const { email, client_id, first_name } = req.body;
   const log = [];
