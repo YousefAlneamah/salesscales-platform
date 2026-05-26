@@ -21,6 +21,7 @@ import Integrations from "./pages/Integrations";
 import ShopifyData from "./pages/ShopifyData";
 import KlaviyoStats from "./pages/KlaviyoStats";
 import MetaAds from "./pages/MetaAds";
+import Transcribe from "./pages/Transcribe";
 import MyPipeline from "./pages/MyPipeline";
 import SocialAutomation from "./pages/SocialAutomation";
 import Reports from "./pages/Reports";
@@ -82,6 +83,7 @@ const navItems = [
     { id: "store-audit", label: "Store Audit", icon: "ti-search" },
   ]},
   { group: "PLATFORM", items: [
+    { id: "transcribe", label: "Transcribe", icon: "ti-microphone-2" },
     { id: "onboarding", label: "Onboarding", icon: "ti-rocket" },
     { id: "marketplace", label: "Marketplace", icon: "ti-building-store" },
     { id: "whitelabel", label: "White Label", icon: "ti-tag" },
@@ -121,6 +123,7 @@ const pageTitles = {
   casestudies: "Case Studies",
   "revenue-dashboard": "Revenue Dashboard",
   "store-audit": "Store Audit Tool",
+  transcribe: "Call Transcription",
   onboarding: "Onboarding",
   marketplace: "Marketplace",
   whitelabel: "White Label",
@@ -209,6 +212,7 @@ function App() {
       case "casestudies": return <CaseStudies />;
       case "revenue-dashboard": return <RevenueDashboard />;
       case "store-audit": return <AuditTool />;
+      case "transcribe": return <Transcribe />;
       case "onboarding": return <Onboarding />;
       case "marketplace": return <Marketplace />;
       case "whitelabel": return <WhiteLabel />;

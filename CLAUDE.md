@@ -147,6 +147,8 @@ Single Express file, port 3001. All AI calls go through the `aiCall()` helper wh
 | POST | `/shopify/sync-customers` | Pull customers from Shopify → contacts table |
 | POST | `/shopify/store-data` | Fetch live data from a client's connected Shopify store — total orders, month revenue, month order count, abandoned checkouts count, top 8 products by revenue, 10 most recent orders. Uses stored access token from `shopify_connections`. |
 | GET  | `/analytics/stats` | Month-specific platform stats — emails/SMS/WhatsApp sent, contacts added, workflow enrollments, active sequences. Uses Supabase `count: 'exact'` queries with `monthStart` filter. Also returns all-time totals for contacts, active enrollments, pipeline value. |
+| POST | `/whisper/transcribe` | Transcribe an audio file using OpenAI Whisper. Accepts `{ audio_base64, filename, mime_type }`. Converts base64 to Buffer, sends as multipart/form-data to `https://api.openai.com/v1/audio/transcriptions` with `model: whisper-1`. Returns `{ text }`. Max 25 MB. Uses `form-data` npm package for multipart construction. |
+| POST | `/competitor/analyze` | Competitor intelligence via Hussain. Accepts `{ facebook_page_url, client_id? }`. Runs RAG search for context, then calls `aiCall()` with Hussain's persona to produce a structured report: positioning, target audience, price tier, marketing channels, weaknesses, and Sales Scales winning angles. Returns `{ analysis }`. |
 | POST | `/meta/ad-stats` | Fetch Meta Ads performance for a client. Accepts `{ client_id }` — looks up `meta_access_token` and `meta_ad_account_id` from clients table. 2 parallel Meta Graph API v21.0 calls: account-level insights (spend, impressions, clicks, CTR, purchase ROAS) and top-5 ads by spend at ad level. Returns `{ spend, impressions, clicks, ctr, roas, topAds[] }`. 400 if credentials not configured; 401 on invalid token (error code 190/102). |
 | POST | `/klaviyo/stats` | Fetch Klaviyo email performance for a client. Accepts `{ client_id, api_key? }` — looks up `klaviyo_api_key` from clients table if `api_key` not provided. 3 parallel calls: campaigns list, lists (with profile_count), and 30-day aggregate report. Returns `{ openRate, clickRate, revenue, totalLists, totalSubscribers, lists, recentCampaigns }`. Auth: `Klaviyo-API-Key {key}` header, revision `2024-10-15`. 401/403 returns `{ error: 'Invalid Klaviyo API key' }`. |
 | GET  | `/revenue/stats` | Revenue stats — pipeline deals, enrollment conversion rates, per-client and per-channel breakdowns |
@@ -174,7 +176,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 
 `node-cron` runs every 15 minutes. Finds `workflow_enrollments` with `status = 'active'` and `next_step_at <= now`. Processes `wait`, `sms`, `whatsapp`, and `email` step types. Pauses enrollment on inbound SMS or WhatsApp reply. Completes enrollment when all steps are done.
 
-## All Pages (42 total)
+## All Pages (43 total)
 
 ### Authentication
 - **Login** (`Login.js`) — owner hardcoded credentials, client login via `client_users` table
@@ -220,6 +222,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 - **AuditTool** (`AuditTool.js`) — full AI-powered store audit at route `store-audit`. Sends a structured JSON prompt to `/hussain`, parses the response (strips markdown fences, brace-padding recovery, safe defaults), and displays a scored report across 5 categories (email/cart abandonment/SMS/social/ads, each /20, total /100 with letter grade). Includes animated loading steps, localStorage audit history (last 5), and copy-to-clipboard pitch with execCommand fallback.
 
 ### PLATFORM Group
+- **Transcribe** (`Transcribe.js`) — Sales call transcription tool at route `transcribe` (icon `ti-microphone-2`). Drag-and-drop or click-to-browse audio file upload (MP3, WAV, M4A, OGG, FLAC, max 25 MB). Reads file as base64 via FileReader, POSTs to `/whisper/transcribe`, displays full transcript with word count and copy button. Gold tip box guides user to add transcript to Knowledge Base → Ali.
 - **Onboarding** (`Onboarding.js`) — admin view of all `client_onboarding` responses (expandable rows, stats)
 - **Marketplace** (`Marketplace.js`) — service/tool marketplace
 - **WhiteLabel** (`WhiteLabel.js`) — white-label configuration

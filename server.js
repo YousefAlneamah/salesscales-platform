@@ -2184,6 +2184,61 @@ app.get('/revenue/dashboard', async (req, res) => {
   }
 });
 
+// ─── WHISPER TRANSCRIPTION ────────────────────────────────
+app.post('/whisper/transcribe', async (req, res) => {
+  const { audio_base64, filename, mime_type } = req.body;
+  if (!audio_base64) return res.status(400).json({ error: 'audio_base64 required' });
+  try {
+    const FormData = require('form-data');
+    const audioBuffer = Buffer.from(audio_base64, 'base64');
+    const form = new FormData();
+    form.append('file', audioBuffer, {
+      filename: filename || 'recording.mp3',
+      contentType: mime_type || 'audio/mpeg',
+    });
+    form.append('model', 'whisper-1');
+    const { data } = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        ...form.getHeaders(),
+      },
+      maxBodyLength: 25 * 1024 * 1024,
+    });
+    res.json({ text: data.text || '' });
+  } catch (e) {
+    console.error('Whisper transcribe error:', e.message);
+    res.status(500).json({ error: 'Transcription failed', details: e.response?.data?.error?.message || e.message });
+  }
+});
+
+// ─── COMPETITOR ANALYSIS ──────────────────────────────────
+app.post('/competitor/analyze', async (req, res) => {
+  const { facebook_page_url, client_id } = req.body;
+  if (!facebook_page_url) return res.status(400).json({ error: 'facebook_page_url required' });
+  try {
+    const ragContext = await ragSearch(`competitor analysis ecommerce agency positioning`, client_id);
+    const analysis = await aiCall(
+      `You are Hussain, Intelligence & Strategy AI for Sales Scales — a high-ticket ecommerce growth agency. You are a sharp, data-driven analyst with a founder mindset. You never break character.`,
+      `Analyze this competitor based on their Facebook page URL: ${facebook_page_url}
+
+Provide a structured competitive intelligence report covering:
+1. Likely brand positioning and core value proposition
+2. Target audience and customer segments
+3. Estimated price point and market tier (budget / mid-market / premium / high-ticket)
+4. Probable marketing channels, ad style, and messaging tone
+5. Key weaknesses and vulnerabilities we can exploit
+6. Strategic angles for Sales Scales to win against them
+
+Be direct, specific, and actionable. Think like a founder preparing for battle.`,
+      ragContext
+    );
+    res.json({ analysis });
+  } catch (e) {
+    console.error('Competitor analyze error:', e.message);
+    res.status(500).json({ error: 'Analysis failed', details: e.message });
+  }
+});
+
 // ─── META MCP ─────────────────────────────────────────────
 app.post('/meta/ad-stats', async (req, res) => {
   const { client_id } = req.body;
