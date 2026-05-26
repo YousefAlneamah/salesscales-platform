@@ -172,7 +172,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 
 `node-cron` runs every 15 minutes. Finds `workflow_enrollments` with `status = 'active'` and `next_step_at <= now`. Processes `wait`, `sms`, `whatsapp`, and `email` step types. Pauses enrollment on inbound SMS or WhatsApp reply. Completes enrollment when all steps are done.
 
-## All Pages (40 total)
+## All Pages (41 total)
 
 ### Authentication
 - **Login** (`Login.js`) — owner hardcoded credentials, client login via `client_users` table
@@ -205,6 +205,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 - **ShopifyData** (`ShopifyData.js`) — live store data dashboard at route `shopify-data`. Client selector → fetches `/shopify/store-data` → shows 4 stat cards (monthly revenue, total orders, month orders, abandoned checkouts), recent orders table, top products by revenue with progress bars, and an Ask Hussain AI panel that has real store data in context.
 - **SocialMedia** (`SocialMedia.js`) — social media management
 - **VoiceAgents** (`VoiceAgents.js`) — ElevenLabs voice agent config; inbound + outbound agents, test call panel. Error details from API are always coerced to string via `errStr()` helper before rendering.
+- **KlaviyoStats** (`KlaviyoStats.js`) — Klaviyo email performance dashboard at route `klaviyo-stats`. Client selector → POST `/klaviyo/stats` → shows 4 stat cards (open rate, click rate, revenue attributed, total subscribers), list breakdown bar chart, recent campaigns table, and industry benchmark comparison panel with visual gauge for open rate and click rate vs industry averages. Auth errors surface a Settings link.
 - **Integrations** (`Integrations.js`) — all third-party integrations hub
 
 ### SALES SCALES Group
