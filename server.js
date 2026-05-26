@@ -2184,6 +2184,140 @@ app.get('/revenue/dashboard', async (req, res) => {
   }
 });
 
+// ─── CASE STUDIES, REFERRALS & SEQUENCE FEEDBACK ─────────
+
+app.post('/casestudies/create', async (req, res) => {
+  try {
+    const { client_id, title, results, timeline } = req.body;
+    if (!title || !results) return res.status(400).json({ error: 'title and results are required' });
+    const { data: client } = await supabase.from('clients').select('name, niche').eq('id', client_id).maybeSingle();
+    const clientName = client?.name || 'the client';
+    const niche = client?.niche || 'ecommerce';
+    const context = await ragSearch(title + ' ' + results, client_id);
+    const caseStudy = await aiCall(
+      `You are Hussain, Intelligence & Strategy AI at Sales Scales. You write compelling, data-driven case studies that showcase client wins. Write professionally and engagingly. Never break character or mention Claude.`,
+      `Write a professional case study for ${clientName} (${niche}).
+Title: ${title}
+Results: ${results}
+Timeline: ${timeline || 'not specified'}
+
+Write with these sections:
+1. Executive Summary (2-3 sentences, lead with the biggest result)
+2. The Challenge (problem before Sales Scales)
+3. Our Strategy (what we implemented — sequences, AI, automation)
+4. Implementation (how we rolled it out)
+5. The Results (specific numbers from the data)
+6. Key Takeaways (3 bullet points)
+7. Client Quote (realistic quote)`,
+      context
+    );
+    const { data, error } = await supabase.from('case_studies').insert([{
+      client_id: client_id || null, title, results, timeline: timeline || null, content: caseStudy, status: 'draft',
+    }]).select();
+    if (error) throw error;
+    res.json({ case_study: data[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/casestudies/list', async (req, res) => {
+  try {
+    const { client_id } = req.query;
+    let query = supabase.from('case_studies').select('*, clients(name)').order('created_at', { ascending: false });
+    if (client_id) query = query.eq('client_id', client_id);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ case_studies: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/referrals/create', async (req, res) => {
+  try {
+    const { referrer_name, referrer_email, referred_business, notes } = req.body;
+    if (!referrer_name || !referred_business) return res.status(400).json({ error: 'referrer_name and referred_business are required' });
+    const { data, error } = await supabase.from('referrals').insert([{
+      referrer_name, referrer_email: referrer_email || null, referred_business, notes: notes || null, status: 'pending',
+    }]).select();
+    if (error) throw error;
+    res.json({ referral: data[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/referrals/list', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('referrals').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ referrals: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch('/referrals/:id/status', async (req, res) => {
+  try {
+    const { status } = req.body;
+    const { data, error } = await supabase.from('referrals').update({ status }).eq('id', req.params.id).select();
+    if (error) throw error;
+    res.json({ referral: data[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/sequences/feedback', async (req, res) => {
+  try {
+    const { workflow_id } = req.body;
+    if (!workflow_id) return res.status(400).json({ error: 'workflow_id is required' });
+    const { data: workflow } = await supabase.from('workflows').select('*, clients(name)').eq('id', workflow_id).maybeSingle();
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' });
+    const [totalR, completedR, cancelledR, activeR, stepsResult] = await Promise.all([
+      supabase.from('workflow_enrollments').select('*', { count: 'exact', head: true }).eq('workflow_id', workflow_id),
+      supabase.from('workflow_enrollments').select('*', { count: 'exact', head: true }).eq('workflow_id', workflow_id).eq('status', 'completed'),
+      supabase.from('workflow_enrollments').select('*', { count: 'exact', head: true }).eq('workflow_id', workflow_id).eq('status', 'cancelled'),
+      supabase.from('workflow_enrollments').select('*', { count: 'exact', head: true }).eq('workflow_id', workflow_id).eq('status', 'active'),
+      supabase.from('workflow_steps').select('*').eq('workflow_id', workflow_id).order('step_order'),
+    ]);
+    const total = totalR.count || 0;
+    const completed = completedR.count || 0;
+    const cancelled = cancelledR.count || 0;
+    const active = activeR.count || 0;
+    const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+    const dropOffRate = total > 0 ? Math.round((cancelled / total) * 100) : 0;
+    const stepList = stepsResult.data || [];
+    const context = await ragSearch(workflow.trigger_type + ' sequence optimization', workflow.client_id);
+    const analysis = await aiCall(
+      `You are Hussain, Intelligence & Strategy AI at Sales Scales. You analyze automation sequence performance and deliver sharp, specific optimization recommendations. Be direct and data-driven. Never break character or mention Claude.`,
+      `Analyze this sequence and provide improvement recommendations:
+
+Sequence: ${workflow.name}
+Client: ${workflow.clients?.name || 'Unknown'}
+Trigger: ${workflow.trigger_type}
+
+Performance:
+- Enrolled: ${total} | Completed: ${completed} (${completionRate}%) | Dropped off: ${cancelled} (${dropOffRate}%) | Active: ${active}
+
+Steps (${stepList.length}):
+${stepList.map((s, i) => `Step ${i + 1}: ${s.step_type.toUpperCase()}${s.step_type === 'wait' ? ` — ${s.wait_hours}h wait` : s.subject ? ` — "${s.subject}"` : ''}`).join('\n') || 'No steps configured'}
+
+Provide:
+1. Performance Grade (A–F with reasoning)
+2. Top 3 Problems hurting performance
+3. Quick Wins (3 immediate changes)
+4. Step-by-step recommendations
+5. 30-Day projection if improvements made`,
+      context
+    );
+    res.json({ analysis, stats: { total, completed, cancelled, active, completionRate, dropOffRate } });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── CONTRACT SYSTEM ──────────────────────────────────────
 const TIER_SERVICE_MAP = {
   starter:    'AI-powered email marketing, SMS campaigns, workflow automation (up to 3 sequences), CRM contact management, monthly analytics report, and access to the full AI team (Hussain, Hassan, Ali, Mahdi, Fatima, Zainab)',

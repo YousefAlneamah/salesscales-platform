@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { supabase } from '../supabase';
 
 export default function Sequences() {
@@ -13,6 +14,10 @@ export default function Sequences() {
   const [triggerType, setTriggerType] = useState('Cart Abandoned');
   const [steps, setSteps] = useState([]);
   const [filterClient, setFilterClient] = useState('All');
+  const [feedbackId, setFeedbackId] = useState(null);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackResult, setFeedbackResult] = useState(null);
+  const [feedbackStats, setFeedbackStats] = useState(null);
 
   const triggers = [
     'Cart Abandoned',
@@ -128,6 +133,24 @@ export default function Sequences() {
 
   const getClientName = (id) => clients.find(c => c.id === id)?.name || '—';
   const filtered = filterClient === 'All' ? workflows : workflows.filter(w => w.client_id === filterClient);
+
+  const getFeedback = async (workflow) => {
+    if (feedbackId === workflow.id && feedbackResult) {
+      setFeedbackId(null); setFeedbackResult(null); setFeedbackStats(null); return;
+    }
+    setFeedbackId(workflow.id);
+    setFeedbackResult(null);
+    setFeedbackStats(null);
+    setFeedbackLoading(true);
+    try {
+      const { data } = await axios.post('http://localhost:3001/sequences/feedback', { workflow_id: workflow.id });
+      setFeedbackResult(data.analysis);
+      setFeedbackStats(data.stats);
+    } catch (_) {
+      setFeedbackResult('Failed to load feedback. Please try again.');
+    }
+    setFeedbackLoading(false);
+  };
 
   const inputStyle = {
     width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px',
@@ -369,9 +392,51 @@ export default function Sequences() {
                   style={{ background: workflow.status === 'active' ? '#fffbeb' : '#ecfdf5', color: workflow.status === 'active' ? '#d97706' : '#059669', border: `1px solid ${workflow.status === 'active' ? '#fde68a' : '#a7f3d0'}`, borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
                   {workflow.status === 'active' ? 'Pause' : 'Activate'}
                 </button>
+                <button onClick={() => getFeedback(workflow)}
+                  style={{ background: feedbackId === workflow.id ? 'rgba(201,168,76,0.1)' : '#f8fafc', color: feedbackId === workflow.id ? '#c9a84c' : '#8896a8', border: `1px solid ${feedbackId === workflow.id ? '#c9a84c' : '#e4e9f0'}`, borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+                  Feedback
+                </button>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* FEEDBACK PANEL */}
+      {feedbackId && (
+        <div style={{ marginTop: '16px', background: '#0a1628', borderRadius: '12px', overflow: 'hidden', border: '1px solid rgba(201,168,76,0.2)' }}>
+          <div style={{ padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '2px' }}>Hussain — Sequence Analysis</div>
+              <div style={{ fontSize: '12px', color: 'white', fontWeight: 600 }}>{workflows.find(w => w.id === feedbackId)?.name}</div>
+            </div>
+            <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+              {feedbackStats && (
+                <>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '18px', fontWeight: 700, color: '#c9a84c' }}>{feedbackStats.completionRate}%</div>
+                    <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)' }}>Completion</div>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '18px', fontWeight: 700, color: 'white' }}>{feedbackStats.total}</div>
+                    <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)' }}>Enrolled</div>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '18px', fontWeight: 700, color: '#ef4444' }}>{feedbackStats.dropOffRate}%</div>
+                    <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)' }}>Drop-off</div>
+                  </div>
+                </>
+              )}
+              <button onClick={() => { setFeedbackId(null); setFeedbackResult(null); setFeedbackStats(null); }}
+                style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: '20px', lineHeight: 1, padding: '0 4px' }}>×</button>
+            </div>
+          </div>
+          <div style={{ padding: '20px', fontSize: '12px', color: 'rgba(255,255,255,0.8)', lineHeight: '1.8', whiteSpace: 'pre-wrap', maxHeight: '380px', overflowY: 'auto' }}>
+            {feedbackLoading
+              ? <div style={{ color: 'rgba(255,255,255,0.3)', textAlign: 'center', padding: '40px 0' }}>Hussain is analyzing this sequence...</div>
+              : feedbackResult
+            }
+          </div>
         </div>
       )}
     </div>

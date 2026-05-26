@@ -37,6 +37,7 @@ import Onboarding from "./pages/Onboarding";
 import Marketplace from "./pages/Marketplace";
 import WhiteLabel from "./pages/WhiteLabel";
 import Settings from "./pages/Settings";
+import Referrals from "./pages/Referrals";
 import ClientDashboard from "./pages/ClientDashboard";
 import ClientOnboardingFlow from "./pages/ClientOnboardingFlow";
 import Hussain from "./pages/Hussain";
@@ -97,6 +98,7 @@ const navItems = [
     { id: "marketplace", label: "Marketplace", icon: "ti-building-store" },
     { id: "whitelabel", label: "White Label", icon: "ti-tag" },
     { id: "contracts", label: "Contracts", icon: "ti-file-text" },
+    { id: "referrals", label: "Referrals", icon: "ti-users" },
     { id: "auto-reports", label: "Auto Reports", icon: "ti-file-report" },
     { id: "billing", label: "Billing", icon: "ti-credit-card" },
     { id: "settings", label: "Settings", icon: "ti-settings" },
@@ -129,6 +131,7 @@ const pageTitles = {
   "canva-design": "Canva Design Studio",
   higgsfield: "Higgsfield Video Briefs",
   contracts: "Client Contracts",
+  referrals: "Referral Tracker",
   "auto-reports": "Automated Monthly Reports",
   billing: "Billing",
   social: "Social Media",
@@ -238,6 +241,7 @@ function App() {
       case "marketplace": return <Marketplace />;
       case "whitelabel": return <WhiteLabel />;
       case "contracts": return <Contracts />;
+      case "referrals": return <Referrals />;
       case "auto-reports": return <AutoReports />;
       case "billing": return <Billing />;
       case "settings": return <Settings />;
