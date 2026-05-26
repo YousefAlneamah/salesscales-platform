@@ -145,6 +145,7 @@ Single Express file, port 3001. All AI calls go through the `aiCall()` helper wh
 | GET | `/shopify/install` | Initiate Shopify OAuth |
 | GET | `/shopify/callback` | Complete Shopify OAuth, save token |
 | POST | `/shopify/sync-customers` | Pull customers from Shopify → contacts table |
+| POST | `/shopify/store-data` | Fetch live data from a client's connected Shopify store — total orders, month revenue, month order count, abandoned checkouts count, top 8 products by revenue, 10 most recent orders. Uses stored access token from `shopify_connections`. |
 | GET  | `/revenue/stats` | Revenue stats — pipeline deals, enrollment conversion rates, per-client and per-channel breakdowns |
 | POST | `/team/brief` | Create a team briefing from one AI member to another — inserts into `team_briefings` |
 | GET  | `/team/briefings` | Fetch all briefings; filter by `?recipient=` or `?sender=` query params |
@@ -199,6 +200,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 
 ### INTEGRATIONS Group
 - **Shopify** (`Shopify.js`) — connect stores via OAuth, sync customers
+- **ShopifyData** (`ShopifyData.js`) — live store data dashboard at route `shopify-data`. Client selector → fetches `/shopify/store-data` → shows 4 stat cards (monthly revenue, total orders, month orders, abandoned checkouts), recent orders table, top products by revenue with progress bars, and an Ask Hussain AI panel that has real store data in context.
 - **SocialMedia** (`SocialMedia.js`) — social media management
 - **VoiceAgents** (`VoiceAgents.js`) — ElevenLabs voice agent config; inbound + outbound agents, test call panel. Error details from API are always coerced to string via `errStr()` helper before rendering.
 - **Integrations** (`Integrations.js`) — all third-party integrations hub
@@ -259,6 +261,8 @@ Auth state stored in `localStorage` as `"user"` key containing `{ name, email, r
 **Clipboard copy pattern**: Try `navigator.clipboard.writeText(text).then(...).catch(...)` first. Fallback: create a `<textarea>`, append to body off-screen, select, `document.execCommand('copy')`, then remove.
 
 **WhatsApp via Twilio**: Always prefix both `from` and `to` with `whatsapp:` — e.g. `from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER, to: 'whatsapp:' + phone`. The inbound webhook strips the prefix with `.replace('whatsapp:', '')` before looking up the contact by phone.
+
+**Shopify live context injection**: `getShopifyContext(clientId)` runs in `Promise.all` alongside `ragSearch` and `getBriefingsContext` in every AI team endpoint. Fetches live orders, revenue, and abandoned checkouts from the client's connected Shopify store. Returns `''` gracefully if no store is connected.
 
 **Team briefings context injection**: `getBriefingsContext(memberName)` runs in `Promise.all` alongside `ragSearch` in every AI team endpoint. The two strings are joined with `'\n\n'` and filtered for empty values before being passed as context.
 

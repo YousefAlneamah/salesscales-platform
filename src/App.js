@@ -18,6 +18,7 @@ import ShopifyWebhooks from "./pages/ShopifyWebhooks";
 import SocialMedia from "./pages/SocialMedia";
 import VoiceAgents from "./pages/VoiceAgents";
 import Integrations from "./pages/Integrations";
+import ShopifyData from "./pages/ShopifyData";
 import MyPipeline from "./pages/MyPipeline";
 import SocialAutomation from "./pages/SocialAutomation";
 import Reports from "./pages/Reports";
@@ -62,6 +63,7 @@ const navItems = [
   ]},
   { group: "INTEGRATIONS", items: [
     { id: "shopify", label: "Shopify", icon: "ti-shopping-cart" },
+    { id: "shopify-data", label: "Store Data", icon: "ti-chart-bar" },
     { id: "shopifywebhooks", label: "Shopify Webhooks", icon: "ti-webhook" },
     { id: "social", label: "Social Media", icon: "ti-social" },
     { id: "voice", label: "Voice Agents", icon: "ti-microphone" },
@@ -102,6 +104,7 @@ const pageTitles = {
   inbox: "Unified Inbox",
   knowledge: "Knowledge Base",
   shopify: "Shopify Stores",
+  "shopify-data": "Live Store Data",
   shopifywebhooks: "Shopify Webhooks",
   social: "Social Media",
   voice: "Voice Agents",
@@ -187,6 +190,7 @@ function App() {
       case "inbox": return <Inbox />;
       case "knowledge": return <KnowledgeBase />;
       case "shopify": return <Shopify />;
+      case "shopify-data": return <ShopifyData />;
       case "shopifywebhooks": return <ShopifyWebhooks />;
       case "social": return <SocialMedia />;
       case "voice": return <VoiceAgents />;

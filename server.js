@@ -144,6 +144,43 @@ const getClientSender = async (clientId) => {
   }
 };
 
+// ─── HELPER: SHOPIFY LIVE STORE CONTEXT ──────────────────
+const getShopifyContext = async (clientId) => {
+  if (!clientId) return '';
+  try {
+    const { data: conn } = await supabase.from('shopify_connections')
+      .select('shop, access_token').eq('client_id', clientId).maybeSingle();
+    if (!conn) return '';
+    const { shop, access_token } = conn;
+    const headers = { 'X-Shopify-Access-Token': access_token, 'Content-Type': 'application/json' };
+    const base = `https://${shop}/admin/api/2026-01`;
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+    const [recentRes, monthRes, countRes, abandonedRes] = await Promise.all([
+      axios.get(`${base}/orders.json?status=any&limit=5&order=created_at+desc`, { headers }),
+      axios.get(`${base}/orders.json?status=any&created_at_min=${monthStart}&limit=250`, { headers }),
+      axios.get(`${base}/orders/count.json?status=any`, { headers }),
+      axios.get(`${base}/checkouts/count.json`, { headers }),
+    ]);
+    const monthOrders = monthRes.data.orders || [];
+    const monthRevenue = monthOrders.reduce((sum, o) => sum + parseFloat(o.total_price || 0), 0);
+    const recentLines = (recentRes.data.orders || []).map(o =>
+      `  - ${o.name} | ${o.email} | $${o.total_price} | ${o.financial_status} | ${new Date(o.created_at).toLocaleDateString()}`
+    );
+    return [
+      `Live Shopify store data for ${shop}:`,
+      `  Total orders (all time): ${countRes.data.count}`,
+      `  Orders this month: ${monthOrders.length}`,
+      `  Revenue this month: $${monthRevenue.toFixed(2)}`,
+      `  Abandoned checkouts: ${abandonedRes.data.count}`,
+      `  5 most recent orders:`,
+      ...recentLines,
+    ].join('\n');
+  } catch (e) {
+    console.log('Shopify context skipped:', e.message);
+    return '';
+  }
+};
+
 // ─── HELPER: ENROLL CONTACT IN WORKFLOW ──────────────────
 const enrollContactInWorkflow = async (workflowId, contactId, clientId, contactEmail, contactPhone, contactName) => {
   const { data: steps } = await supabase.from('workflow_steps')
@@ -699,6 +736,67 @@ app.post('/shopify/sync-customers', async (req, res) => {
   } catch (e) {
     console.error('Sync error:', e.message);
     res.status(500).json({ error: 'Sync failed', details: e.message });
+  }
+});
+
+// ─── SHOPIFY STORE DATA (LIVE) ───────────────────────────
+app.post('/shopify/store-data', async (req, res) => {
+  const { client_id } = req.body;
+  if (!client_id) return res.status(400).json({ error: 'Missing client_id' });
+  try {
+    const { data: conn } = await supabase.from('shopify_connections')
+      .select('*').eq('client_id', client_id).maybeSingle();
+    if (!conn) return res.status(404).json({ error: 'No Shopify store connected for this client' });
+
+    const { shop, access_token } = conn;
+    const headers = { 'X-Shopify-Access-Token': access_token, 'Content-Type': 'application/json' };
+    const base = `https://${shop}/admin/api/2026-01`;
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+
+    const [recentRes, monthRes, totalCountRes, abandonedCountRes] = await Promise.all([
+      axios.get(`${base}/orders.json?status=any&limit=10&order=created_at+desc`, { headers }),
+      axios.get(`${base}/orders.json?status=any&created_at_min=${monthStart}&limit=250`, { headers }),
+      axios.get(`${base}/orders/count.json?status=any`, { headers }),
+      axios.get(`${base}/checkouts/count.json`, { headers }),
+    ]);
+
+    const monthOrders = monthRes.data.orders || [];
+    const monthRevenue = monthOrders.reduce((sum, o) => sum + parseFloat(o.total_price || 0), 0);
+
+    const productMap = {};
+    monthOrders.forEach(order => {
+      (order.line_items || []).forEach(item => {
+        const key = item.product_id || item.title;
+        if (!productMap[key]) productMap[key] = { title: item.title, quantity: 0, revenue: 0 };
+        productMap[key].quantity += item.quantity;
+        productMap[key].revenue += parseFloat(item.price || 0) * item.quantity;
+      });
+    });
+    const topProducts = Object.values(productMap)
+      .sort((a, b) => b.revenue - a.revenue).slice(0, 8);
+
+    const recentOrders = (recentRes.data.orders || []).map(o => ({
+      id: o.id, name: o.name, email: o.email,
+      total: o.total_price, currency: o.currency,
+      financial_status: o.financial_status,
+      fulfillment_status: o.fulfillment_status || 'unfulfilled',
+      item_count: (o.line_items || []).reduce((s, li) => s + li.quantity, 0),
+      created_at: o.created_at,
+    }));
+
+    res.json({
+      shop, connected: true,
+      totalOrders: totalCountRes.data.count,
+      monthOrderCount: monthOrders.length,
+      monthRevenue: parseFloat(monthRevenue.toFixed(2)),
+      abandonedCheckouts: abandonedCountRes.data.count,
+      recentOrders,
+      topProducts,
+      fetchedAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.error('Store data error:', e.message);
+    res.status(500).json({ error: 'Failed to fetch store data', details: e.response?.data || e.message });
   }
 });
 
@@ -1381,11 +1479,12 @@ app.post('/hussain', async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
-    const [ragContext, briefingsCtx] = await Promise.all([
+    const [ragContext, briefingsCtx, shopifyCtx] = await Promise.all([
       ragSearch(prompt, clientId),
-      getBriefingsContext('hussain')
+      getBriefingsContext('hussain'),
+      getShopifyContext(clientId),
     ]);
-    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+    const context = [ragContext, briefingsCtx, shopifyCtx].filter(Boolean).join('\n\n');
     const result = await aiCall(`You are Hussain, the Intelligence and Strategy AI at Sales Scales. You are sharp, data-driven, and think like a founder. You analyze platform data and give direct, actionable insights. You speak in a confident, concise style — no fluff, no filler. You are Hussain — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
@@ -1398,11 +1497,12 @@ app.post('/hassan', async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
-    const [ragContext, briefingsCtx] = await Promise.all([
+    const [ragContext, briefingsCtx, shopifyCtx] = await Promise.all([
       ragSearch(prompt, clientId),
-      getBriefingsContext('hassan')
+      getBriefingsContext('hassan'),
+      getShopifyContext(clientId),
     ]);
-    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+    const context = [ragContext, briefingsCtx, shopifyCtx].filter(Boolean).join('\n\n');
     const result = await aiCall(`You are Hassan, the Growth and Outreach AI at Sales Scales. You are creative, persuasive, and a master of personalized communication. You find prospects, write outreach that converts, follow up strategically, and create content that attracts ecommerce founders. You are Hassan — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
@@ -1415,11 +1515,12 @@ app.post('/ali', async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
-    const [ragContext, briefingsCtx] = await Promise.all([
+    const [ragContext, briefingsCtx, shopifyCtx] = await Promise.all([
       ragSearch(prompt, clientId),
-      getBriefingsContext('ali')
+      getBriefingsContext('ali'),
+      getShopifyContext(clientId),
     ]);
-    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+    const context = [ragContext, briefingsCtx, shopifyCtx].filter(Boolean).join('\n\n');
     const result = await aiCall(`You are Ali, the Sales Closer AI at Sales Scales. You are a master of the NEPQ framework and high ticket closing. You take warm leads and close them with precision. You generate sales strategies, handle objections without flinching, and write call scripts that convert. You are Ali — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
@@ -1432,11 +1533,12 @@ app.post('/mahdi', async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
-    const [ragContext, briefingsCtx] = await Promise.all([
+    const [ragContext, briefingsCtx, shopifyCtx] = await Promise.all([
       ragSearch(prompt, clientId),
-      getBriefingsContext('mahdi')
+      getBriefingsContext('mahdi'),
+      getShopifyContext(clientId),
     ]);
-    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+    const context = [ragContext, briefingsCtx, shopifyCtx].filter(Boolean).join('\n\n');
     const result = await aiCall(`You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world class copywriter and email marketer. You write email sequences, SMS campaigns, and ad copy that converts — all in the exact brand voice of each client. You are Mahdi — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
@@ -1449,11 +1551,12 @@ app.post('/fatima', async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
-    const [ragContext, briefingsCtx] = await Promise.all([
+    const [ragContext, briefingsCtx, shopifyCtx] = await Promise.all([
       ragSearch(prompt, clientId),
-      getBriefingsContext('fatima')
+      getBriefingsContext('fatima'),
+      getShopifyContext(clientId),
     ]);
-    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+    const context = [ragContext, briefingsCtx, shopifyCtx].filter(Boolean).join('\n\n');
     const result = await aiCall(`You are Fatima, the Operations Manager AI at Sales Scales. You are systematic, detail-oriented, and keep everything running smoothly. You monitor platform operations, track client health, identify bottlenecks, and generate operational reports. You are Fatima — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
@@ -1466,11 +1569,12 @@ app.post('/zainab', async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
-    const [ragContext, briefingsCtx] = await Promise.all([
+    const [ragContext, briefingsCtx, shopifyCtx] = await Promise.all([
       ragSearch(prompt, clientId),
-      getBriefingsContext('zainab')
+      getBriefingsContext('zainab'),
+      getShopifyContext(clientId),
     ]);
-    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+    const context = [ragContext, briefingsCtx, shopifyCtx].filter(Boolean).join('\n\n');
     const result = await aiCall(`You are Zainab, the Client Partner AI at Sales Scales. You are warm, professional, and deeply care about client success. You manage client relationships, handle onboarding, write client communications, and ensure every client feels valued and supported. You are Zainab — never identify as anyone else or mention Claude.`, prompt, context);
     res.json({ result });
   } catch (e) {
