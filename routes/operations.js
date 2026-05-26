@@ -1,0 +1,257 @@
+const express = require('express');
+
+const TIER_SERVICE_MAP = {
+  starter:    'AI-powered email marketing, SMS campaigns, workflow automation (up to 3 sequences), CRM contact management, monthly analytics report, and access to the full AI team (Hussain, Hassan, Ali, Mahdi, Fatima, Zainab)',
+  growth:     'Everything in Starter, plus WhatsApp automation, unlimited sequences, Klaviyo integration, Meta Ads reporting, HubSpot CRM sync, weekly strategy calls, and priority AI team support',
+  scale:      'Everything in Growth, plus dedicated account management, voice AI agents, custom workflow builds, Shopify live data integration, Canva & Higgsfield AI design briefs, competitor intelligence, and monthly executive reports',
+  enterprise: 'Fully custom engagement — all platform features, white-label options, custom AI agent training, dedicated infrastructure, and a tailored SLA',
+};
+
+module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken }) => {
+  const router = express.Router();
+
+  // ─── CASE STUDIES ────────────────────────────────────────
+  router.post('/casestudies/create', async (req, res) => {
+    try {
+      const { client_id, title, results, timeline } = req.body;
+      if (!title || !results) return res.status(400).json({ error: 'title and results are required' });
+      const { data: client } = await supabase.from('clients').select('name, niche').eq('id', client_id).maybeSingle();
+      const clientName = client?.name || 'the client';
+      const niche = client?.niche || 'ecommerce';
+      const context = await ragSearch(title + ' ' + results, client_id);
+      const caseStudy = await aiCall(
+        `You are Hussain, Intelligence & Strategy AI at Sales Scales. You write compelling, data-driven case studies that showcase client wins. Write professionally and engagingly. Never break character or mention Claude.`,
+        `Write a professional case study for ${clientName} (${niche}).\nTitle: ${title}\nResults: ${results}\nTimeline: ${timeline || 'not specified'}\n\nWrite with these sections:\n1. Executive Summary (2-3 sentences, lead with the biggest result)\n2. The Challenge (problem before Sales Scales)\n3. Our Strategy (what we implemented — sequences, AI, automation)\n4. Implementation (how we rolled it out)\n5. The Results (specific numbers from the data)\n6. Key Takeaways (3 bullet points)\n7. Client Quote (realistic quote)`,
+        context
+      );
+      const { data, error } = await supabase.from('case_studies').insert([{
+        client_id: client_id || null, title, results, timeline: timeline || null, content: caseStudy, status: 'draft',
+      }]).select();
+      if (error) throw error;
+      res.json({ case_study: data[0] });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.get('/casestudies/list', async (req, res) => {
+    try {
+      const { client_id } = req.query;
+      let query = supabase.from('case_studies').select('*, clients(name)').order('created_at', { ascending: false });
+      if (client_id) query = query.eq('client_id', client_id);
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json({ case_studies: data || [] });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── REFERRALS ───────────────────────────────────────────
+  router.post('/referrals/create', async (req, res) => {
+    try {
+      const { referrer_name, referrer_email, referred_business, notes } = req.body;
+      if (!referrer_name || !referred_business) return res.status(400).json({ error: 'referrer_name and referred_business are required' });
+      const { data, error } = await supabase.from('referrals').insert([{
+        referrer_name, referrer_email: referrer_email || null, referred_business, notes: notes || null, status: 'pending',
+      }]).select();
+      if (error) throw error;
+      res.json({ referral: data[0] });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.get('/referrals/list', async (req, res) => {
+    try {
+      const { data, error } = await supabase.from('referrals').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json({ referrals: data || [] });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.patch('/referrals/:id/status', async (req, res) => {
+    try {
+      const { status } = req.body;
+      const { data, error } = await supabase.from('referrals').update({ status }).eq('id', req.params.id).select();
+      if (error) throw error;
+      res.json({ referral: data[0] });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── SEQUENCES FEEDBACK ──────────────────────────────────
+  router.post('/sequences/feedback', async (req, res) => {
+    try {
+      const { workflow_id } = req.body;
+      if (!workflow_id) return res.status(400).json({ error: 'workflow_id is required' });
+      const { data: workflow } = await supabase.from('workflows').select('*, clients(name)').eq('id', workflow_id).maybeSingle();
+      if (!workflow) return res.status(404).json({ error: 'Workflow not found' });
+      const [totalR, completedR, cancelledR, activeR, stepsResult] = await Promise.all([
+        supabase.from('workflow_enrollments').select('*', { count: 'exact', head: true }).eq('workflow_id', workflow_id),
+        supabase.from('workflow_enrollments').select('*', { count: 'exact', head: true }).eq('workflow_id', workflow_id).eq('status', 'completed'),
+        supabase.from('workflow_enrollments').select('*', { count: 'exact', head: true }).eq('workflow_id', workflow_id).eq('status', 'cancelled'),
+        supabase.from('workflow_enrollments').select('*', { count: 'exact', head: true }).eq('workflow_id', workflow_id).eq('status', 'active'),
+        supabase.from('workflow_steps').select('*').eq('workflow_id', workflow_id).order('step_order'),
+      ]);
+      const total = totalR.count || 0;
+      const completed = completedR.count || 0;
+      const cancelled = cancelledR.count || 0;
+      const active = activeR.count || 0;
+      const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+      const dropOffRate = total > 0 ? Math.round((cancelled / total) * 100) : 0;
+      const stepList = stepsResult.data || [];
+      const context = await ragSearch(workflow.trigger_type + ' sequence optimization', workflow.client_id);
+      const analysis = await aiCall(
+        `You are Hussain, Intelligence & Strategy AI at Sales Scales. You analyze automation sequence performance and deliver sharp, specific optimization recommendations. Be direct and data-driven. Never break character or mention Claude.`,
+        `Analyze this sequence and provide improvement recommendations:\n\nSequence: ${workflow.name}\nClient: ${workflow.clients?.name || 'Unknown'}\nTrigger: ${workflow.trigger_type}\n\nPerformance:\n- Enrolled: ${total} | Completed: ${completed} (${completionRate}%) | Dropped off: ${cancelled} (${dropOffRate}%) | Active: ${active}\n\nSteps (${stepList.length}):\n${stepList.map((s, i) => `Step ${i + 1}: ${s.step_type.toUpperCase()}${s.step_type === 'wait' ? ` — ${s.wait_hours}h wait` : s.subject ? ` — "${s.subject}"` : ''}`).join('\n') || 'No steps configured'}\n\nProvide:\n1. Performance Grade (A–F with reasoning)\n2. Top 3 Problems hurting performance\n3. Quick Wins (3 immediate changes)\n4. Step-by-step recommendations\n5. 30-Day projection if improvements made`,
+        context
+      );
+      res.json({ analysis, stats: { total, completed, cancelled, active, completionRate, dropOffRate } });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── CONTRACTS ───────────────────────────────────────────
+  router.post('/contracts/create', verifyToken, async (req, res) => {
+    const { client_id, tier, monthly_fee, start_date } = req.body;
+    if (!client_id || !tier || !monthly_fee || !start_date)
+      return res.status(400).json({ error: 'client_id, tier, monthly_fee, and start_date are required' });
+
+    try {
+      const { data: client } = await supabase.from('clients').select('id, name, niche').eq('id', client_id).maybeSingle();
+      if (!client) return res.status(404).json({ error: 'Client not found' });
+
+      const services = TIER_SERVICE_MAP[tier.toLowerCase()] || TIER_SERVICE_MAP.starter;
+      const fmtFee = parseFloat(monthly_fee).toLocaleString('en-US', { minimumFractionDigits: 2 });
+      const fmtDate = new Date(start_date).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+
+      const contractText = await aiCall(
+        `You are Zainab, the Client Partner AI at Sales Scales. You draft professional, clear, and legally structured service agreements. You write in formal legal language, are thorough, and ensure both parties are fully protected. Never break character or mention Claude.`,
+        `Generate a complete professional service agreement between Sales Scales (the Agency) and ${client.name} (the Client).\n\nContract Details:\n- Client: ${client.name}${client.niche ? ` (${client.niche} industry)` : ''}\n- Service Tier: ${tier.charAt(0).toUpperCase() + tier.slice(1)} Plan\n- Monthly Fee: $${fmtFee} USD\n- Commencement Date: ${fmtDate}\n- Services Included: ${services}\n\nWrite the full agreement with all of these sections, each clearly headed:\n\n1. PARTIES\n   Full identification: Sales Scales (the Agency, a digital marketing and AI automation company) and ${client.name} (the Client). Include today's date as the agreement date.\n\n2. SERVICES\n   Describe the ${tier} tier services in detail. Be specific about what is and is not included.\n\n3. PAYMENT TERMS\n   Monthly fee of $${fmtFee} USD. Due on the 1st of each calendar month. 5-day grace period. 1.5% monthly late fee on overdue amounts. Payment via bank transfer or agreed method.\n\n4. TERM AND RENEWAL\n   Commences ${fmtDate}. Month-to-month, automatically renewing unless either party provides written notice of cancellation.\n\n5. INTELLECTUAL PROPERTY\n   All client data, brand assets, and existing intellectual property remain the exclusive property of the Client. Sales Scales retains all IP in its platform, AI systems, workflows, and methodologies.\n\n6. CONFIDENTIALITY\n   Mutual non-disclosure covering all business information, strategies, data, and communications. Obligation survives termination indefinitely.\n\n7. PERFORMANCE AND RESULTS\n   Agency commits to best-efforts service delivery. Marketing results depend on many factors outside the Agency's control and are not guaranteed.\n\n8. LIMITATION OF LIABILITY\n   Neither party liable for indirect or consequential damages. Agency's total liability capped at three (3) months of fees paid.\n\n9. TERMINATION\n   Either party may terminate with 30 days written notice. Agency may terminate immediately for non-payment exceeding 15 days. Upon termination, all client data is returned within 14 days.\n\n10. GOVERNING LAW\n    This agreement is governed by the laws of the State of Kuwait. Any disputes shall be resolved through arbitration in Kuwait City.\n\n11. ENTIRE AGREEMENT\n    This agreement constitutes the entire understanding between the parties and supersedes all prior communications, negotiations, and agreements relating to the subject matter.\n\n12. SIGNATURES\n    Include signature blocks for both parties with: Name, Title, Date, Signature lines. Agency signatory: Yousef Al-Neamah, Founder & CEO, Sales Scales.\n\nWrite the full agreement text. Use formal legal language throughout. Do not include any commentary outside the contract itself.`,
+        ''
+      );
+
+      const { data: contract, error: insertErr } = await supabase.from('contracts').insert({
+        client_id, client_name: client.name, tier,
+        monthly_fee: parseFloat(monthly_fee), start_date,
+        status: 'draft', contract_text: contractText,
+      }).select().single();
+
+      if (insertErr) throw insertErr;
+      res.json({ contract });
+    } catch (e) {
+      console.error('contracts/create error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.get('/contracts/list', async (req, res) => {
+    const { client_id } = req.query;
+    try {
+      let q = supabase
+        .from('contracts')
+        .select('id, client_id, client_name, tier, monthly_fee, start_date, status, contract_text, created_at')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (client_id) q = q.eq('client_id', client_id);
+      const { data, error } = await q;
+      if (error) throw error;
+      res.json({ contracts: data || [] });
+    } catch (e) {
+      console.error('contracts/list error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.patch('/contracts/:id/status', async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    const valid = ['draft', 'sent', 'signed', 'cancelled'];
+    if (!valid.includes(status)) return res.status(400).json({ error: `status must be one of: ${valid.join(', ')}` });
+    try {
+      const { data, error } = await supabase.from('contracts').update({ status }).eq('id', id).select().single();
+      if (error) throw error;
+      res.json({ contract: data });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── REPORTS ─────────────────────────────────────────────
+  router.post('/reports/generate', verifyToken, async (req, res) => {
+    const { client_id } = req.body;
+    if (!client_id) return res.status(400).json({ error: 'client_id required' });
+
+    try {
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const period = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+      const { data: client } = await supabase.from('clients').select('id, name, niche, tier').eq('id', client_id).maybeSingle();
+      if (!client) return res.status(404).json({ error: 'Client not found' });
+
+      const [
+        emailRes, smsRes, waRes, contactsRes, enrollRes, seqRes,
+        ragContext, briefingsCtx,
+      ] = await Promise.all([
+        supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', client_id).eq('channel', 'email').eq('direction', 'outbound').gte('created_at', monthStart),
+        supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', client_id).eq('channel', 'sms').eq('direction', 'outbound').gte('created_at', monthStart),
+        supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', client_id).eq('channel', 'whatsapp').eq('direction', 'outbound').gte('created_at', monthStart),
+        supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('client_id', client_id).gte('created_at', monthStart),
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('client_id', client_id).gte('enrolled_at', monthStart),
+        supabase.from('workflows').select('name, enrolled_count').eq('client_id', client_id).eq('status', 'active').order('enrolled_count', { ascending: false }).limit(1),
+        ragSearch(`monthly report ${client.name}`, client_id),
+        getBriefingsContext('zainab'),
+      ]);
+
+      const emailsSent   = emailRes.count   || 0;
+      const smsSent      = smsRes.count     || 0;
+      const whatsappSent = waRes.count      || 0;
+      const contactsAdded = contactsRes.count || 0;
+      const enrollments  = enrollRes.count  || 0;
+      const topSequence  = seqRes.data?.[0]?.name || 'None';
+      const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+
+      const summary = await aiCall(
+        `You are Zainab, the Client Partner AI at Sales Scales. You are warm, professional, and deeply invested in each client's success. You write monthly performance reports that are honest, insightful, and actionable. You celebrate wins, identify opportunities, and provide clear next steps. Your reports feel like they come from a trusted advisor who knows the client's business deeply. Never break character or mention Claude.`,
+        `Write a comprehensive monthly performance report for ${client.name} (${client.niche || 'ecommerce'}) for ${period}.\n\nPerformance Data:\n- Emails sent: ${emailsSent}\n- SMS sent: ${smsSent}\n- WhatsApp messages sent: ${whatsappSent}\n- New contacts added: ${contactsAdded}\n- Workflow enrollments: ${enrollments}\n- Top performing sequence: ${topSequence}\n\nWrite a 5-section report with these exact headings:\n1. MONTHLY OVERVIEW — 2–3 sentences summarising the month's performance in an honest, encouraging tone\n2. CHANNEL PERFORMANCE — specific breakdown of email, SMS, and WhatsApp activity and what the numbers mean\n3. GROWTH & CONTACTS — analysis of new contacts added and the pipeline impact\n4. SEQUENCE PERFORMANCE — commentary on workflow activity and the top sequence\n5. RECOMMENDATIONS FOR NEXT MONTH — 3–5 specific, actionable recommendations Yousef and the team should execute\n\nUse the numbers directly. Be specific. Make the client feel supported and excited about what's coming next month.`,
+        context
+      );
+
+      const { data: report, error: insertErr } = await supabase.from('reports').insert({
+        client_id, period, emails_sent: emailsSent, sms_sent: smsSent,
+        whatsapp_sent: whatsappSent, contacts_added: contactsAdded,
+        workflow_enrollments: enrollments, top_sequence: topSequence, summary,
+      }).select().single();
+
+      if (insertErr) throw insertErr;
+      res.json({ report });
+    } catch (e) {
+      console.error('reports/generate error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.get('/reports/list', async (req, res) => {
+    const { client_id } = req.query;
+    try {
+      let q = supabase.from('reports')
+        .select('id, client_id, period, emails_sent, sms_sent, whatsapp_sent, contacts_added, workflow_enrollments, top_sequence, summary, created_at, clients(name)')
+        .order('created_at', { ascending: false }).limit(100);
+      if (client_id) q = q.eq('client_id', client_id);
+      const { data, error } = await q;
+      if (error) throw error;
+      res.json({ reports: data || [] });
+    } catch (e) {
+      console.error('reports/list error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  return router;
+};
