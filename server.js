@@ -102,7 +102,9 @@ app.post('/auth/login', async (req, res) => {
   try {
     const { data: user } = await supabase.from('users').select('*').eq('email', email.toLowerCase()).maybeSingle();
     if (!user) return res.status(401).json({ error: 'Invalid email or password' });
-    const valid = await bcrypt.compare(password, user.password_hash);
+    const valid = user.password_hash
+      ? await bcrypt.compare(password, user.password_hash)
+      : password === user.password;
     if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
     const token = jwt.sign(
       { id: user.id, email: user.email, name: user.name, role: user.role },
