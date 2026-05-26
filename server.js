@@ -1327,7 +1327,29 @@ app.use('/',        require('./routes/analytics')({ supabase }));
 app.use('/',        require('./routes/integrations')({ supabase, axios, aiCall, ragSearch, getBriefingsContext, verifyToken }));
 app.use('/',        require('./routes/operations')({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken }));
 
+// ─── GLOBAL ERROR HANDLER ─────────────────────────────────
+app.use((err, req, res, next) => {
+  const ts = new Date().toISOString();
+  console.error(`[${ts}] Unhandled error — ${req.method} ${req.path} — ${err.message}`);
+  console.error(err.stack);
+  if (!res.headersSent) {
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');
+});
+
+// ─── PROCESS ERROR HANDLERS ───────────────────────────────
+process.on('uncaughtException', (err) => {
+  console.error(`[${new Date().toISOString()}] uncaughtException — ${err.message}`);
+  console.error(err.stack);
+});
+
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error(`[${new Date().toISOString()}] unhandledRejection — ${msg}`);
+  if (reason instanceof Error) console.error(reason.stack);
 });
