@@ -20,6 +20,7 @@ import VoiceAgents from "./pages/VoiceAgents";
 import Integrations from "./pages/Integrations";
 import ShopifyData from "./pages/ShopifyData";
 import KlaviyoStats from "./pages/KlaviyoStats";
+import MetaAds from "./pages/MetaAds";
 import MyPipeline from "./pages/MyPipeline";
 import SocialAutomation from "./pages/SocialAutomation";
 import Reports from "./pages/Reports";
@@ -67,6 +68,7 @@ const navItems = [
     { id: "shopify-data", label: "Store Data", icon: "ti-chart-bar" },
     { id: "shopifywebhooks", label: "Shopify Webhooks", icon: "ti-webhook" },
     { id: "klaviyo-stats", label: "Klaviyo", icon: "ti-mail-opened" },
+    { id: "meta-ads", label: "Meta Ads", icon: "ti-brand-meta" },
     { id: "social", label: "Social Media", icon: "ti-social" },
     { id: "voice", label: "Voice Agents", icon: "ti-microphone" },
     { id: "integrations", label: "All Integrations", icon: "ti-plug" },
@@ -109,6 +111,7 @@ const pageTitles = {
   "shopify-data": "Live Store Data",
   shopifywebhooks: "Shopify Webhooks",
   "klaviyo-stats": "Klaviyo Email Performance",
+  "meta-ads": "Meta Ads Performance",
   social: "Social Media",
   voice: "Voice Agents",
   integrations: "All Integrations",
@@ -196,6 +199,7 @@ function App() {
       case "shopify-data": return <ShopifyData />;
       case "shopifywebhooks": return <ShopifyWebhooks />;
       case "klaviyo-stats": return <KlaviyoStats />;
+      case "meta-ads": return <MetaAds />;
       case "social": return <SocialMedia />;
       case "voice": return <VoiceAgents />;
       case "integrations": return <Integrations />;

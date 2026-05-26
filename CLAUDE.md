@@ -174,7 +174,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 
 `node-cron` runs every 15 minutes. Finds `workflow_enrollments` with `status = 'active'` and `next_step_at <= now`. Processes `wait`, `sms`, `whatsapp`, and `email` step types. Pauses enrollment on inbound SMS or WhatsApp reply. Completes enrollment when all steps are done.
 
-## All Pages (41 total)
+## All Pages (42 total)
 
 ### Authentication
 - **Login** (`Login.js`) — owner hardcoded credentials, client login via `client_users` table
@@ -208,6 +208,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 - **SocialMedia** (`SocialMedia.js`) — social media management
 - **VoiceAgents** (`VoiceAgents.js`) — ElevenLabs voice agent config; inbound + outbound agents, test call panel. Error details from API are always coerced to string via `errStr()` helper before rendering.
 - **KlaviyoStats** (`KlaviyoStats.js`) — Klaviyo email performance dashboard at route `klaviyo-stats`. Client selector → POST `/klaviyo/stats` → shows 4 stat cards (open rate, click rate, revenue attributed, total subscribers), list breakdown bar chart, recent campaigns table, and industry benchmark comparison panel with visual gauge for open rate and click rate vs industry averages. Auth errors surface a Settings link.
+- **MetaAds** (`MetaAds.js`) — Meta Ads performance dashboard at route `meta-ads`. Client selector → POST `/meta/ad-stats` → 4 stat cards (spend, impressions, CTR, ROAS), ROAS vs benchmark bar chart, spend efficiency panel (CPC, CPM, total spend), top-5 ads table with per-ad spend bar, clicks, CTR, and ROAS badge. Three distinct error states: 400 (credentials not configured → Settings link), 401 (invalid token → Settings link), generic.
 - **Integrations** (`Integrations.js`) — all third-party integrations hub
 
 ### SALES SCALES Group
