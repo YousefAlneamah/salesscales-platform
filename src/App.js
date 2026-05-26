@@ -76,7 +76,7 @@ const navItems = [
     { id: "socialautomation", label: "Social Automation", icon: "ti-device-mobile" },
     { id: "reports", label: "Reports", icon: "ti-file-analytics" },
     { id: "casestudies", label: "Case Studies", icon: "ti-trophy" },
-    { id: "revenue-dashboard", label: "Revenue Dashboard", icon: "ti-cash" },
+    { id: "revenue-dashboard", label: "Revenue Dashboard", icon: "ti-currency-dollar" },
     { id: "store-audit", label: "Store Audit", icon: "ti-search" },
   ]},
   { group: "PLATFORM", items: [

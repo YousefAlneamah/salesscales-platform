@@ -36,7 +36,7 @@ export default function RevenueDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('http://localhost:3001/revenue/stats');
+      const res = await fetch('http://localhost:3001/revenue/dashboard');
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setStats(data);
@@ -115,7 +115,7 @@ export default function RevenueDashboard() {
       <div style={{ background: 'linear-gradient(135deg, #0a1628, #112240)', borderRadius: '12px', padding: '22px 24px', marginBottom: '24px', border: '1px solid rgba(201,168,76,0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
           <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'rgba(201,168,76,0.15)', border: '1.5px solid rgba(201,168,76,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <i className="ti ti-cash" style={{ fontSize: '20px', color: '#c9a84c' }} aria-hidden="true" />
+            <i className="ti ti-currency-dollar" style={{ fontSize: '20px', color: '#c9a84c' }} aria-hidden="true" />
           </div>
           <div>
             <div style={{ fontSize: '16px', fontWeight: 700, color: 'white', marginBottom: '2px' }}>Revenue Dashboard</div>

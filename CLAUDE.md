@@ -149,6 +149,7 @@ Single Express file, port 3001. All AI calls go through the `aiCall()` helper wh
 | GET  | `/analytics/stats` | Month-specific platform stats — emails/SMS/WhatsApp sent, contacts added, workflow enrollments, active sequences. Uses Supabase `count: 'exact'` queries with `monthStart` filter. Also returns all-time totals for contacts, active enrollments, pipeline value. |
 | POST | `/klaviyo/stats` | Fetch Klaviyo email performance for a client. Accepts `{ client_id, api_key? }` — looks up `klaviyo_api_key` from clients table if `api_key` not provided. 3 parallel calls: campaigns list, lists (with profile_count), and 30-day aggregate report. Returns `{ openRate, clickRate, revenue, totalLists, totalSubscribers, lists, recentCampaigns }`. Auth: `Klaviyo-API-Key {key}` header, revision `2024-10-15`. 401/403 returns `{ error: 'Invalid Klaviyo API key' }`. |
 | GET  | `/revenue/stats` | Revenue stats — pipeline deals, enrollment conversion rates, per-client and per-channel breakdowns |
+| GET  | `/revenue/dashboard` | Full revenue dashboard data — same aggregation as `/revenue/stats` but with human-readable trigger labels (Cart Recovery, Post Purchase, Win-Back, Welcome). Returns `{ thisMonth, byChannel, byTrigger, topSequences, byClient, maxRevenue }`. Used by `RevenueDashboard.js`. |
 | POST | `/team/brief` | Create a team briefing from one AI member to another — inserts into `team_briefings` |
 | GET  | `/team/briefings` | Fetch all briefings; filter by `?recipient=` or `?sender=` query params |
 | POST | `/test/trigger-webhook` | Simulate a Shopify abandoned cart webhook for a given `email`, `client_id`, and `first_name`. Runs the full flow end-to-end: verify client → find/create contact → find active cart_abandoned workflow → enroll contact → fire first step. Returns `{ ok, log[], contact_id, enrollment_id, workflow }` with a step-by-step log of every action taken. |
@@ -213,7 +214,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 - **SocialAutomation** (`SocialAutomation.js`) — DM / social automation
 - **Reports** (`Reports.js`) — reporting and analytics
 - **CaseStudies** (`CaseStudies.js`) — case study library
-- **RevenueDashboard** (`RevenueDashboard.js`) — revenue stats: by channel, sequence type, top sequences, per-client breakdown. Calls `GET /revenue/stats`.
+- **RevenueDashboard** (`RevenueDashboard.js`) — revenue stats: by channel (Email/SMS/WhatsApp/Voice with proportional revenue attribution), by sequence type (Cart Recovery/Post Purchase/Win-Back/Welcome with completion rates), top sequences table ranked by conversion rate, per-client breakdown with pipeline bars. Calls `GET /revenue/dashboard`. Nav icon: `ti-currency-dollar`.
 - **AuditTool** (`AuditTool.js`) — full AI-powered store audit at route `store-audit`. Sends a structured JSON prompt to `/hussain`, parses the response (strips markdown fences, brace-padding recovery, safe defaults), and displays a scored report across 5 categories (email/cart abandonment/SMS/social/ads, each /20, total /100 with letter grade). Includes animated loading steps, localStorage audit history (last 5), and copy-to-clipboard pitch with execCommand fallback.
 
 ### PLATFORM Group
