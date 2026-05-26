@@ -98,7 +98,7 @@ YOUTUBE_API_KEY=            # YouTube Data API v3 — bulk channel import (serve
 
 | Table | Purpose |
 |-------|---------|
-| `clients` | Agency clients (ecommerce stores). Fields: `id, name, business_type, niche, tier, status, health_score, from_email, from_name` |
+| `clients` | Agency clients (ecommerce stores). Fields: `id, name, business_type, niche, tier, status, health_score, from_email, from_name, klaviyo_api_key` |
 | `client_users` | Login credentials for client portal. Fields: `id, name, email, password, client_id, last_login` |
 | `contacts` | CRM contacts. Fields: `id, first_name, last_name, email, phone, source, channel, pipeline_stage, client_id, shopify_customer_id, last_activity, status` |
 | `pipeline_deals` | Sales pipeline deals. Fields: `id, value, stage, client_id` |
@@ -147,6 +147,7 @@ Single Express file, port 3001. All AI calls go through the `aiCall()` helper wh
 | POST | `/shopify/sync-customers` | Pull customers from Shopify → contacts table |
 | POST | `/shopify/store-data` | Fetch live data from a client's connected Shopify store — total orders, month revenue, month order count, abandoned checkouts count, top 8 products by revenue, 10 most recent orders. Uses stored access token from `shopify_connections`. |
 | GET  | `/analytics/stats` | Month-specific platform stats — emails/SMS/WhatsApp sent, contacts added, workflow enrollments, active sequences. Uses Supabase `count: 'exact'` queries with `monthStart` filter. Also returns all-time totals for contacts, active enrollments, pipeline value. |
+| POST | `/klaviyo/stats` | Fetch Klaviyo email performance for a client. Accepts `{ client_id, api_key? }` — looks up `klaviyo_api_key` from clients table if `api_key` not provided. 3 parallel calls: campaigns list, lists (with profile_count), and 30-day aggregate report. Returns `{ openRate, clickRate, revenue, totalLists, totalSubscribers, lists, recentCampaigns }`. Auth: `Klaviyo-API-Key {key}` header, revision `2024-10-15`. 401/403 returns `{ error: 'Invalid Klaviyo API key' }`. |
 | GET  | `/revenue/stats` | Revenue stats — pipeline deals, enrollment conversion rates, per-client and per-channel breakdowns |
 | POST | `/team/brief` | Create a team briefing from one AI member to another — inserts into `team_briefings` |
 | GET  | `/team/briefings` | Fetch all briefings; filter by `?recipient=` or `?sender=` query params |

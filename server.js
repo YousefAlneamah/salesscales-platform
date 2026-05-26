@@ -2044,6 +2044,82 @@ app.get('/revenue/stats', async (req, res) => {
   }
 });
 
+// ─── KLAVIYO MCP ──────────────────────────────────────────
+app.post('/klaviyo/stats', async (req, res) => {
+  const { client_id } = req.body;
+  try {
+    let apiKey = req.body.api_key;
+    if (!apiKey && client_id) {
+      const { data: client } = await supabase.from('clients').select('klaviyo_api_key').eq('id', client_id).maybeSingle();
+      apiKey = client?.klaviyo_api_key;
+    }
+    if (!apiKey) return res.status(400).json({ error: 'Klaviyo API key required' });
+
+    const headers = {
+      Authorization: `Klaviyo-API-Key ${apiKey}`,
+      revision: '2024-10-15',
+      'Content-Type': 'application/json',
+    };
+    const base = 'https://a.klaviyo.com/api';
+
+    const [campaignsRes, listsRes, reportRes] = await Promise.all([
+      axios.get(`${base}/campaigns/?filter=equals(messages.channel,'email')&sort=-created_at&page[size]=10`, { headers }).catch(e => ({ error: e })),
+      axios.get(`${base}/lists/?fields[list]=name,profile_count`, { headers }).catch(e => ({ error: e })),
+      axios.post(`${base}/campaign-values-reports/`, {
+        data: {
+          type: 'campaign-values-report',
+          attributes: {
+            timeframe: { key: 'last_30_days' },
+            conversion_metric_id: null,
+            statistics: ['open_rate', 'click_rate', 'revenue'],
+          },
+        },
+      }, { headers }).catch(e => ({ error: e })),
+    ]);
+
+    if (campaignsRes.error || listsRes.error) {
+      const err = campaignsRes.error || listsRes.error;
+      const status = err.response?.status;
+      if (status === 401 || status === 403) return res.status(401).json({ error: 'Invalid Klaviyo API key' });
+      throw err;
+    }
+
+    const campaigns = (campaignsRes.data?.data || []).map(c => ({
+      id: c.id,
+      name: c.attributes?.name || '',
+      status: c.attributes?.status || '',
+      sent_at: c.attributes?.send_time || null,
+    }));
+
+    const lists = (listsRes.data?.data || []).map(l => ({
+      id: l.id,
+      name: l.attributes?.name || '',
+      profile_count: l.attributes?.profile_count || 0,
+    }));
+
+    const stats = reportRes.error ? {} : (reportRes.data?.data?.attributes?.results?.[0]?.statistics || {});
+    const openRate = stats.open_rate != null ? Math.round(stats.open_rate * 100 * 10) / 10 : null;
+    const clickRate = stats.click_rate != null ? Math.round(stats.click_rate * 100 * 10) / 10 : null;
+    const revenue = stats.revenue != null ? stats.revenue : null;
+
+    res.json({
+      ok: true,
+      openRate,
+      clickRate,
+      revenue,
+      totalLists: lists.length,
+      totalSubscribers: lists.reduce((s, l) => s + l.profile_count, 0),
+      lists,
+      recentCampaigns: campaigns,
+    });
+  } catch (e) {
+    const status = e.response?.status;
+    if (status === 401 || status === 403) return res.status(401).json({ error: 'Invalid Klaviyo API key' });
+    console.error('Klaviyo stats error:', e.message);
+    res.status(500).json({ error: 'Failed to fetch Klaviyo data', details: e.message });
+  }
+});
+
 // ─── TEST ENDPOINTS ───────────────────────────────────────
 // Hit GET /test/ping first — if it 404s, the server process is stale and needs restart.
 app.get('/test/ping', (req, res) => {
