@@ -11,6 +11,7 @@ const twilio = require('twilio');
 const sgMail = require('@sendgrid/mail');
 const { createClient } = require('@supabase/supabase-js');
 const cron = require('node-cron');
+const rateLimit = require('express-rate-limit');
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
@@ -33,6 +34,48 @@ app.use((req, res, next) => {
 app.use(cors());
 app.use(express.json({ limit: '50mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
+
+// ─── RATE LIMITING ────────────────────────────────────────
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+});
+
+const aiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'AI team rate limit exceeded. Maximum 20 requests per 15 minutes.' },
+});
+
+const importLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Import rate limit exceeded. Maximum 5 imports per hour.' },
+});
+
+app.use(generalLimiter);
+
+// ─── HEALTH CHECK ─────────────────────────────────────────
+app.get('/health', (req, res) => {
+  const mem = process.memoryUsage();
+  res.json({
+    status: 'ok',
+    uptime: Math.floor(process.uptime()),
+    memory: {
+      rss: Math.round(mem.rss / 1024 / 1024) + 'MB',
+      heapUsed: Math.round(mem.heapUsed / 1024 / 1024) + 'MB',
+      heapTotal: Math.round(mem.heapTotal / 1024 / 1024) + 'MB',
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // ─── HELPER: AI CALL WITH RAG CONTEXT ────────────────────
 const aiCall = async (systemPrompt, userPrompt, context = '') => {
@@ -596,6 +639,7 @@ app.post('/email/tracking', async (req, res) => {
 // ─── AUDIT ────────────────────────────────────────────────
 app.post('/audit', async (req, res) => {
   const { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'url is required' });
   try {
     const response = await axios.post(
       'https://api.anthropic.com/v1/messages',
@@ -639,6 +683,7 @@ app.post('/audit', async (req, res) => {
 // ─── GENERATE AI REPLY ────────────────────────────────────
 app.post('/generate-reply', async (req, res) => {
   const { channel, senderName, content, clientName } = req.body;
+  if (!content) return res.status(400).json({ error: 'content is required' });
   try {
     const response = await axios.post(
       'https://api.anthropic.com/v1/messages',
@@ -883,7 +928,7 @@ app.post('/shopify/list-webhooks', async (req, res) => {
 });
 
 // ─── PDF UPLOAD + AUTO CHUNK + EMBED ─────────────────────
-app.post('/upload-pdf', upload.single('pdf'), async (req, res) => {
+app.post('/upload-pdf', importLimiter, upload.single('pdf'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
@@ -1415,7 +1460,7 @@ const runChannelImport = async (jobId, channelUrl, clientId, aiMember) => {
   }
 };
 
-app.post('/knowledge/import-channel', async (req, res) => {
+app.post('/knowledge/import-channel', importLimiter, async (req, res) => {
   const { channelUrl, clientId, aiMember } = req.body;
   if (!channelUrl) return res.status(400).json({ error: 'Missing channelUrl' });
   if (!process.env.YOUTUBE_API_KEY) return res.status(500).json({ error: 'YOUTUBE_API_KEY not set in environment' });
@@ -1475,7 +1520,7 @@ app.get('/knowledge/import-channel/progress', (req, res) => {
 });
 
 // ─── AI TEAM ENDPOINTS ────────────────────────────────────
-app.post('/hussain', async (req, res) => {
+app.post('/hussain', aiLimiter, async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
@@ -1493,7 +1538,7 @@ app.post('/hussain', async (req, res) => {
   }
 });
 
-app.post('/hassan', async (req, res) => {
+app.post('/hassan', aiLimiter, async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
@@ -1511,7 +1556,7 @@ app.post('/hassan', async (req, res) => {
   }
 });
 
-app.post('/ali', async (req, res) => {
+app.post('/ali', aiLimiter, async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
@@ -1529,7 +1574,7 @@ app.post('/ali', async (req, res) => {
   }
 });
 
-app.post('/mahdi', async (req, res) => {
+app.post('/mahdi', aiLimiter, async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
@@ -1547,7 +1592,7 @@ app.post('/mahdi', async (req, res) => {
   }
 });
 
-app.post('/fatima', async (req, res) => {
+app.post('/fatima', aiLimiter, async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
@@ -1565,7 +1610,7 @@ app.post('/fatima', async (req, res) => {
   }
 });
 
-app.post('/zainab', async (req, res) => {
+app.post('/zainab', aiLimiter, async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
@@ -2881,6 +2926,7 @@ Be direct, specific, and actionable. Think like a founder preparing for battle.`
 // ─── META MCP ─────────────────────────────────────────────
 app.post('/meta/ad-stats', async (req, res) => {
   const { client_id } = req.body;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
   try {
     const { data: client } = await supabase.from('clients')
       .select('meta_access_token, meta_ad_account_id')
