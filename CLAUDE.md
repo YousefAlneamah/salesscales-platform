@@ -98,7 +98,7 @@ YOUTUBE_API_KEY=            # YouTube Data API v3 — bulk channel import (serve
 
 | Table | Purpose |
 |-------|---------|
-| `clients` | Agency clients (ecommerce stores). Fields: `id, name, business_type, niche, tier, status, health_score, from_email, from_name, klaviyo_api_key` |
+| `clients` | Agency clients (ecommerce stores). Fields: `id, name, business_type, niche, tier, status, health_score, from_email, from_name, klaviyo_api_key, meta_access_token, meta_ad_account_id` |
 | `client_users` | Login credentials for client portal. Fields: `id, name, email, password, client_id, last_login` |
 | `contacts` | CRM contacts. Fields: `id, first_name, last_name, email, phone, source, channel, pipeline_stage, client_id, shopify_customer_id, last_activity, status` |
 | `pipeline_deals` | Sales pipeline deals. Fields: `id, value, stage, client_id` |
@@ -147,6 +147,7 @@ Single Express file, port 3001. All AI calls go through the `aiCall()` helper wh
 | POST | `/shopify/sync-customers` | Pull customers from Shopify → contacts table |
 | POST | `/shopify/store-data` | Fetch live data from a client's connected Shopify store — total orders, month revenue, month order count, abandoned checkouts count, top 8 products by revenue, 10 most recent orders. Uses stored access token from `shopify_connections`. |
 | GET  | `/analytics/stats` | Month-specific platform stats — emails/SMS/WhatsApp sent, contacts added, workflow enrollments, active sequences. Uses Supabase `count: 'exact'` queries with `monthStart` filter. Also returns all-time totals for contacts, active enrollments, pipeline value. |
+| POST | `/meta/ad-stats` | Fetch Meta Ads performance for a client. Accepts `{ client_id }` — looks up `meta_access_token` and `meta_ad_account_id` from clients table. 2 parallel Meta Graph API v21.0 calls: account-level insights (spend, impressions, clicks, CTR, purchase ROAS) and top-5 ads by spend at ad level. Returns `{ spend, impressions, clicks, ctr, roas, topAds[] }`. 400 if credentials not configured; 401 on invalid token (error code 190/102). |
 | POST | `/klaviyo/stats` | Fetch Klaviyo email performance for a client. Accepts `{ client_id, api_key? }` — looks up `klaviyo_api_key` from clients table if `api_key` not provided. 3 parallel calls: campaigns list, lists (with profile_count), and 30-day aggregate report. Returns `{ openRate, clickRate, revenue, totalLists, totalSubscribers, lists, recentCampaigns }`. Auth: `Klaviyo-API-Key {key}` header, revision `2024-10-15`. 401/403 returns `{ error: 'Invalid Klaviyo API key' }`. |
 | GET  | `/revenue/stats` | Revenue stats — pipeline deals, enrollment conversion rates, per-client and per-channel breakdowns |
 | GET  | `/revenue/dashboard` | Full revenue dashboard data — same aggregation as `/revenue/stats` but with human-readable trigger labels (Cart Recovery, Post Purchase, Win-Back, Welcome). Returns `{ thisMonth, byChannel, byTrigger, topSequences, byClient, maxRevenue }`. Used by `RevenueDashboard.js`. |

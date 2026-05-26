@@ -50,19 +50,19 @@ export default function Settings() {
   });
 
   useEffect(() => {
-    supabase.from('clients').select('id, name, from_email, from_name, klaviyo_api_key').order('name').then(({ data }) => {
+    supabase.from('clients').select('id, name, from_email, from_name, klaviyo_api_key, meta_access_token, meta_ad_account_id').order('name').then(({ data }) => {
       if (!data) return;
       setClients(data);
       const cfg = {};
-      data.forEach(c => { cfg[c.id] = { from_email: c.from_email || '', from_name: c.from_name || '', klaviyo_api_key: c.klaviyo_api_key || '' }; });
+      data.forEach(c => { cfg[c.id] = { from_email: c.from_email || '', from_name: c.from_name || '', klaviyo_api_key: c.klaviyo_api_key || '', meta_access_token: c.meta_access_token || '', meta_ad_account_id: c.meta_ad_account_id || '' }; });
       setEmailConfig(cfg);
     });
   }, []);
 
   const saveEmailConfig = async (clientId) => {
     setEmailSaving(clientId);
-    const { from_email, from_name, klaviyo_api_key } = emailConfig[clientId] || {};
-    await supabase.from('clients').update({ from_email: from_email || null, from_name: from_name || null, klaviyo_api_key: klaviyo_api_key || null }).eq('id', clientId);
+    const { from_email, from_name, klaviyo_api_key, meta_access_token, meta_ad_account_id } = emailConfig[clientId] || {};
+    await supabase.from('clients').update({ from_email: from_email || null, from_name: from_name || null, klaviyo_api_key: klaviyo_api_key || null, meta_access_token: meta_access_token || null, meta_ad_account_id: meta_ad_account_id || null }).eq('id', clientId);
     setEmailSaving(null);
     setEmailSaved(clientId);
     setTimeout(() => setEmailSaved(null), 2000);
@@ -283,7 +283,7 @@ export default function Settings() {
               )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {clients.map(client => {
-                  const cfg = emailConfig[client.id] || { from_email: '', from_name: '', klaviyo_api_key: '' };
+                  const cfg = emailConfig[client.id] || { from_email: '', from_name: '', klaviyo_api_key: '', meta_access_token: '', meta_ad_account_id: '' };
                   const isSaving = emailSaving === client.id;
                   const isDone = emailSaved === client.id;
                   return (
@@ -312,14 +312,34 @@ export default function Settings() {
                         </div>
                         <div style={{ visibility: 'hidden', padding: '9px 16px' }} />
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '10px', alignItems: 'end' }}>
+                      <div style={{ marginBottom: '10px' }}>
+                        <label style={{ ...labelStyle, color: '#c9a84c' }}>Klaviyo API Key</label>
+                        <input
+                          type="password"
+                          value={cfg.klaviyo_api_key}
+                          onChange={e => setEmailConfig(prev => ({ ...prev, [client.id]: { ...prev[client.id], klaviyo_api_key: e.target.value } }))}
+                          placeholder="pk_••••••••••••••••••••••••••••••••"
+                          style={inputStyle}
+                        />
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '10px', alignItems: 'end' }}>
                         <div>
-                          <label style={{ ...labelStyle, color: '#c9a84c' }}>Klaviyo API Key</label>
+                          <label style={{ ...labelStyle, color: '#3b82f6' }}>Meta Access Token</label>
                           <input
                             type="password"
-                            value={cfg.klaviyo_api_key}
-                            onChange={e => setEmailConfig(prev => ({ ...prev, [client.id]: { ...prev[client.id], klaviyo_api_key: e.target.value } }))}
-                            placeholder="pk_••••••••••••••••••••••••••••••••"
+                            value={cfg.meta_access_token}
+                            onChange={e => setEmailConfig(prev => ({ ...prev, [client.id]: { ...prev[client.id], meta_access_token: e.target.value } }))}
+                            placeholder="EAAxxxxxxxxxxxxxxxx"
+                            style={inputStyle}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ ...labelStyle, color: '#3b82f6' }}>Meta Ad Account ID</label>
+                          <input
+                            type="text"
+                            value={cfg.meta_ad_account_id}
+                            onChange={e => setEmailConfig(prev => ({ ...prev, [client.id]: { ...prev[client.id], meta_ad_account_id: e.target.value } }))}
+                            placeholder="act_1234567890"
                             style={inputStyle}
                           />
                         </div>

@@ -2184,6 +2184,89 @@ app.get('/revenue/dashboard', async (req, res) => {
   }
 });
 
+// ─── META MCP ─────────────────────────────────────────────
+app.post('/meta/ad-stats', async (req, res) => {
+  const { client_id } = req.body;
+  try {
+    const { data: client } = await supabase.from('clients')
+      .select('meta_access_token, meta_ad_account_id')
+      .eq('id', client_id)
+      .maybeSingle();
+
+    if (!client?.meta_access_token) return res.status(400).json({ error: 'Meta access token not configured for this client' });
+    if (!client?.meta_ad_account_id) return res.status(400).json({ error: 'Meta ad account ID not configured for this client' });
+
+    const token = client.meta_access_token;
+    const accountId = client.meta_ad_account_id.startsWith('act_') ? client.meta_ad_account_id : `act_${client.meta_ad_account_id}`;
+    const base = 'https://graph.facebook.com/v21.0';
+
+    const [accountRes, adsRes] = await Promise.all([
+      axios.get(`${base}/${accountId}/insights`, {
+        params: {
+          access_token: token,
+          fields: 'spend,impressions,clicks,ctr,purchase_roas,actions',
+          date_preset: 'last_30_days',
+          level: 'account',
+        },
+      }).catch(e => ({ error: e })),
+      axios.get(`${base}/${accountId}/insights`, {
+        params: {
+          access_token: token,
+          fields: 'ad_name,ad_id,spend,impressions,clicks,ctr,purchase_roas',
+          date_preset: 'last_30_days',
+          level: 'ad',
+          sort: '["spend_descending"]',
+          limit: 5,
+        },
+      }).catch(e => ({ error: e })),
+    ]);
+
+    if (accountRes.error) {
+      const status = accountRes.error.response?.status;
+      const errCode = accountRes.error.response?.data?.error?.code;
+      if (status === 401 || status === 403 || errCode === 190 || errCode === 102) {
+        return res.status(401).json({ error: 'Invalid Meta access token' });
+      }
+      throw accountRes.error;
+    }
+
+    const accountData = accountRes.data?.data?.[0] || {};
+    const roasArr = accountData.purchase_roas || [];
+    const roas = roasArr.length > 0 ? parseFloat(roasArr[0]?.value || 0) : null;
+
+    const topAds = (adsRes.error ? [] : (adsRes.data?.data || [])).map(ad => {
+      const adRoasArr = ad.purchase_roas || [];
+      return {
+        id: ad.ad_id,
+        name: ad.ad_name || '—',
+        spend: parseFloat(ad.spend || 0),
+        impressions: parseInt(ad.impressions || 0, 10),
+        clicks: parseInt(ad.clicks || 0, 10),
+        ctr: parseFloat(ad.ctr || 0),
+        roas: adRoasArr.length > 0 ? parseFloat(adRoasArr[0]?.value || 0) : null,
+      };
+    });
+
+    res.json({
+      ok: true,
+      spend: parseFloat(accountData.spend || 0),
+      impressions: parseInt(accountData.impressions || 0, 10),
+      clicks: parseInt(accountData.clicks || 0, 10),
+      ctr: parseFloat(accountData.ctr || 0),
+      roas,
+      topAds,
+    });
+  } catch (e) {
+    const status = e.response?.status;
+    const errCode = e.response?.data?.error?.code;
+    if (status === 401 || status === 403 || errCode === 190 || errCode === 102) {
+      return res.status(401).json({ error: 'Invalid Meta access token' });
+    }
+    console.error('Meta ad stats error:', e.message);
+    res.status(500).json({ error: 'Failed to fetch Meta data', details: e.message });
+  }
+});
+
 // ─── KLAVIYO MCP ──────────────────────────────────────────
 app.post('/klaviyo/stats', async (req, res) => {
   const { client_id } = req.body;
