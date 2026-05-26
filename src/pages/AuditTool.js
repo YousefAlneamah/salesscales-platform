@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import axios from 'axios';
 
 const CATEGORIES = [
   { key: 'email',           label: 'Email Marketing',    icon: 'ti-mail',             maxScore: 20 },
@@ -151,12 +152,7 @@ Grade: 0-40=F, 41-55=D, 56-65=C, 66-75=B, 76-85=A, 86-100=A+
 Be specific, be direct, think like a revenue strategist. This audit is used by Sales Scales to pitch and close this prospect.`;
 
     try {
-      const res = await fetch('http://localhost:3001/hussain', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, clientId: null }),
-      });
-      const data = await res.json();
+      const { data } = await axios.post('http://localhost:3001/hussain', { prompt, clientId: null });
       if (!data.result) throw new Error('No response from Hussain');
 
       // Strip markdown code fences, then extract outermost JSON object

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { supabase } from '../supabase';
 
 export default function Hussain() {
@@ -31,12 +32,7 @@ export default function Hussain() {
   };
 
   const callHussain = async (prompt) => {
-    const response = await fetch('http://localhost:3001/hussain', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt })
-    });
-    const data = await response.json();
+    const { data } = await axios.post('http://localhost:3001/hussain', { prompt });
     return data.result || 'Unable to generate response.';
   };
 

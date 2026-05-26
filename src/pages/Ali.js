@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import axios from 'axios';
 
 export default function Ali() {
   const [activeTab, setActiveTab] = useState('closer');
@@ -16,12 +17,7 @@ export default function Ali() {
   const [tierTarget, setTierTarget] = useState('starter');
 
   const callAli = async (prompt) => {
-    const response = await fetch('http://localhost:3001/ali', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt })
-    });
-    const data = await response.json();
+    const { data } = await axios.post('http://localhost:3001/ali', { prompt });
     return data.result || 'Unable to generate response.';
   };
 

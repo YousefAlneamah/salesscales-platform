@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import axios from 'axios';
 
 export default function Hassan() {
   const [activeTab, setActiveTab] = useState('outreach');
@@ -17,12 +18,7 @@ export default function Hassan() {
   const [followUpContext, setFollowUpContext] = useState('');
 
   const callHassan = async (prompt) => {
-    const response = await fetch('http://localhost:3001/hassan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt })
-    });
-    const data = await response.json();
+    const { data } = await axios.post('http://localhost:3001/hassan', { prompt });
     return data.result || 'Unable to generate response.';
   };
 
