@@ -1909,7 +1909,7 @@ app.post('/test/trigger-webhook', async (req, res) => {
     const { data: client } = await supabase.from('clients').select('id, name').eq('id', client_id).maybeSingle();
     if (!client) {
       step('ERROR: Client not found', { client_id });
-      return res.status(404).json({ ok: false, error: 'Client not found', log });
+      return res.status(422).json({ ok: false, error: 'Client not found', log });
     }
     step('Client verified', { name: client.name });
 
@@ -1948,7 +1948,7 @@ app.post('/test/trigger-webhook', async (req, res) => {
 
     if (!workflows || workflows.length === 0) {
       step('ERROR: No active cart_abandoned workflow found for this client', { client_id });
-      return res.status(404).json({ ok: false, error: 'No active cart_abandoned workflow for this client. Create a workflow with trigger_type = cart_abandoned and status = active.', log });
+      return res.status(422).json({ ok: false, error: 'No active cart_abandoned workflow for this client. Create a workflow with trigger_type = cart_abandoned and status = active.', log });
     }
 
     const workflow = workflows[0];
