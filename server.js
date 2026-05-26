@@ -2184,6 +2184,130 @@ app.get('/revenue/dashboard', async (req, res) => {
   }
 });
 
+// ─── CONTRACT SYSTEM ──────────────────────────────────────
+const TIER_SERVICE_MAP = {
+  starter:    'AI-powered email marketing, SMS campaigns, workflow automation (up to 3 sequences), CRM contact management, monthly analytics report, and access to the full AI team (Hussain, Hassan, Ali, Mahdi, Fatima, Zainab)',
+  growth:     'Everything in Starter, plus WhatsApp automation, unlimited sequences, Klaviyo integration, Meta Ads reporting, HubSpot CRM sync, weekly strategy calls, and priority AI team support',
+  scale:      'Everything in Growth, plus dedicated account management, voice AI agents, custom workflow builds, Shopify live data integration, Canva & Higgsfield AI design briefs, competitor intelligence, and monthly executive reports',
+  enterprise: 'Fully custom engagement — all platform features, white-label options, custom AI agent training, dedicated infrastructure, and a tailored SLA',
+};
+
+app.post('/contracts/create', async (req, res) => {
+  const { client_id, tier, monthly_fee, start_date } = req.body;
+  if (!client_id || !tier || !monthly_fee || !start_date)
+    return res.status(400).json({ error: 'client_id, tier, monthly_fee, and start_date are required' });
+
+  try {
+    const { data: client } = await supabase.from('clients').select('id, name, niche').eq('id', client_id).maybeSingle();
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+
+    const services = TIER_SERVICE_MAP[tier.toLowerCase()] || TIER_SERVICE_MAP.starter;
+    const fmtFee = parseFloat(monthly_fee).toLocaleString('en-US', { minimumFractionDigits: 2 });
+    const fmtDate = new Date(start_date).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    const contractText = await aiCall(
+      `You are Zainab, the Client Partner AI at Sales Scales. You draft professional, clear, and legally structured service agreements. You write in formal legal language, are thorough, and ensure both parties are fully protected. Never break character or mention Claude.`,
+      `Generate a complete professional service agreement between Sales Scales (the Agency) and ${client.name} (the Client).
+
+Contract Details:
+- Client: ${client.name}${client.niche ? ` (${client.niche} industry)` : ''}
+- Service Tier: ${tier.charAt(0).toUpperCase() + tier.slice(1)} Plan
+- Monthly Fee: $${fmtFee} USD
+- Commencement Date: ${fmtDate}
+- Services Included: ${services}
+
+Write the full agreement with all of these sections, each clearly headed:
+
+1. PARTIES
+   Full identification: Sales Scales (the Agency, a digital marketing and AI automation company) and ${client.name} (the Client). Include today's date as the agreement date.
+
+2. SERVICES
+   Describe the ${tier} tier services in detail. Be specific about what is and is not included.
+
+3. PAYMENT TERMS
+   Monthly fee of $${fmtFee} USD. Due on the 1st of each calendar month. 5-day grace period. 1.5% monthly late fee on overdue amounts. Payment via bank transfer or agreed method.
+
+4. TERM AND RENEWAL
+   Commences ${fmtDate}. Month-to-month, automatically renewing unless either party provides written notice of cancellation.
+
+5. INTELLECTUAL PROPERTY
+   All client data, brand assets, and existing intellectual property remain the exclusive property of the Client. Sales Scales retains all IP in its platform, AI systems, workflows, and methodologies.
+
+6. CONFIDENTIALITY
+   Mutual non-disclosure covering all business information, strategies, data, and communications. Obligation survives termination indefinitely.
+
+7. PERFORMANCE AND RESULTS
+   Agency commits to best-efforts service delivery. Marketing results depend on many factors outside the Agency's control and are not guaranteed.
+
+8. LIMITATION OF LIABILITY
+   Neither party liable for indirect or consequential damages. Agency's total liability capped at three (3) months of fees paid.
+
+9. TERMINATION
+   Either party may terminate with 30 days written notice. Agency may terminate immediately for non-payment exceeding 15 days. Upon termination, all client data is returned within 14 days.
+
+10. GOVERNING LAW
+    This agreement is governed by the laws of the State of Kuwait. Any disputes shall be resolved through arbitration in Kuwait City.
+
+11. ENTIRE AGREEMENT
+    This agreement constitutes the entire understanding between the parties and supersedes all prior communications, negotiations, and agreements relating to the subject matter.
+
+12. SIGNATURES
+    Include signature blocks for both parties with: Name, Title, Date, Signature lines. Agency signatory: Yousef Al-Neamah, Founder & CEO, Sales Scales.
+
+Write the full agreement text. Use formal legal language throughout. Do not include any commentary outside the contract itself.`,
+      ''
+    );
+
+    const { data: contract, error: insertErr } = await supabase.from('contracts').insert({
+      client_id,
+      client_name: client.name,
+      tier,
+      monthly_fee: parseFloat(monthly_fee),
+      start_date,
+      status: 'draft',
+      contract_text: contractText,
+    }).select().single();
+
+    if (insertErr) throw insertErr;
+    res.json({ contract });
+  } catch (e) {
+    console.error('contracts/create error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/contracts/list', async (req, res) => {
+  const { client_id } = req.query;
+  try {
+    let q = supabase
+      .from('contracts')
+      .select('id, client_id, client_name, tier, monthly_fee, start_date, status, contract_text, created_at')
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (client_id) q = q.eq('client_id', client_id);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json({ contracts: data || [] });
+  } catch (e) {
+    console.error('contracts/list error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch('/contracts/:id/status', async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  const valid = ['draft', 'sent', 'signed', 'cancelled'];
+  if (!valid.includes(status)) return res.status(400).json({ error: `status must be one of: ${valid.join(', ')}` });
+  try {
+    const { data, error } = await supabase.from('contracts').update({ status }).eq('id', id).select().single();
+    if (error) throw error;
+    res.json({ contract: data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── HUBSPOT MCP ──────────────────────────────────────────
 const HUBSPOT_API = 'https://api.hubapi.com';
 
