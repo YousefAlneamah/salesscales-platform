@@ -2184,6 +2184,84 @@ app.get('/revenue/dashboard', async (req, res) => {
   }
 });
 
+// ─── HIGGSFIELD MCP ───────────────────────────────────────
+const HIGGSFIELD_URLS = {
+  product_showcase: 'https://higgsfield.ai/',
+  ad_creative:      'https://higgsfield.ai/',
+  brand_story:      'https://higgsfield.ai/',
+};
+
+const HIGGSFIELD_LABELS = {
+  product_showcase: 'Product Showcase',
+  ad_creative:      'Ad Creative',
+  brand_story:      'Brand Story',
+};
+
+const HIGGSFIELD_SPECS = {
+  product_showcase: '15–30s · 9:16 or 16:9 · cinematic product focus',
+  ad_creative:      '6–15s · 9:16 · high-impact, scroll-stopping',
+  brand_story:      '30–60s · 16:9 · narrative-driven, emotional',
+};
+
+app.post('/higgsfield/create-video', async (req, res) => {
+  const { client_id, video_type = 'product_showcase', prompt } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'prompt required' });
+  if (!HIGGSFIELD_LABELS[video_type]) {
+    return res.status(400).json({ error: `Invalid video_type. Use: ${Object.keys(HIGGSFIELD_LABELS).join(', ')}` });
+  }
+
+  try {
+    let clientName = '';
+    if (client_id) {
+      const { data: client } = await supabase.from('clients')
+        .select('name')
+        .eq('id', client_id)
+        .maybeSingle();
+      clientName = client?.name || '';
+    }
+
+    const [ragContext, briefingsCtx] = await Promise.all([
+      ragSearch(prompt, client_id),
+      getBriefingsContext('mahdi'),
+    ]);
+    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+
+    const brief = await aiCall(
+      `You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world-class video creative director who specialises in AI-generated video content for ecommerce brands. You produce precise, cinematic, production-ready video briefs optimised for Higgsfield.ai. You are Mahdi — never mention Claude.`,
+      `Create a detailed Higgsfield.ai video production brief for the following:
+
+Client: ${clientName || 'Not specified'}
+Video Type: ${HIGGSFIELD_LABELS[video_type]}
+Technical Specs: ${HIGGSFIELD_SPECS[video_type]}
+Request: ${prompt}
+
+${context ? `Brand & client context:\n${context}\n` : ''}
+Your brief must include:
+1. **Concept** — One-sentence creative hook and story angle
+2. **Scene Breakdown** — Shot-by-shot description (3–6 scenes with timing)
+3. **Visual Style** — Camera movement, lighting mood, colour grade, aesthetic references
+4. **Motion Direction** — Specific AI motion prompts for Higgsfield (zoom, pan, pull, orbit, etc.)
+5. **Text Overlays** — All on-screen text, timing, placement, and animation style
+6. **Audio Mood** — Music tempo, genre, and sound design direction
+7. **Call to Action** — Final frame CTA — exact wording and visual treatment
+
+Make every scene description specific enough to paste directly into Higgsfield as a generation prompt. Output must be immediately usable.`,
+      context
+    );
+
+    res.json({
+      brief,
+      higgsfield_url: HIGGSFIELD_URLS[video_type],
+      video_type,
+      video_label: HIGGSFIELD_LABELS[video_type],
+      specs: HIGGSFIELD_SPECS[video_type],
+    });
+  } catch (e) {
+    console.error('Higgsfield create-video error:', e.message);
+    res.status(500).json({ error: 'Failed to generate video brief', details: e.message });
+  }
+});
+
 // ─── CANVA MCP ────────────────────────────────────────────
 const CANVA_URLS = {
   social_post:   'https://www.canva.com/social-media-graphics/templates/',
