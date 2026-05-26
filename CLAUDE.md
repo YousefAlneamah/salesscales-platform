@@ -125,12 +125,25 @@ YOUTUBE_API_KEY=            # YouTube Data API v3 — bulk channel import (serve
 
 Single Express file, port 3001. All AI calls go through the `aiCall()` helper which hits the Anthropic API directly via axios. All RAG searches go through `ragSearch()` which embeds the query with OpenAI then calls `search_knowledge_base` RPC.
 
+### Rate Limiting (Phase 10)
+
+Three `express-rate-limit` limiters applied in server.js:
+
+| Limiter | Window | Max | Applied to |
+|---------|--------|-----|------------|
+| `generalLimiter` | 15 min | 100 req/IP | All endpoints via `app.use()` |
+| `aiLimiter` | 15 min | 20 req/IP | `/hussain`, `/hassan`, `/ali`, `/mahdi`, `/fatima`, `/zainab` |
+| `importLimiter` | 1 hour | 5 req/IP | `/upload-pdf`, `/knowledge/import-channel` |
+
+Errors return `{ error: '...' }` with HTTP 429. `standardHeaders: true` — rate limit info in `RateLimit-*` response headers.
+
 ### Utility Endpoints
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/audit` | Shopify store audit — returns structured JSON via Claude Haiku |
-| POST | `/generate-reply` | AI-suggested inbox reply via Claude Haiku |
+| GET  | `/health` | Server health — returns `{ status, uptime (seconds), memory: { rss, heapUsed, heapTotal }, timestamp }` |
+| POST | `/audit` | Shopify store audit — returns structured JSON via Claude Haiku. Requires `url`. |
+| POST | `/generate-reply` | AI-suggested inbox reply via Claude Haiku. Requires `content`. |
 | POST | `/upload-pdf` | PDF → chunks → embeddings → knowledge_base (background after response) |
 | POST | `/youtube-transcript` | Fetch YouTube transcript text |
 | POST | `/send-sms` | Send SMS via Twilio |
@@ -170,7 +183,7 @@ Single Express file, port 3001. All AI calls go through the `aiCall()` helper wh
 | POST | `/higgsfield/create-video` | Generate a Higgsfield.ai video production brief via Mahdi. Accepts `{ client_id, video_type (product_showcase/ad_creative/brand_story), prompt }`. Looks up client name, runs `ragSearch` + `getBriefingsContext` in parallel. Uses `aiCall()` with Mahdi's persona to produce a 7-section brief (Concept, Scene Breakdown, Visual Style, Motion Direction, Text Overlays, Audio Mood, CTA). Returns `{ brief, higgsfield_url, video_type, video_label, specs }`. |
 | POST | `/whisper/transcribe` | Transcribe an audio file using OpenAI Whisper. Accepts `{ audio_base64, filename, mime_type }`. Converts base64 to Buffer, sends as multipart/form-data to `https://api.openai.com/v1/audio/transcriptions` with `model: whisper-1`. Returns `{ text }`. Max 25 MB. Uses `form-data` npm package for multipart construction. |
 | POST | `/competitor/analyze` | Competitor intelligence via Hussain. Accepts `{ facebook_page_url, client_id? }`. Runs RAG search for context, then calls `aiCall()` with Hussain's persona to produce a structured report: positioning, target audience, price tier, marketing channels, weaknesses, and Sales Scales winning angles. Returns `{ analysis }`. |
-| POST | `/meta/ad-stats` | Fetch Meta Ads performance for a client. Accepts `{ client_id }` — looks up `meta_access_token` and `meta_ad_account_id` from clients table. 2 parallel Meta Graph API v21.0 calls: account-level insights (spend, impressions, clicks, CTR, purchase ROAS) and top-5 ads by spend at ad level. Returns `{ spend, impressions, clicks, ctr, roas, topAds[] }`. 400 if credentials not configured; 401 on invalid token (error code 190/102). |
+| POST | `/meta/ad-stats` | Fetch Meta Ads performance for a client. Requires `{ client_id }` — looks up `meta_access_token` and `meta_ad_account_id` from clients table. 2 parallel Meta Graph API v21.0 calls: account-level insights (spend, impressions, clicks, CTR, purchase ROAS) and top-5 ads by spend at ad level. Returns `{ spend, impressions, clicks, ctr, roas, topAds[] }`. 400 if client_id or credentials not configured; 401 on invalid token (error code 190/102). |
 | POST | `/klaviyo/stats` | Fetch Klaviyo email performance for a client. Accepts `{ client_id, api_key? }` — looks up `klaviyo_api_key` from clients table if `api_key` not provided. 3 parallel calls: campaigns list, lists (with profile_count), and 30-day aggregate report. Returns `{ openRate, clickRate, revenue, totalLists, totalSubscribers, lists, recentCampaigns }`. Auth: `Klaviyo-API-Key {key}` header, revision `2024-10-15`. 401/403 returns `{ error: 'Invalid Klaviyo API key' }`. |
 | GET  | `/revenue/stats` | Revenue stats — pipeline deals, enrollment conversion rates, per-client and per-channel breakdowns |
 | GET  | `/revenue/dashboard` | Full revenue dashboard data — same aggregation as `/revenue/stats` but with human-readable trigger labels (Cart Recovery, Post Purchase, Win-Back, Welcome). Returns `{ thisMonth, byChannel, byTrigger, topSequences, byClient, maxRevenue }`. Used by `RevenueDashboard.js`. |
