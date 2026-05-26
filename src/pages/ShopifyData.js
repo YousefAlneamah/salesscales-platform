@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
@@ -44,7 +45,7 @@ export default function ShopifyData() {
     setData(null);
     setAiResult('');
     try {
-      const { data: res } = await axios.post('http://localhost:3001/shopify/store-data', { client_id: clientId });
+      const { data: res } = await axios.post(`${API_BASE}/shopify/store-data`, { client_id: clientId });
       setData(res);
     } catch (e) {
       const msg = e.response?.data?.error || e.message;
@@ -64,7 +65,7 @@ export default function ShopifyData() {
     setAiLoading(true);
     setAiResult('');
     try {
-      const { data: res } = await axios.post('http://localhost:3001/hussain', {
+      const { data: res } = await axios.post(`${API_BASE}/hussain`, {
         prompt: aiPrompt,
         clientId: selectedClient,
       });

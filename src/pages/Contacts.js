@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import { supabase } from '../supabase';
 
 export default function Contacts() {
@@ -86,7 +87,7 @@ export default function Contacts() {
     if (!selectedWorkflow) { alert('Invalid selection'); return; }
 
     try {
-      const response = await fetch('http://localhost:3001/enroll-contact', {
+      const response = await fetch(`${API_BASE}/enroll-contact`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

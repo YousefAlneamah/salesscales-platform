@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
@@ -28,7 +29,7 @@ export default function MetaAds() {
     setErrorStatus(null);
     setData(null);
     try {
-      const { data: res } = await axios.post('http://localhost:3001/meta/ad-stats', { client_id: clientId });
+      const { data: res } = await axios.post(`${API_BASE}/meta/ad-stats`, { client_id: clientId });
       setData(res);
     } catch (e) {
       setErrorStatus(e.response?.status ?? null);

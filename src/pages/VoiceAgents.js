@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import { supabase } from '../supabase';
 
 const DEFAULT_VOICES = [
@@ -61,7 +62,7 @@ export default function VoiceAgents() {
 
   const fetchVoices = async () => {
     try {
-      const res = await fetch('http://localhost:3001/voice-agent/voices');
+      const res = await fetch(`${API_BASE}/voice-agent/voices`);
       const data = await res.json();
       if (data.voices && data.voices.length > 0) {
         setVoices(data.voices.map(v => ({ id: v.voice_id, name: v.name })));
@@ -84,7 +85,7 @@ export default function VoiceAgents() {
     setTestResult(null);
     const cfg = type === 'inbound' ? inbound : outbound;
     try {
-      const res = await fetch('http://localhost:3001/voice-agent/save-agent', {
+      const res = await fetch(`${API_BASE}/voice-agent/save-agent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -117,7 +118,7 @@ export default function VoiceAgents() {
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch('http://localhost:3001/voice-agent/outbound-call', {
+      const res = await fetch(`${API_BASE}/voice-agent/outbound-call`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: testPhone, agentId })

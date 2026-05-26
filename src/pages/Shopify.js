@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import { supabase } from '../supabase';
 
 export default function Shopify() {
@@ -42,7 +43,7 @@ export default function Shopify() {
     shop = shop.replace('https://', '').replace('http://', '');
 
     setConnecting(true);
-    const installUrl = `http://localhost:3001/shopify/install?shop=${shop}&clientId=${selectedClient}`;
+    const installUrl = `${API_BASE}/shopify/install?shop=${shop}&clientId=${selectedClient}`;
     window.open(installUrl, '_blank');
     setConnecting(false);
   };
@@ -51,7 +52,7 @@ export default function Shopify() {
     setSyncing(true);
     setSyncResult(null);
     try {
-      const response = await fetch('http://localhost:3001/shopify/sync-customers', {
+      const response = await fetch(`${API_BASE}/shopify/sync-customers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { API_BASE } from '../config';
 import axios from "axios";
 import { supabase } from "../supabase";
 
@@ -14,7 +15,7 @@ export default function Login({ onLogin }) {
 
     // Owner login — validated server-side against users table
     try {
-      const { data } = await axios.post("http://localhost:3001/auth/login", { email, password });
+      const { data } = await axios.post(`${API_BASE}/auth/login`, { email, password });
       if (data.token) {
         localStorage.setItem("token", data.token);
         localStorage.setItem("user", JSON.stringify(data.user));

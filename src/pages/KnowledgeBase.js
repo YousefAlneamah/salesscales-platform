@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { API_BASE } from '../config';
 import { supabase } from '../supabase';
 
 const AI_MEMBERS = ['All Team', 'Ali', 'Hassan', 'Mahdi', 'Hussain', 'Zainab', 'Fatima'];
@@ -57,7 +58,7 @@ export default function KnowledgeBase() {
     if (importJob.status === 'complete' || importJob.status === 'error') return;
 
     const es = new EventSource(
-      `http://localhost:3001/knowledge/import-channel/progress?jobId=${importJob.jobId}`
+      `${API_BASE}/knowledge/import-channel/progress?jobId=${importJob.jobId}`
     );
 
     es.onmessage = (e) => {
@@ -113,7 +114,7 @@ export default function KnowledgeBase() {
         formData.append('clientId', clientId);
         formData.append('type', type);
         formData.append('aiMember', aiMember);
-        const response = await fetch('http://localhost:3001/upload-pdf', { method: 'POST', body: formData });
+        const response = await fetch(`${API_BASE}/upload-pdf`, { method: 'POST', body: formData });
         const data = await response.json();
         if (data.success) {
           alert(`✅ ${data.chunks} chunks are being processed in the background. Refresh in a few minutes.`);
@@ -132,7 +133,7 @@ export default function KnowledgeBase() {
 
       if (url && url.includes('youtube.com')) {
         try {
-          const response = await fetch('http://localhost:3001/youtube-transcript', {
+          const response = await fetch(`${API_BASE}/youtube-transcript`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url })
           });
@@ -150,7 +151,7 @@ export default function KnowledgeBase() {
 
       if (!error && data) {
         try {
-          await fetch('http://localhost:3001/generate-embedding', {
+          await fetch(`${API_BASE}/generate-embedding`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text: finalContent, documentId: data[0].id })
@@ -177,7 +178,7 @@ export default function KnowledgeBase() {
     setImportJob({ jobId: null, status: 'starting', log: [], videos: [], videosQueued: 0, videosProcessed: 0, chunksAdded: 0, error: null });
 
     try {
-      const res = await fetch('http://localhost:3001/knowledge/import-channel', {
+      const res = await fetch(`${API_BASE}/knowledge/import-channel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channelUrl, clientId: importClientId || null, aiMember: importAiMember }),
@@ -200,7 +201,7 @@ export default function KnowledgeBase() {
     setSearching(true);
     setSearchResults(null);
     try {
-      const response = await fetch('http://localhost:3001/search-knowledge', {
+      const response = await fetch(`${API_BASE}/search-knowledge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: searchQuery, clientId: filterClient !== 'All' ? filterClient : null })

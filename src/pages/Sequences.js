@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
@@ -143,7 +144,7 @@ export default function Sequences() {
     setFeedbackStats(null);
     setFeedbackLoading(true);
     try {
-      const { data } = await axios.post('http://localhost:3001/sequences/feedback', { workflow_id: workflow.id });
+      const { data } = await axios.post(`${API_BASE}/sequences/feedback`, { workflow_id: workflow.id });
       setFeedbackResult(data.analysis);
       setFeedbackStats(data.stats);
     } catch (_) {

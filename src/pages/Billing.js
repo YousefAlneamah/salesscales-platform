@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 
 const TIER_FEES = { starter: 997, growth: 1997, scale: 3997, enterprise: 0 };
@@ -32,7 +33,7 @@ export default function Billing() {
     setLoading(true);
     setError('');
     try {
-      const { data } = await axios.get('http://localhost:3001/stripe/billing');
+      const { data } = await axios.get(`${API_BASE}/stripe/billing`);
       setClients(data.clients || []);
     } catch (e) {
       setError(e.response?.data?.error || e.message);
@@ -57,7 +58,7 @@ export default function Billing() {
     setSubmitError('');
     setSubmitSuccess('');
     try {
-      await axios.post('http://localhost:3001/stripe/create-subscription', {
+      await axios.post(`${API_BASE}/stripe/create-subscription`, {
         client_id: modal.id,
         price_id: priceId.trim(),
         payment_method_id: pmId.trim(),

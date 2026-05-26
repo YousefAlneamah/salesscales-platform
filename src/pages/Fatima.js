@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
@@ -74,7 +75,7 @@ export default function Fatima() {
   };
 
   const callFatima = async (prompt) => {
-    const { data } = await axios.post('http://localhost:3001/fatima', { prompt });
+    const { data } = await axios.post(`${API_BASE}/fatima`, { prompt });
     return data.result || 'Unable to generate response.';
   };
 

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 
 export default function Ali() {
@@ -17,7 +18,7 @@ export default function Ali() {
   const [tierTarget, setTierTarget] = useState('starter');
 
   const callAli = async (prompt) => {
-    const { data } = await axios.post('http://localhost:3001/ali', { prompt });
+    const { data } = await axios.post(`${API_BASE}/ali`, { prompt });
     return data.result || 'Unable to generate response.';
   };
 

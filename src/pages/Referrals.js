@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 
-const API = 'http://localhost:3001';
 
 const STATUS_MAP = {
   pending:   { cls: 'badge-yellow', label: 'Pending' },
@@ -22,7 +22,7 @@ export default function Referrals() {
   const fetchReferrals = async () => {
     setLoading(true);
     try {
-      const { data } = await axios.get(`${API}/referrals/list`);
+      const { data } = await axios.get(`${API_BASE}/referrals/list`);
       setReferrals(data.referrals || []);
     } catch (_) {}
     setLoading(false);
@@ -32,7 +32,7 @@ export default function Referrals() {
     if (!form.referrer_name || !form.referred_business) { alert('Referrer name and referred business are required'); return; }
     setSubmitting(true);
     try {
-      const { data } = await axios.post(`${API}/referrals/create`, form);
+      const { data } = await axios.post(`${API_BASE}/referrals/create`, form);
       setReferrals([data.referral, ...referrals]);
       setShowForm(false);
       setForm({ referrer_name: '', referrer_email: '', referred_business: '', notes: '' });
@@ -42,7 +42,7 @@ export default function Referrals() {
 
   const updateStatus = async (id, status) => {
     try {
-      await axios.patch(`${API}/referrals/${id}/status`, { status });
+      await axios.patch(`${API_BASE}/referrals/${id}/status`, { status });
       setReferrals(referrals.map(r => r.id === id ? { ...r, status } : r));
     } catch (_) {}
   };

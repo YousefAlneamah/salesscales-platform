@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 
 const ACCEPTED = 'audio/*,.mp3,.mp4,.wav,.m4a,.ogg,.webm,.flac';
@@ -48,7 +49,7 @@ export default function Transcribe() {
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
-      const { data } = await axios.post('http://localhost:3001/whisper/transcribe', {
+      const { data } = await axios.post(`${API_BASE}/whisper/transcribe`, {
         audio_base64: base64,
         filename: file.name,
         mime_type: file.type || 'audio/mpeg',

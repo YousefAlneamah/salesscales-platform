@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
@@ -32,7 +33,7 @@ export default function Hussain() {
   };
 
   const callHussain = async (prompt) => {
-    const { data } = await axios.post('http://localhost:3001/hussain', { prompt });
+    const { data } = await axios.post(`${API_BASE}/hussain`, { prompt });
     return data.result || 'Unable to generate response.';
   };
 

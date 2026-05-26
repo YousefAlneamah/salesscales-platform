@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 
 const CATEGORIES = [
@@ -152,7 +153,7 @@ Grade: 0-40=F, 41-55=D, 56-65=C, 66-75=B, 76-85=A, 86-100=A+
 Be specific, be direct, think like a revenue strategist. This audit is used by Sales Scales to pitch and close this prospect.`;
 
     try {
-      const { data } = await axios.post('http://localhost:3001/hussain', { prompt, clientId: null });
+      const { data } = await axios.post(`${API_BASE}/hussain`, { prompt, clientId: null });
       if (!data.result) throw new Error('No response from Hussain');
 
       // Strip markdown code fences, then extract outermost JSON object

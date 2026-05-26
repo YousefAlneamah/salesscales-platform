@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import { createClient } from '@supabase/supabase-js';
 import axios from 'axios';
 
@@ -41,7 +42,7 @@ export default function ShopifyWebhooks() {
   const checkStatus = async (shop, accessToken) => {
     setChecking(prev => ({ ...prev, [shop]: true }));
     try {
-      const res = await axios.post('http://localhost:3001/shopify/list-webhooks', { shop, accessToken });
+      const res = await axios.post(`${API_BASE}/shopify/list-webhooks`, { shop, accessToken });
       setWebhookStatus(prev => ({ ...prev, [shop]: { webhooks: res.data.webhooks || [], error: null } }));
     } catch (e) {
       setWebhookStatus(prev => ({ ...prev, [shop]: { webhooks: [], error: e.response?.data?.error || e.message } }));
@@ -52,7 +53,7 @@ export default function ShopifyWebhooks() {
   const registerWebhooks = async (shop, accessToken) => {
     setRegistering(prev => ({ ...prev, [shop]: true }));
     try {
-      const res = await axios.post('http://localhost:3001/shopify/register-webhooks', { shop, accessToken });
+      const res = await axios.post(`${API_BASE}/shopify/register-webhooks`, { shop, accessToken });
       if (res.data.failed?.length > 0) {
         alert(`Registered ${res.data.registered.length} webhooks. ${res.data.failed.length} failed:\n${res.data.failed.map(f => f.topic).join(', ')}`);
       }

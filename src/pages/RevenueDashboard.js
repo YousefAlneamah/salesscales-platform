@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 
 const fmt = (n) => n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n}`;
 const pct = (n) => `${n}%`;
@@ -36,7 +37,7 @@ export default function RevenueDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('http://localhost:3001/revenue/dashboard');
+      const res = await fetch(`${API_BASE}/revenue/dashboard`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setStats(data);

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
-const API = 'http://localhost:3001';
 
 export default function CaseStudies() {
   const [cases, setCases] = useState([]);
@@ -19,7 +19,7 @@ export default function CaseStudies() {
   const fetchCases = async () => {
     setLoading(true);
     try {
-      const { data } = await axios.get(`${API}/casestudies/list`);
+      const { data } = await axios.get(`${API_BASE}/casestudies/list`);
       setCases(data.case_studies || []);
     } catch (_) {}
     setLoading(false);
@@ -34,7 +34,7 @@ export default function CaseStudies() {
     if (!form.title || !form.results) { alert('Title and results are required'); return; }
     setGenerating(true);
     try {
-      const { data } = await axios.post(`${API}/casestudies/create`, form);
+      const { data } = await axios.post(`${API_BASE}/casestudies/create`, form);
       const newCase = data.case_study;
       setCases([newCase, ...cases]);
       setSelectedCase(newCase);

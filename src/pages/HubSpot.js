@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
@@ -39,7 +40,7 @@ export default function HubSpot() {
     setSyncError('');
 
     // Load contact count with email
-    axios.get(`http://localhost:3001/hubspot/contact-count?client_id=${selectedClient}`)
+    axios.get(`${API_BASE}/hubspot/contact-count?client_id=${selectedClient}`)
       .then(({ data }) => setContactCount(data.count))
       .catch(() => setContactCount(null));
 
@@ -63,7 +64,7 @@ export default function HubSpot() {
     setSyncResult(null);
     setSyncError('');
     try {
-      const { data } = await axios.post('http://localhost:3001/hubspot/sync-contacts', { client_id: selectedClient });
+      const { data } = await axios.post(`${API_BASE}/hubspot/sync-contacts`, { client_id: selectedClient });
       const entry = { ...data, client: clientData?.name, ts: new Date().toISOString() };
       setSyncResult(entry);
       setSyncHistory(prev => [entry, ...prev.slice(0, 9)]);

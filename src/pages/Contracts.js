@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
@@ -75,7 +76,7 @@ export default function Contracts() {
   const loadContracts = async () => {
     setLoading(true);
     try {
-      const { data } = await axios.get('http://localhost:3001/contracts/list');
+      const { data } = await axios.get(`${API_BASE}/contracts/list`);
       setContracts(data.contracts || []);
     } catch { setContracts([]); }
     finally { setLoading(false); }
@@ -86,7 +87,7 @@ export default function Contracts() {
     setGenerating(true);
     setGenError('');
     try {
-      const { data } = await axios.post('http://localhost:3001/contracts/create', {
+      const { data } = await axios.post(`${API_BASE}/contracts/create`, {
         client_id: form.client_id,
         tier: form.tier,
         monthly_fee: parseFloat(form.monthly_fee),
@@ -104,7 +105,7 @@ export default function Contracts() {
   const updateStatus = async (id, status) => {
     setUpdatingStatus(id);
     try {
-      await axios.patch(`http://localhost:3001/contracts/${id}/status`, { status });
+      await axios.patch(`${API_BASE}/contracts/${id}/status`, { status });
       setContracts(prev => prev.map(c => c.id === id ? { ...c, status } : c));
     } catch {}
     finally { setUpdatingStatus(null); }

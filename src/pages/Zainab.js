@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
@@ -23,7 +24,7 @@ export default function Zainab() {
   };
 
   const callZainab = async (prompt) => {
-    const { data } = await axios.post('http://localhost:3001/zainab', { prompt });
+    const { data } = await axios.post(`${API_BASE}/zainab`, { prompt });
     return data.result || 'Unable to generate response.';
   };
 

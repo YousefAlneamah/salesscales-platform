@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
@@ -55,7 +56,7 @@ export default function Analytics() {
     setLoading(true);
     try {
       const [serverRes, contactsRes, workflowsRes, messagesRes, dealsRes, approvalsRes, clientsRes] = await Promise.all([
-        axios.get('http://localhost:3001/analytics/stats'),
+        axios.get(`${API_BASE}/analytics/stats`),
         supabase.from('contacts').select('source, pipeline_stage, client_id'),
         supabase.from('workflows').select('*'),
         supabase.from('messages').select('channel, direction, client_id'),

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import { supabase } from '../supabase';
 
 export default function Inbox() {
@@ -39,7 +40,7 @@ export default function Inbox() {
   const generateAIReply = async (message) => {
     setGenerating(true);
     try {
-      const response = await fetch('http://localhost:3001/generate-reply', {
+      const response = await fetch(`${API_BASE}/generate-reply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

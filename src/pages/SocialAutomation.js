@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import { supabase } from '../supabase';
 
 const TONES = [
@@ -82,7 +83,7 @@ export default function SocialAutomation() {
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null);
 
-  const BASE_URL = 'http://localhost:3001';
+  const BASE_URL = `${API_BASE}`;
   const VERIFY_TOKEN = 'salesscales_meta_verify';
 
   useEffect(() => {

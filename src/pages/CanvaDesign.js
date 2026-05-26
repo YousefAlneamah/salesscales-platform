@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
@@ -39,7 +40,7 @@ export default function CanvaDesign() {
     setError('');
     setResult(null);
     try {
-      const { data } = await axios.post('http://localhost:3001/canva/create-design', {
+      const { data } = await axios.post(`${API_BASE}/canva/create-design`, {
         client_id: selectedClient || null,
         design_type: designType,
         brand_colors: brandColors,

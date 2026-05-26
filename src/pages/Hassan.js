@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 
 export default function Hassan() {
@@ -18,7 +19,7 @@ export default function Hassan() {
   const [followUpContext, setFollowUpContext] = useState('');
 
   const callHassan = async (prompt) => {
-    const { data } = await axios.post('http://localhost:3001/hassan', { prompt });
+    const { data } = await axios.post(`${API_BASE}/hassan`, { prompt });
     return data.result || 'Unable to generate response.';
   };
 

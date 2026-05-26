@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 
 const MEMBERS = [
@@ -54,8 +55,8 @@ export default function TeamBriefings() {
     setLoading(true);
     try {
       const url = filter === 'all'
-        ? 'http://localhost:3001/team/briefings'
-        : `http://localhost:3001/team/briefings?recipient=${filter}`;
+        ? `${API_BASE}/team/briefings`
+        : `${API_BASE}/team/briefings?recipient=${filter}`;
       const { data } = await axios.get(url);
       setBriefings(data.briefings || []);
     } catch (e) {
@@ -75,7 +76,7 @@ export default function TeamBriefings() {
     }
     setSubmitting(true);
     try {
-      await axios.post('http://localhost:3001/team/brief', form);
+      await axios.post(`${API_BASE}/team/brief`, form);
       setSuccessMsg(`Briefing sent to ${getMemberName(form.to_member)}.`);
       setForm(f => ({ ...f, subject: '', content: '' }));
       fetchBriefings();

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
@@ -27,8 +28,8 @@ export default function AutoReports() {
     setLoadingReports(true);
     try {
       const url = clientId
-        ? `http://localhost:3001/reports/list?client_id=${clientId}`
-        : 'http://localhost:3001/reports/list';
+        ? `${API_BASE}/reports/list?client_id=${clientId}`
+        : `${API_BASE}/reports/list`;
       const { data } = await axios.get(url);
       setReports(data.reports || []);
     } catch {
@@ -45,7 +46,7 @@ export default function AutoReports() {
     setGenerating(true);
     setGenError('');
     try {
-      const { data } = await axios.post('http://localhost:3001/reports/generate', { client_id: selectedClient });
+      const { data } = await axios.post(`${API_BASE}/reports/generate`, { client_id: selectedClient });
       setReports(prev => [{ ...data.report, clients: { name: clients.find(c => c.id === selectedClient)?.name || '' } }, ...prev]);
       setExpandedId(data.report.id);
     } catch (e) {

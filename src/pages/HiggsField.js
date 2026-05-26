@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
@@ -30,7 +31,7 @@ export default function HiggsField() {
     setError('');
     setResult(null);
     try {
-      const { data } = await axios.post('http://localhost:3001/higgsfield/create-video', {
+      const { data } = await axios.post(`${API_BASE}/higgsfield/create-video`, {
         client_id: selectedClient || null,
         video_type: videoType,
         prompt: prompt.trim(),

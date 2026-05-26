@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_BASE } from '../config';
 import axios from 'axios';
 
 export default function Mahdi() {
@@ -17,7 +18,7 @@ export default function Mahdi() {
   const [smsCount, setSmsCount] = useState('3');
 
   const callMahdi = async (prompt) => {
-    const { data } = await axios.post('http://localhost:3001/mahdi', { prompt });
+    const { data } = await axios.post(`${API_BASE}/mahdi`, { prompt });
     return data.result || 'Unable to generate response.';
   };
 
