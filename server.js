@@ -2184,6 +2184,68 @@ app.get('/revenue/dashboard', async (req, res) => {
   }
 });
 
+// ─── STRIPE BILLING ───────────────────────────────────────
+const STRIPE_API = 'https://api.stripe.com/v1';
+const stripeHeaders = () => ({ Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' });
+const toQs = (obj) => new URLSearchParams(obj).toString();
+
+app.post('/stripe/create-subscription', async (req, res) => {
+  const { client_id, price_id, payment_method_id } = req.body;
+  if (!client_id || !price_id || !payment_method_id)
+    return res.status(400).json({ error: 'client_id, price_id, and payment_method_id are required' });
+  if (!process.env.STRIPE_SECRET_KEY)
+    return res.status(500).json({ error: 'STRIPE_SECRET_KEY not configured' });
+  try {
+    const { data: client } = await supabase.from('clients').select('id, name, stripe_customer_id').eq('id', client_id).maybeSingle();
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+
+    let customerId = client.stripe_customer_id;
+    if (!customerId) {
+      const custResp = await axios.post(`${STRIPE_API}/customers`, toQs({ name: client.name }), { headers: stripeHeaders() });
+      customerId = custResp.data.id;
+      await supabase.from('clients').update({ stripe_customer_id: customerId }).eq('id', client_id);
+    }
+
+    await axios.post(`${STRIPE_API}/payment_methods/${payment_method_id}/attach`, toQs({ customer: customerId }), { headers: stripeHeaders() });
+    await axios.post(`${STRIPE_API}/customers/${customerId}`, toQs({ 'invoice_settings[default_payment_method]': payment_method_id }), { headers: stripeHeaders() });
+
+    const subResp = await axios.post(`${STRIPE_API}/subscriptions`,
+      toQs({ customer: customerId, 'items[0][price]': price_id, default_payment_method: payment_method_id }),
+      { headers: stripeHeaders() }
+    );
+    res.json({ ok: true, subscription_id: subResp.data.id, customer_id: customerId, status: subResp.data.status });
+  } catch (e) {
+    const msg = e.response?.data?.error?.message || e.message;
+    console.error('Stripe create-subscription error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+app.get('/stripe/billing', async (req, res) => {
+  if (!process.env.STRIPE_SECRET_KEY)
+    return res.status(500).json({ error: 'STRIPE_SECRET_KEY not configured' });
+  try {
+    const { data: clients } = await supabase.from('clients').select('id, name, tier, status, stripe_customer_id').order('name');
+    if (!clients) return res.json({ clients: [] });
+
+    const withStripe = await Promise.all(clients.map(async (c) => {
+      if (!c.stripe_customer_id) return { ...c, subscription_status: null, subscription_id: null };
+      try {
+        const subResp = await axios.get(`${STRIPE_API}/subscriptions?customer=${c.stripe_customer_id}&limit=1&status=all`, { headers: stripeHeaders() });
+        const sub = subResp.data.data?.[0];
+        return { ...c, subscription_status: sub?.status || null, subscription_id: sub?.id || null, current_period_end: sub?.current_period_end || null };
+      } catch {
+        return { ...c, subscription_status: 'error', subscription_id: null };
+      }
+    }));
+
+    res.json({ clients: withStripe });
+  } catch (e) {
+    console.error('Stripe billing error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── HIGGSFIELD MCP ───────────────────────────────────────
 const HIGGSFIELD_URLS = {
   product_showcase: 'https://higgsfield.ai/',
