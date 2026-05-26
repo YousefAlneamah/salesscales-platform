@@ -2184,6 +2184,76 @@ app.get('/revenue/dashboard', async (req, res) => {
   }
 });
 
+// ─── HUBSPOT MCP ──────────────────────────────────────────
+const HUBSPOT_API = 'https://api.hubapi.com';
+
+app.post('/hubspot/sync-contacts', async (req, res) => {
+  const { client_id } = req.body;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+  try {
+    const { data: client } = await supabase.from('clients').select('id, name, hubspot_api_key').eq('id', client_id).maybeSingle();
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+    if (!client.hubspot_api_key)
+      return res.status(400).json({ error: 'HubSpot API key not configured. Add it in Settings → Email Domains.' });
+
+    const { data: contacts } = await supabase
+      .from('contacts')
+      .select('first_name, last_name, email, phone, pipeline_stage, source')
+      .eq('client_id', client_id)
+      .not('email', 'is', null);
+
+    if (!contacts || contacts.length === 0)
+      return res.json({ synced: 0, failed: 0, total: 0, message: 'No contacts with email addresses to sync.' });
+
+    const hsHeaders = { Authorization: `Bearer ${client.hubspot_api_key}`, 'Content-Type': 'application/json' };
+    const BATCH = 100;
+    let synced = 0, failed = 0;
+
+    for (let i = 0; i < contacts.length; i += BATCH) {
+      const slice = contacts.slice(i, i + BATCH);
+      const inputs = slice.map(c => ({
+        idProperty: 'email',
+        id: c.email,
+        properties: {
+          email:       c.email,
+          firstname:   c.first_name  || '',
+          lastname:    c.last_name   || '',
+          phone:       c.phone       || '',
+          hs_lead_status: c.pipeline_stage || '',
+          lead_source: c.source      || '',
+        },
+      }));
+      try {
+        await axios.post(`${HUBSPOT_API}/crm/v3/objects/contacts/batch/upsert`, { inputs }, { headers: hsHeaders });
+        synced += slice.length;
+      } catch (batchErr) {
+        console.error('HubSpot batch upsert error:', batchErr.response?.data?.message || batchErr.message);
+        failed += slice.length;
+      }
+    }
+
+    res.json({ synced, failed, total: contacts.length });
+  } catch (e) {
+    console.error('hubspot/sync-contacts error:', e.message);
+    res.status(500).json({ error: e.response?.data?.message || e.message });
+  }
+});
+
+app.get('/hubspot/contact-count', async (req, res) => {
+  const { client_id } = req.query;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+  try {
+    const { count } = await supabase
+      .from('contacts')
+      .select('id', { count: 'exact', head: true })
+      .eq('client_id', client_id)
+      .not('email', 'is', null);
+    res.json({ count: count || 0 });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── AUTOMATED MONTHLY REPORTS ────────────────────────────
 app.post('/reports/generate', async (req, res) => {
   const { client_id } = req.body;

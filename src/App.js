@@ -25,6 +25,7 @@ import CanvaDesign from "./pages/CanvaDesign";
 import HiggsField from "./pages/HiggsField";
 import Billing from "./pages/Billing";
 import AutoReports from "./pages/AutoReports";
+import HubSpot from "./pages/HubSpot";
 import Transcribe from "./pages/Transcribe";
 import MyPipeline from "./pages/MyPipeline";
 import SocialAutomation from "./pages/SocialAutomation";
@@ -78,6 +79,7 @@ const navItems = [
     { id: "higgsfield", label: "Higgsfield", icon: "ti-video" },
     { id: "social", label: "Social Media", icon: "ti-social" },
     { id: "voice", label: "Voice Agents", icon: "ti-microphone" },
+    { id: "hubspot", label: "HubSpot", icon: "ti-brand-hubspot" },
     { id: "integrations", label: "All Integrations", icon: "ti-plug" },
   ]},
   { group: "SALES SCALES", items: [
@@ -128,6 +130,7 @@ const pageTitles = {
   billing: "Billing",
   social: "Social Media",
   voice: "Voice Agents",
+  hubspot: "HubSpot CRM Sync",
   integrations: "All Integrations",
   mypipeline: "My Pipeline",
   socialautomation: "Social Automation",
@@ -219,6 +222,7 @@ function App() {
       case "higgsfield": return <HiggsField />;
       case "social": return <SocialMedia />;
       case "voice": return <VoiceAgents />;
+      case "hubspot": return <HubSpot />;
       case "integrations": return <Integrations />;
       case "mypipeline": return <MyPipeline />;
       case "socialautomation": return <SocialAutomation />;
