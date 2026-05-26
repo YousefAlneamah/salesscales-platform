@@ -98,7 +98,7 @@ YOUTUBE_API_KEY=            # YouTube Data API v3 — bulk channel import (serve
 
 | Table | Purpose |
 |-------|---------|
-| `clients` | Agency clients (ecommerce stores). Fields: `id, name, business_type, niche, tier, status, health_score, from_email, from_name, klaviyo_api_key, meta_access_token, meta_ad_account_id` |
+| `clients` | Agency clients (ecommerce stores). Fields: `id, name, business_type, niche, tier, status, health_score, from_email, from_name, klaviyo_api_key, meta_access_token, meta_ad_account_id, canva_brand_kit_id` |
 | `client_users` | Login credentials for client portal. Fields: `id, name, email, password, client_id, last_login` |
 | `contacts` | CRM contacts. Fields: `id, first_name, last_name, email, phone, source, channel, pipeline_stage, client_id, shopify_customer_id, last_activity, status` |
 | `pipeline_deals` | Sales pipeline deals. Fields: `id, value, stage, client_id` |
@@ -147,6 +147,7 @@ Single Express file, port 3001. All AI calls go through the `aiCall()` helper wh
 | POST | `/shopify/sync-customers` | Pull customers from Shopify → contacts table |
 | POST | `/shopify/store-data` | Fetch live data from a client's connected Shopify store — total orders, month revenue, month order count, abandoned checkouts count, top 8 products by revenue, 10 most recent orders. Uses stored access token from `shopify_connections`. |
 | GET  | `/analytics/stats` | Month-specific platform stats — emails/SMS/WhatsApp sent, contacts added, workflow enrollments, active sequences. Uses Supabase `count: 'exact'` queries with `monthStart` filter. Also returns all-time totals for contacts, active enrollments, pipeline value. |
+| POST | `/canva/create-design` | Generate a Canva design brief via Mahdi. Accepts `{ client_id, design_type (social_post/email_header/ad_banner), brand_colors[], prompt }`. Looks up `canva_brand_kit_id` from clients table. Uses `aiCall()` with Mahdi's persona to produce a structured 7-section brief (concept, layout, color usage, typography, copy, imagery, mood). Returns `{ brief, canva_url, design_type, design_label, canva_brand_kit_id }`. Canva URL maps to the matching template browse page. |
 | POST | `/whisper/transcribe` | Transcribe an audio file using OpenAI Whisper. Accepts `{ audio_base64, filename, mime_type }`. Converts base64 to Buffer, sends as multipart/form-data to `https://api.openai.com/v1/audio/transcriptions` with `model: whisper-1`. Returns `{ text }`. Max 25 MB. Uses `form-data` npm package for multipart construction. |
 | POST | `/competitor/analyze` | Competitor intelligence via Hussain. Accepts `{ facebook_page_url, client_id? }`. Runs RAG search for context, then calls `aiCall()` with Hussain's persona to produce a structured report: positioning, target audience, price tier, marketing channels, weaknesses, and Sales Scales winning angles. Returns `{ analysis }`. |
 | POST | `/meta/ad-stats` | Fetch Meta Ads performance for a client. Accepts `{ client_id }` — looks up `meta_access_token` and `meta_ad_account_id` from clients table. 2 parallel Meta Graph API v21.0 calls: account-level insights (spend, impressions, clicks, CTR, purchase ROAS) and top-5 ads by spend at ad level. Returns `{ spend, impressions, clicks, ctr, roas, topAds[] }`. 400 if credentials not configured; 401 on invalid token (error code 190/102). |
@@ -176,7 +177,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 
 `node-cron` runs every 15 minutes. Finds `workflow_enrollments` with `status = 'active'` and `next_step_at <= now`. Processes `wait`, `sms`, `whatsapp`, and `email` step types. Pauses enrollment on inbound SMS or WhatsApp reply. Completes enrollment when all steps are done.
 
-## All Pages (43 total)
+## All Pages (44 total)
 
 ### Authentication
 - **Login** (`Login.js`) — owner hardcoded credentials, client login via `client_users` table
@@ -210,6 +211,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 - **SocialMedia** (`SocialMedia.js`) — social media management
 - **VoiceAgents** (`VoiceAgents.js`) — ElevenLabs voice agent config; inbound + outbound agents, test call panel. Error details from API are always coerced to string via `errStr()` helper before rendering.
 - **KlaviyoStats** (`KlaviyoStats.js`) — Klaviyo email performance dashboard at route `klaviyo-stats`. Client selector → POST `/klaviyo/stats` → shows 4 stat cards (open rate, click rate, revenue attributed, total subscribers), list breakdown bar chart, recent campaigns table, and industry benchmark comparison panel with visual gauge for open rate and click rate vs industry averages. Auth errors surface a Settings link.
+- **CanvaDesign** (`CanvaDesign.js`) — Canva AI design brief generator at route `canva-design` (icon `ti-palette`). Client selector (optional, pulls RAG brand context), design type picker (Social Post 1080×1080 / Email Header 600×200 / Ad Banner 1200×628), brand colors input with live swatch preview, prompt textarea. Calls `POST /canva/create-design` → Mahdi generates a 7-section brief. Output panel shows dark header bar with word count, Copy Brief button, Launch in Canva gold link, full brief in pre-wrap, optional Brand Kit ID callout, and usage tip.
 - **MetaAds** (`MetaAds.js`) — Meta Ads performance dashboard at route `meta-ads`. Client selector → POST `/meta/ad-stats` → 4 stat cards (spend, impressions, CTR, ROAS), ROAS vs benchmark bar chart, spend efficiency panel (CPC, CPM, total spend), top-5 ads table with per-ad spend bar, clicks, CTR, and ROAS badge. Three distinct error states: 400 (credentials not configured → Settings link), 401 (invalid token → Settings link), generic.
 - **Integrations** (`Integrations.js`) — all third-party integrations hub
 

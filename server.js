@@ -2184,6 +2184,84 @@ app.get('/revenue/dashboard', async (req, res) => {
   }
 });
 
+// ─── CANVA MCP ────────────────────────────────────────────
+const CANVA_URLS = {
+  social_post:   'https://www.canva.com/social-media-graphics/templates/',
+  email_header:  'https://www.canva.com/email-headers/templates/',
+  ad_banner:     'https://www.canva.com/banner-ads/templates/',
+};
+
+const CANVA_LABELS = {
+  social_post:  'Social Post (1080×1080)',
+  email_header: 'Email Header (600×200)',
+  ad_banner:    'Ad Banner (1200×628)',
+};
+
+app.post('/canva/create-design', async (req, res) => {
+  const { client_id, design_type = 'social_post', brand_colors = [], prompt } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'prompt required' });
+  if (!CANVA_URLS[design_type]) return res.status(400).json({ error: `Invalid design_type. Use: ${Object.keys(CANVA_URLS).join(', ')}` });
+
+  try {
+    let canva_brand_kit_id = null;
+    let clientName = '';
+    if (client_id) {
+      const { data: client } = await supabase.from('clients')
+        .select('name, canva_brand_kit_id')
+        .eq('id', client_id)
+        .maybeSingle();
+      canva_brand_kit_id = client?.canva_brand_kit_id || null;
+      clientName = client?.name || '';
+    }
+
+    const [ragContext, briefingsCtx] = await Promise.all([
+      ragSearch(prompt, client_id),
+      getBriefingsContext('mahdi'),
+    ]);
+    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+
+    const colorBlock = brand_colors.length > 0
+      ? `Brand Colors: ${brand_colors.join(', ')}`
+      : 'Brand Colors: not specified';
+
+    const brief = await aiCall(
+      `You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world-class creative director and copywriter who specialises in visual content for ecommerce brands. You produce precise, actionable design briefs. You are Mahdi — never mention Claude.`,
+      `Create a detailed Canva design brief for the following:
+
+Client: ${clientName || 'Not specified'}
+Design Type: ${CANVA_LABELS[design_type]}
+${colorBlock}
+Request: ${prompt}
+
+${context ? `Brand & client context:\n${context}\n` : ''}
+Your brief must include:
+1. **Concept** — One sentence creative direction
+2. **Visual Layout** — Exact layout structure (background, focal elements, placement)
+3. **Color Usage** — How to apply each brand color and where
+4. **Typography** — Font style, size hierarchy, and what text goes where
+5. **Copy** — All text elements, headlines, subheads, CTA — ready to paste into Canva
+6. **Imagery** — What photo or graphic style to use
+7. **Mood** — 3 adjectives that define the feel
+
+Be specific and production-ready. A designer should be able to open Canva and execute this immediately.`,
+      context
+    );
+
+    const canva_url = CANVA_URLS[design_type];
+
+    res.json({
+      brief,
+      canva_url,
+      design_type,
+      design_label: CANVA_LABELS[design_type],
+      canva_brand_kit_id,
+    });
+  } catch (e) {
+    console.error('Canva create-design error:', e.message);
+    res.status(500).json({ error: 'Failed to generate design brief', details: e.message });
+  }
+});
+
 // ─── WHISPER TRANSCRIPTION ────────────────────────────────
 app.post('/whisper/transcribe', async (req, res) => {
   const { audio_base64, filename, mime_type } = req.body;
