@@ -98,6 +98,7 @@ YOUTUBE_API_KEY=            # YouTube Data API v3 — bulk channel import (serve
 
 | Table | Purpose |
 |-------|---------|
+| `users` | Owner credentials for JWT auth. Fields: `id (uuid), name, email (unique), password_hash (bcrypt), role (default 'owner'), created_at` |
 | `clients` | Agency clients (ecommerce stores). Fields: `id, name, business_type, niche, tier, status, health_score, from_email, from_name, klaviyo_api_key, meta_access_token, meta_ad_account_id, canva_brand_kit_id, stripe_customer_id, hubspot_api_key, hubspot_portal_id` |
 | `client_users` | Login credentials for client portal. Fields: `id, name, email, password, client_id, last_login` |
 | `contacts` | CRM contacts. Fields: `id, first_name, last_name, email, phone, source, channel, pipeline_stage, client_id, shopify_customer_id, last_activity, status` |
@@ -124,6 +125,26 @@ YOUTUBE_API_KEY=            # YouTube Data API v3 — bulk channel import (serve
 ## Server Architecture (`server.js`)
 
 Single Express file, port 3001. All AI calls go through the `aiCall()` helper which hits the Anthropic API directly via axios. All RAG searches go through `ragSearch()` which embeds the query with OpenAI then calls `search_knowledge_base` RPC.
+
+### JWT Authentication (Phase 10)
+
+Owner login goes through `POST /auth/login` → returns a 7-day JWT signed with `JWT_SECRET` env var (falls back to a dev default if unset). Token is stored in `localStorage` as `"token"` and set as `axios.defaults.headers.common["Authorization"]` for all subsequent API calls. App.js restores the header on page load; logout clears both localStorage keys and deletes the axios default.
+
+`verifyToken` middleware reads `Authorization: Bearer <token>`, calls `jwt.verify`, attaches decoded payload to `req.user`. Returns 401 if header is missing or token is invalid/expired.
+
+**Protected endpoints** (require `Authorization: Bearer <token>`):
+- All 6 AI team endpoints (`/hussain`, `/hassan`, `/ali`, `/mahdi`, `/fatima`, `/zainab`)
+- `POST /reports/generate`
+- `POST /contracts/create`
+- `GET /stripe/billing`
+- `POST /hubspot/sync-contacts`
+- `POST /auth/change-password`
+
+**Auth endpoints** (no token required):
+- `POST /auth/login` — accepts `{ email, password }`, returns `{ token, user: { name, email, role } }`
+- `POST /auth/change-password` — requires token; accepts `{ current_password, new_password }` (min 8 chars)
+
+Client login (role = 'client') still uses Supabase `client_users` table directly — no JWT issued.
 
 ### Rate Limiting (Phase 10)
 
@@ -213,7 +234,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 ## All Pages (50 total)
 
 ### Authentication
-- **Login** (`Login.js`) — owner hardcoded credentials, client login via `client_users` table
+- **Login** (`Login.js`) — owner login via `POST /auth/login` (JWT); client login via Supabase `client_users` table
 - **ClientDashboard** (`ClientDashboard.js`) — restricted view for clients (role = 'client')
 
 ### MAIN Group
@@ -286,7 +307,7 @@ The old `audit` route (MAIN group) has been removed — `store-audit` is the onl
 
 State management is `useState` in `App.js` — `currentPage` string drives which component renders. No React Router `<Route>` — single-page switch statement in `renderPage()`.
 
-Auth state stored in `localStorage` as `"user"` key containing `{ name, email, role, clientId?, clientName?, tier? }`.
+Auth state stored in `localStorage` as `"user"` key containing `{ name, email, role, clientId?, clientName?, tier? }`. Owner JWT stored separately as `"token"` key. On page load, App.js sets `axios.defaults.headers.common["Authorization"]` from the stored token.
 
 ## Coding Patterns
 

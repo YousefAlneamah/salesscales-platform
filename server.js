@@ -12,6 +12,10 @@ const sgMail = require('@sendgrid/mail');
 const { createClient } = require('@supabase/supabase-js');
 const cron = require('node-cron');
 const rateLimit = require('express-rate-limit');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'salesscales-jwt-secret-change-in-production';
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
@@ -75,6 +79,61 @@ app.get('/health', (req, res) => {
     },
     timestamp: new Date().toISOString(),
   });
+});
+
+// ─── JWT MIDDLEWARE ───────────────────────────────────────
+const verifyToken = (req, res, next) => {
+  const auth = req.headers['authorization'];
+  if (!auth || !auth.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authorization token required' });
+  }
+  try {
+    req.user = jwt.verify(auth.slice(7), JWT_SECRET);
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+};
+
+// ─── AUTH ENDPOINTS ───────────────────────────────────────
+app.post('/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+  try {
+    const { data: user } = await supabase.from('users').select('*').eq('email', email.toLowerCase()).maybeSingle();
+    if (!user) return res.status(401).json({ error: 'Invalid email or password' });
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
+    const token = jwt.sign(
+      { id: user.id, email: user.email, name: user.name, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    console.log('Owner login:', user.email);
+    res.json({ token, user: { name: user.name, email: user.email, role: user.role } });
+  } catch (e) {
+    console.error('Login error:', e.message);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.post('/auth/change-password', verifyToken, async (req, res) => {
+  const { current_password, new_password } = req.body;
+  if (!current_password || !new_password) return res.status(400).json({ error: 'current_password and new_password required' });
+  if (new_password.length < 8) return res.status(400).json({ error: 'new_password must be at least 8 characters' });
+  try {
+    const { data: user } = await supabase.from('users').select('*').eq('id', req.user.id).maybeSingle();
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const valid = await bcrypt.compare(current_password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
+    const password_hash = await bcrypt.hash(new_password, 10);
+    await supabase.from('users').update({ password_hash }).eq('id', user.id);
+    console.log('Password changed for:', user.email);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('Change password error:', e.message);
+    res.status(500).json({ error: 'Failed to change password' });
+  }
 });
 
 // ─── HELPER: AI CALL WITH RAG CONTEXT ────────────────────
@@ -1520,7 +1579,7 @@ app.get('/knowledge/import-channel/progress', (req, res) => {
 });
 
 // ─── AI TEAM ENDPOINTS ────────────────────────────────────
-app.post('/hussain', aiLimiter, async (req, res) => {
+app.post('/hussain', aiLimiter, verifyToken, async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
@@ -1538,7 +1597,7 @@ app.post('/hussain', aiLimiter, async (req, res) => {
   }
 });
 
-app.post('/hassan', aiLimiter, async (req, res) => {
+app.post('/hassan', aiLimiter, verifyToken, async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
@@ -1556,7 +1615,7 @@ app.post('/hassan', aiLimiter, async (req, res) => {
   }
 });
 
-app.post('/ali', aiLimiter, async (req, res) => {
+app.post('/ali', aiLimiter, verifyToken, async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
@@ -1574,7 +1633,7 @@ app.post('/ali', aiLimiter, async (req, res) => {
   }
 });
 
-app.post('/mahdi', aiLimiter, async (req, res) => {
+app.post('/mahdi', aiLimiter, verifyToken, async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
@@ -1592,7 +1651,7 @@ app.post('/mahdi', aiLimiter, async (req, res) => {
   }
 });
 
-app.post('/fatima', aiLimiter, async (req, res) => {
+app.post('/fatima', aiLimiter, verifyToken, async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
@@ -1610,7 +1669,7 @@ app.post('/fatima', aiLimiter, async (req, res) => {
   }
 });
 
-app.post('/zainab', aiLimiter, async (req, res) => {
+app.post('/zainab', aiLimiter, verifyToken, async (req, res) => {
   const { prompt, clientId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   try {
@@ -2371,7 +2430,7 @@ const TIER_SERVICE_MAP = {
   enterprise: 'Fully custom engagement — all platform features, white-label options, custom AI agent training, dedicated infrastructure, and a tailored SLA',
 };
 
-app.post('/contracts/create', async (req, res) => {
+app.post('/contracts/create', verifyToken, async (req, res) => {
   const { client_id, tier, monthly_fee, start_date } = req.body;
   if (!client_id || !tier || !monthly_fee || !start_date)
     return res.status(400).json({ error: 'client_id, tier, monthly_fee, and start_date are required' });
@@ -2490,7 +2549,7 @@ app.patch('/contracts/:id/status', async (req, res) => {
 // ─── HUBSPOT MCP ──────────────────────────────────────────
 const HUBSPOT_API = 'https://api.hubapi.com';
 
-app.post('/hubspot/sync-contacts', async (req, res) => {
+app.post('/hubspot/sync-contacts', verifyToken, async (req, res) => {
   const { client_id } = req.body;
   if (!client_id) return res.status(400).json({ error: 'client_id required' });
   try {
@@ -2558,7 +2617,7 @@ app.get('/hubspot/contact-count', async (req, res) => {
 });
 
 // ─── AUTOMATED MONTHLY REPORTS ────────────────────────────
-app.post('/reports/generate', async (req, res) => {
+app.post('/reports/generate', verifyToken, async (req, res) => {
   const { client_id } = req.body;
   if (!client_id) return res.status(400).json({ error: 'client_id required' });
 
@@ -2687,7 +2746,7 @@ app.post('/stripe/create-subscription', async (req, res) => {
   }
 });
 
-app.get('/stripe/billing', async (req, res) => {
+app.get('/stripe/billing', verifyToken, async (req, res) => {
   if (!process.env.STRIPE_SECRET_KEY)
     return res.status(500).json({ error: 'STRIPE_SECRET_KEY not configured' });
   try {

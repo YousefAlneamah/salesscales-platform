@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import axios from "axios";
 import { supabase } from "../supabase";
 
 export default function Login({ onLogin }) {
@@ -11,13 +12,25 @@ export default function Login({ onLogin }) {
     setLoading(true);
     setError("");
 
-    // Owner login
-    if (email === "yousef@salesscales.com" && password === "owner123") {
-      const user = { name: "Yousef", email: "yousef@salesscales.com", role: "owner" };
-      localStorage.setItem("user", JSON.stringify(user));
-      onLogin(user);
-      setLoading(false);
-      return;
+    // Owner login — validated server-side against users table
+    try {
+      const { data } = await axios.post("http://localhost:3001/auth/login", { email, password });
+      if (data.token) {
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("user", JSON.stringify(data.user));
+        axios.defaults.headers.common["Authorization"] = "Bearer " + data.token;
+        onLogin(data.user);
+        setLoading(false);
+        return;
+      }
+    } catch (ownerErr) {
+      if (ownerErr.response?.status === 401) {
+        // Not an owner — fall through to client login
+      } else if (ownerErr.response?.status !== 401) {
+        setError("Something went wrong. Please try again.");
+        setLoading(false);
+        return;
+      }
     }
 
     // Client login — two queries to avoid join dependency on FK constraints

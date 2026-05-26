@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import axios from "axios";
 import "./styles/global.css";
 import { supabase } from "./supabase";
 import Login from "./pages/Login";
@@ -159,6 +160,8 @@ function App() {
   useEffect(() => {
     const saved = localStorage.getItem("user");
     if (saved) setUser(JSON.parse(saved));
+    const token = localStorage.getItem("token");
+    if (token) axios.defaults.headers.common["Authorization"] = "Bearer " + token;
   }, []);
 
   useEffect(() => {
@@ -181,6 +184,8 @@ function App() {
 
   const handleLogout = () => {
     localStorage.removeItem("user");
+    localStorage.removeItem("token");
+    delete axios.defaults.headers.common["Authorization"];
     setUser(null);
   };
 
