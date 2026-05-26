@@ -1855,6 +1855,63 @@ app.post('/social/config', (req, res) => {
   res.json({ success: true });
 });
 
+// ─── ANALYTICS STATS ─────────────────────────────────────
+app.get('/analytics/stats', async (req, res) => {
+  try {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+    const [
+      emailsRes, smsRes, whatsappRes,
+      contactsRes, enrollmentsRes,
+      activeSeqRes, totalContactsRes,
+      activeEnrollmentsRes, dealsRes,
+      inboundRes,
+    ] = await Promise.all([
+      supabase.from('messages').select('*', { count: 'exact', head: true })
+        .eq('direction', 'outbound').eq('channel', 'Email').gte('created_at', monthStart),
+      supabase.from('messages').select('*', { count: 'exact', head: true })
+        .eq('direction', 'outbound').eq('channel', 'SMS').gte('created_at', monthStart),
+      supabase.from('messages').select('*', { count: 'exact', head: true })
+        .eq('direction', 'outbound').eq('channel', 'WhatsApp').gte('created_at', monthStart),
+      supabase.from('contacts').select('*', { count: 'exact', head: true })
+        .gte('created_at', monthStart),
+      supabase.from('workflow_enrollments').select('*', { count: 'exact', head: true })
+        .gte('enrolled_at', monthStart),
+      supabase.from('workflows').select('*', { count: 'exact', head: true })
+        .eq('status', 'active'),
+      supabase.from('contacts').select('*', { count: 'exact', head: true }),
+      supabase.from('workflow_enrollments').select('*', { count: 'exact', head: true })
+        .eq('status', 'active'),
+      supabase.from('pipeline_deals').select('value, stage'),
+      supabase.from('messages').select('*', { count: 'exact', head: true })
+        .eq('direction', 'inbound').gte('created_at', monthStart),
+    ]);
+
+    const deals = dealsRes.data || [];
+    const pipelineValue = deals.reduce((s, d) => s + (d.value || 0), 0);
+    const convertedValue = deals.filter(d => d.stage === 'Converted').reduce((s, d) => s + (d.value || 0), 0);
+
+    res.json({
+      month: now.toLocaleString('default', { month: 'long', year: 'numeric' }),
+      emailsSentThisMonth: emailsRes.count || 0,
+      smsSentThisMonth: smsRes.count || 0,
+      whatsappSentThisMonth: whatsappRes.count || 0,
+      contactsAddedThisMonth: contactsRes.count || 0,
+      enrollmentsThisMonth: enrollmentsRes.count || 0,
+      activeSequences: activeSeqRes.count || 0,
+      totalContacts: totalContactsRes.count || 0,
+      activeEnrollments: activeEnrollmentsRes.count || 0,
+      inboundThisMonth: inboundRes.count || 0,
+      pipelineValue,
+      convertedValue,
+    });
+  } catch (e) {
+    console.error('Analytics stats error:', e.message);
+    res.status(500).json({ error: 'Failed to fetch analytics stats', details: e.message });
+  }
+});
+
 // ─── REVENUE STATS ────────────────────────────────────────
 app.get('/revenue/stats', async (req, res) => {
   try {

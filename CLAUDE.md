@@ -146,6 +146,7 @@ Single Express file, port 3001. All AI calls go through the `aiCall()` helper wh
 | GET | `/shopify/callback` | Complete Shopify OAuth, save token |
 | POST | `/shopify/sync-customers` | Pull customers from Shopify → contacts table |
 | POST | `/shopify/store-data` | Fetch live data from a client's connected Shopify store — total orders, month revenue, month order count, abandoned checkouts count, top 8 products by revenue, 10 most recent orders. Uses stored access token from `shopify_connections`. |
+| GET  | `/analytics/stats` | Month-specific platform stats — emails/SMS/WhatsApp sent, contacts added, workflow enrollments, active sequences. Uses Supabase `count: 'exact'` queries with `monthStart` filter. Also returns all-time totals for contacts, active enrollments, pipeline value. |
 | GET  | `/revenue/stats` | Revenue stats — pipeline deals, enrollment conversion rates, per-client and per-channel breakdowns |
 | POST | `/team/brief` | Create a team briefing from one AI member to another — inserts into `team_briefings` |
 | GET  | `/team/briefings` | Fetch all briefings; filter by `?recipient=` or `?sender=` query params |
@@ -180,7 +181,7 @@ All AI team endpoints accept `{ prompt, clientId }` and return `{ result }`.
 - **Dashboard** (`Dashboard.js`) — owner overview, stats from all tables
 - **Clients** (`Clients.js`) — agency client management
 - **Contacts** (`Contacts.js`) — CRM contacts, pipeline stages
-- **Analytics** (`Analytics.js`) — platform analytics
+- **Analytics** (`Analytics.js`) — platform analytics. Calls `GET /analytics/stats` for 6 this-month metrics (emails sent, SMS sent, WhatsApp sent, contacts added, workflow enrollments, active sequences), plus direct Supabase queries for all-time breakdowns, charts by source/stage/channel, and workflow performance table. Client filter dropdown applies to all-time sections.
 
 ### AI TEAM Group
 - **Hussain** (`Hussain.js`) — chat interface for Intelligence & Strategy AI
