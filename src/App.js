@@ -24,6 +24,7 @@ import MetaAds from "./pages/MetaAds";
 import CanvaDesign from "./pages/CanvaDesign";
 import HiggsField from "./pages/HiggsField";
 import Billing from "./pages/Billing";
+import AutoReports from "./pages/AutoReports";
 import Transcribe from "./pages/Transcribe";
 import MyPipeline from "./pages/MyPipeline";
 import SocialAutomation from "./pages/SocialAutomation";
@@ -92,6 +93,7 @@ const navItems = [
     { id: "onboarding", label: "Onboarding", icon: "ti-rocket" },
     { id: "marketplace", label: "Marketplace", icon: "ti-building-store" },
     { id: "whitelabel", label: "White Label", icon: "ti-tag" },
+    { id: "auto-reports", label: "Auto Reports", icon: "ti-file-report" },
     { id: "billing", label: "Billing", icon: "ti-credit-card" },
     { id: "settings", label: "Settings", icon: "ti-settings" },
   ]},
@@ -122,6 +124,7 @@ const pageTitles = {
   "meta-ads": "Meta Ads Performance",
   "canva-design": "Canva Design Studio",
   higgsfield: "Higgsfield Video Briefs",
+  "auto-reports": "Automated Monthly Reports",
   billing: "Billing",
   social: "Social Media",
   voice: "Voice Agents",
@@ -227,6 +230,7 @@ function App() {
       case "onboarding": return <Onboarding />;
       case "marketplace": return <Marketplace />;
       case "whitelabel": return <WhiteLabel />;
+      case "auto-reports": return <AutoReports />;
       case "billing": return <Billing />;
       case "settings": return <Settings />;
       default: return <Dashboard />;

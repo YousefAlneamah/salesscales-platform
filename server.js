@@ -2184,6 +2184,99 @@ app.get('/revenue/dashboard', async (req, res) => {
   }
 });
 
+// ─── AUTOMATED MONTHLY REPORTS ────────────────────────────
+app.post('/reports/generate', async (req, res) => {
+  const { client_id } = req.body;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+
+  try {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const period = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+    const { data: client } = await supabase.from('clients').select('id, name, niche, tier').eq('id', client_id).maybeSingle();
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+
+    const [
+      emailRes, smsRes, waRes, contactsRes, enrollRes, seqRes,
+      ragContext, briefingsCtx,
+    ] = await Promise.all([
+      supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', client_id).eq('channel', 'email').eq('direction', 'outbound').gte('created_at', monthStart),
+      supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', client_id).eq('channel', 'sms').eq('direction', 'outbound').gte('created_at', monthStart),
+      supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', client_id).eq('channel', 'whatsapp').eq('direction', 'outbound').gte('created_at', monthStart),
+      supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('client_id', client_id).gte('created_at', monthStart),
+      supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('client_id', client_id).gte('enrolled_at', monthStart),
+      supabase.from('workflows').select('name, enrolled_count').eq('client_id', client_id).eq('status', 'active').order('enrolled_count', { ascending: false }).limit(1),
+      ragSearch(`monthly report ${client.name}`, client_id),
+      getBriefingsContext('zainab'),
+    ]);
+
+    const emailsSent   = emailRes.count   || 0;
+    const smsSent      = smsRes.count     || 0;
+    const whatsappSent = waRes.count      || 0;
+    const contactsAdded = contactsRes.count || 0;
+    const enrollments  = enrollRes.count  || 0;
+    const topSequence  = seqRes.data?.[0]?.name || 'None';
+
+    const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+
+    const summary = await aiCall(
+      `You are Zainab, the Client Partner AI at Sales Scales. You are warm, professional, and deeply invested in each client's success. You write monthly performance reports that are honest, insightful, and actionable. You celebrate wins, identify opportunities, and provide clear next steps. Your reports feel like they come from a trusted advisor who knows the client's business deeply. Never break character or mention Claude.`,
+      `Write a comprehensive monthly performance report for ${client.name} (${client.niche || 'ecommerce'}) for ${period}.
+
+Performance Data:
+- Emails sent: ${emailsSent}
+- SMS sent: ${smsSent}
+- WhatsApp messages sent: ${whatsappSent}
+- New contacts added: ${contactsAdded}
+- Workflow enrollments: ${enrollments}
+- Top performing sequence: ${topSequence}
+
+Write a 5-section report with these exact headings:
+1. MONTHLY OVERVIEW — 2–3 sentences summarising the month's performance in an honest, encouraging tone
+2. CHANNEL PERFORMANCE — specific breakdown of email, SMS, and WhatsApp activity and what the numbers mean
+3. GROWTH & CONTACTS — analysis of new contacts added and the pipeline impact
+4. SEQUENCE PERFORMANCE — commentary on workflow activity and the top sequence
+5. RECOMMENDATIONS FOR NEXT MONTH — 3–5 specific, actionable recommendations Yousef and the team should execute
+
+Use the numbers directly. Be specific. Make the client feel supported and excited about what's coming next month.`,
+      context
+    );
+
+    const { data: report, error: insertErr } = await supabase.from('reports').insert({
+      client_id,
+      period,
+      emails_sent:           emailsSent,
+      sms_sent:              smsSent,
+      whatsapp_sent:         whatsappSent,
+      contacts_added:        contactsAdded,
+      workflow_enrollments:  enrollments,
+      top_sequence:          topSequence,
+      summary,
+    }).select().single();
+
+    if (insertErr) throw insertErr;
+    res.json({ report });
+  } catch (e) {
+    console.error('reports/generate error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/reports/list', async (req, res) => {
+  const { client_id } = req.query;
+  try {
+    let q = supabase.from('reports').select('id, client_id, period, emails_sent, sms_sent, whatsapp_sent, contacts_added, workflow_enrollments, top_sequence, summary, created_at, clients(name)').order('created_at', { ascending: false }).limit(100);
+    if (client_id) q = q.eq('client_id', client_id);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json({ reports: data || [] });
+  } catch (e) {
+    console.error('reports/list error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── STRIPE BILLING ───────────────────────────────────────
 const STRIPE_API = 'https://api.stripe.com/v1';
 const stripeHeaders = () => ({ Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' });
