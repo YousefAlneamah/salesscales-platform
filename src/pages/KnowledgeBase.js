@@ -88,7 +88,7 @@ export default function KnowledgeBase() {
     setLoading(true);
     const { data, count } = await supabase
       .from('knowledge_base')
-      .select('id, title, type, source, client_id, status, notes, created_at, embedding', { count: 'exact' })
+      .select('id, title, type, source, client_id, status, notes, created_at', { count: 'exact' })
       .order('created_at', { ascending: false })
       .limit(100);
     if (data) setDocuments(data);
