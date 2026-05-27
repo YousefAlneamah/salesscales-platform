@@ -88,9 +88,12 @@ export default function KnowledgeBase() {
   const fetchDocuments = async () => {
     setLoading(true);
     try {
-      const { data } = await axios.get(`${API_BASE}/knowledge/documents`);
-      setDocuments(data.documents || []);
-      setTotalCount(data.count || 0);
+      const [docsRes, countRes] = await Promise.all([
+        axios.get(`${API_BASE}/knowledge/documents`),
+        axios.get(`${API_BASE}/knowledge/count`),
+      ]);
+      setDocuments(docsRes.data.documents || []);
+      setTotalCount(countRes.data.count || 0);
     } catch (e) {
       console.error('Failed to fetch documents:', e.message);
     }

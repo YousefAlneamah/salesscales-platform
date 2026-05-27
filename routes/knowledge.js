@@ -312,21 +312,30 @@ module.exports = ({ supabase, axios, importLimiter, upload, PDF2Json, YoutubeTra
     try {
       const { client_id } = req.query;
       const COLS = 'id, title, type, source, client_id, status, notes, created_at';
-
-      let countQuery = supabase.from('knowledge_base').select('*', { count: 'exact', head: true });
-      let docsQuery = supabase.from('knowledge_base').select(COLS).order('created_at', { ascending: false }).limit(100);
-
-      if (client_id) {
-        countQuery = countQuery.eq('client_id', client_id);
-        docsQuery = docsQuery.eq('client_id', client_id);
-      }
-
-      const [{ count }, { data: documents, error }] = await Promise.all([countQuery, docsQuery]);
+      let query = supabase.from('knowledge_base').select(COLS).order('created_at', { ascending: false }).limit(100);
+      if (client_id) query = query.eq('client_id', client_id);
+      const { data: documents, error } = await query;
       if (error) throw error;
-      res.json({ documents: documents || [], count: count || 0 });
+      res.json({ documents: documents || [] });
     } catch (e) {
       console.error('Knowledge documents error:', e.message);
       res.status(500).json({ error: 'Failed to fetch documents', details: e.message });
+    }
+  });
+
+  // Requires this function in Supabase SQL editor:
+  // CREATE OR REPLACE FUNCTION knowledge_base_approx_count()
+  // RETURNS bigint LANGUAGE sql STABLE AS $$
+  //   SELECT reltuples::bigint FROM pg_class WHERE relname = 'knowledge_base';
+  // $$;
+  router.get('/knowledge/count', async (req, res) => {
+    try {
+      const { data, error } = await supabase.rpc('knowledge_base_approx_count');
+      if (error) throw error;
+      res.json({ count: Number(data) || 0 });
+    } catch (e) {
+      console.error('Knowledge count error:', e.message);
+      res.status(500).json({ error: 'Failed to fetch count', details: e.message });
     }
   });
 
