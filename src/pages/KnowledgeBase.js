@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import axios from 'axios';
 import { API_BASE } from '../config';
 import { supabase } from '../supabase';
 
@@ -86,13 +87,13 @@ export default function KnowledgeBase() {
 
   const fetchDocuments = async () => {
     setLoading(true);
-    const { data, count } = await supabase
-      .from('knowledge_base')
-      .select('id, title, type, source, client_id, status, notes, created_at', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .limit(100);
-    if (data) setDocuments(data);
-    if (count) setTotalCount(count);
+    try {
+      const { data } = await axios.get(`${API_BASE}/knowledge/documents`);
+      setDocuments(data.documents || []);
+      setTotalCount(data.count || 0);
+    } catch (e) {
+      console.error('Failed to fetch documents:', e.message);
+    }
     setLoading(false);
   };
 

@@ -308,6 +308,28 @@ module.exports = ({ supabase, axios, importLimiter, upload, PDF2Json, YoutubeTra
     }
   });
 
+  router.get('/knowledge/documents', async (req, res) => {
+    try {
+      const { client_id } = req.query;
+      const COLS = 'id, title, type, source, client_id, status, notes, created_at';
+
+      let countQuery = supabase.from('knowledge_base').select('*', { count: 'exact', head: true });
+      let docsQuery = supabase.from('knowledge_base').select(COLS).order('created_at', { ascending: false }).limit(100);
+
+      if (client_id) {
+        countQuery = countQuery.eq('client_id', client_id);
+        docsQuery = docsQuery.eq('client_id', client_id);
+      }
+
+      const [{ count }, { data: documents, error }] = await Promise.all([countQuery, docsQuery]);
+      if (error) throw error;
+      res.json({ documents: documents || [], count: count || 0 });
+    } catch (e) {
+      console.error('Knowledge documents error:', e.message);
+      res.status(500).json({ error: 'Failed to fetch documents', details: e.message });
+    }
+  });
+
   router.post('/youtube-transcript', async (req, res) => {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: 'No URL provided' });
