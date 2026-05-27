@@ -309,10 +309,15 @@ module.exports = ({ supabase, axios, importLimiter, upload, PDF2Json, YoutubeTra
   });
 
   router.get('/knowledge/documents', async (req, res) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
     try {
       const { client_id } = req.query;
       const COLS = 'id, title, type, source, client_id, status, notes, created_at';
-      let query = supabase.from('knowledge_base').select(COLS).order('created_at', { ascending: false }).limit(100);
+      let query = supabase.from('knowledge_base').select(COLS)
+        .order('created_at', { ascending: false })
+        .range(0, 19)
+        .abortSignal(controller.signal);
       if (client_id) query = query.eq('client_id', client_id);
       const { data: documents, error } = await query;
       if (error) throw error;
@@ -320,6 +325,8 @@ module.exports = ({ supabase, axios, importLimiter, upload, PDF2Json, YoutubeTra
     } catch (e) {
       console.error('Knowledge documents error:', e.message);
       res.status(500).json({ error: 'Failed to fetch documents', details: e.message });
+    } finally {
+      clearTimeout(timer);
     }
   });
 
