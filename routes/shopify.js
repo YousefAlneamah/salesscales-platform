@@ -133,6 +133,16 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
       created_at: new Date().toISOString()
     }]);
     console.log(`[AUTO] Shopify connect — 3-WhatsApp sequence queued for ${shop}`);
+
+    // Save product hash so the daily sync can detect future changes
+    const hashInput = products.slice(0, 6).map(p => {
+      const price = p.variants?.[0]?.price || '0';
+      return `${p.title}:${price}`;
+    }).join('|');
+    const productHash = crypto.createHash('sha256').update(hashInput).digest('hex');
+    await supabase.from('shopify_connections')
+      .update({ last_product_hash: productHash })
+      .eq('shop', shop);
   };
 
   router.get('/install', (req, res) => {

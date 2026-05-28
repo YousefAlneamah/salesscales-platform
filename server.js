@@ -1084,6 +1084,176 @@ Return JSON: {"prospects":[{"name":"...","niche":"...","channel":"Email","pain_p
   }
 });
 
+// ─── AUTO SCHEDULER: SHOPIFY PRODUCT SYNC — 6AM DAILY ────
+cron.schedule('0 6 * * *', async () => {
+  console.log('[AUTO] Shopify sync — checking product changes...');
+  try {
+    const { data: connections } = await supabase
+      .from('shopify_connections')
+      .select('id, shop, access_token, client_id, last_product_hash')
+      .not('client_id', 'is', null);
+    if (!connections || connections.length === 0) {
+      console.log('[AUTO] Shopify sync — no connections found');
+      return;
+    }
+
+    // Only process connections where the client is active
+    const { data: activeClients } = await supabase
+      .from('clients').select('id').eq('status', 'active');
+    const activeIds = new Set((activeClients || []).map(c => c.id));
+    const toSync = connections.filter(c => activeIds.has(c.client_id));
+
+    const mahdiSystem = `You are Mahdi, the Marketing and Content AI at Sales Scales. You write high-converting cart recovery copy. Return ONLY valid JSON, no markdown, no explanation.`;
+
+    const parseSeqJson = (raw) => {
+      const clean = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+      const match = clean.match(/\{[\s\S]*\}/);
+      return JSON.parse(match ? match[0] : clean);
+    };
+
+    let changed = 0, skipped = 0;
+
+    for (const conn of toSync) {
+      try {
+        const { shop, access_token, client_id } = conn;
+        const headers = { 'X-Shopify-Access-Token': access_token, 'Content-Type': 'application/json' };
+        const base = `https://${shop}/admin/api/2026-01`;
+
+        const [productsRes, ordersRes, shopRes] = await Promise.all([
+          axios.get(`${base}/products.json?limit=10&fields=id,title,variants,product_type`, { headers }),
+          axios.get(`${base}/orders.json?status=any&limit=50&fields=total_price&financial_status=paid`, { headers }),
+          axios.get(`${base}/shop.json`, { headers }),
+        ]);
+
+        const products = productsRes.data.products || [];
+        const orders = ordersRes.data.orders || [];
+        const shopInfo = shopRes.data.shop || {};
+
+        // Build a stable hash string from product titles + prices
+        const hashInput = products.slice(0, 6).map(p => {
+          const price = p.variants?.[0]?.price || '0';
+          return `${p.title}:${price}`;
+        }).join('|');
+        const newHash = crypto.createHash('sha256').update(hashInput).digest('hex');
+
+        if (conn.last_product_hash === newHash) {
+          skipped++;
+          console.log(`[AUTO] Shopify sync — no change for ${shop}`);
+          continue;
+        }
+
+        // Products or prices changed — regenerate sequences
+        const totalRevenue = orders.reduce((s, o) => s + parseFloat(o.total_price || 0), 0);
+        const aov = orders.length > 0 ? (totalRevenue / orders.length).toFixed(2) : '0';
+        const productList = products.slice(0, 6).map(p => {
+          const price = p.variants?.[0]?.price || '0';
+          return `${p.title} ($${price})`;
+        }).join(', ');
+        const storeName = shopInfo.name || shop;
+        const ctx = `Store: ${storeName}\nCurrency: ${shopInfo.currency || 'USD'}\nTop products: ${productList}\nAverage order value: $${aov}`;
+
+        // Email: two parallel calls (7 emails total)
+        const [emails1to3Raw, emails4to7Raw] = await Promise.all([
+          aiCall(mahdiSystem,
+            `Write 3 cart recovery emails for this store.\n\n${ctx}\n\nAngles:\nEmail 1 (1h after abandonment): urgency — cart items waiting\nEmail 2 (24h): social proof — customer reviews\nEmail 3 (72h): product benefits\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."}]}\nUse {{first_name}}. Under 120 words per email. Reference real product names and updated prices.`,
+            ''),
+          aiCall(mahdiSystem,
+            `Write 4 cart recovery emails for this store.\n\n${ctx}\n\nAngles:\nEmail 4 (5 days): objection handling\nEmail 5 (7 days): scarcity\nEmail 6 (10 days): value + guarantee\nEmail 7 (14 days): final offer\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."}]}\nUse {{first_name}}. Under 120 words per email. Reference real product names and updated prices.`,
+            ''),
+        ]);
+
+        let e1to3 = { emails: [] }, e4to7 = { emails: [] };
+        try { e1to3 = parseSeqJson(emails1to3Raw); } catch { /* use default */ }
+        try { e4to7 = parseSeqJson(emails4to7Raw); } catch { /* use default */ }
+
+        const allEmails = [...(e1to3.emails || []), ...(e4to7.emails || [])];
+        const emailWaits = [1, 23, 48, 48, 48, 72, 96];
+        const emailSteps = [];
+        allEmails.forEach((email, i) => {
+          emailSteps.push({ step_type: 'wait', content: '', wait_hours: emailWaits[i] || 24 });
+          emailSteps.push({ step_type: 'email', subject: email.subject || '', content: email.content || '', wait_hours: 0 });
+        });
+
+        // SMS: 4 messages
+        const smsRaw = await aiCall(mahdiSystem,
+          `Write 4 cart recovery SMS messages for this store.\n\n${ctx}\n\nTiming: immediate, 24h, 72h, 7 days.\nReturn JSON: {"messages":["...","...","...","..."]}\nEach under 160 chars. Use {{first_name}}. Reference updated product names and prices.`,
+          '');
+        let smsParsed = { messages: [] };
+        try { smsParsed = parseSeqJson(smsRaw); } catch { /* use default */ }
+        const smsMessages = (smsParsed.messages || []).slice(0, 4);
+        const smsWaits = [0, 24, 48, 96];
+        const smsSteps = [];
+        smsMessages.forEach((msg, i) => {
+          if (smsWaits[i] > 0) smsSteps.push({ step_type: 'wait', content: '', wait_hours: smsWaits[i] });
+          smsSteps.push({ step_type: 'sms', content: msg, wait_hours: 0 });
+        });
+
+        // WhatsApp: 3 messages
+        const waRaw = await aiCall(mahdiSystem,
+          `Write 3 cart recovery WhatsApp messages for this store.\n\n${ctx}\n\nTiming: 2h, 48h, 7 days.\nReturn JSON: {"messages":["...","...","..."]}\nEach under 200 chars. Use {{first_name}}. Reference updated product names and prices.`,
+          '');
+        let waParsed = { messages: [] };
+        try { waParsed = parseSeqJson(waRaw); } catch { /* use default */ }
+        const waMessages = (waParsed.messages || []).slice(0, 3);
+        const waWaits = [2, 46, 120];
+        const waSteps = [];
+        waMessages.forEach((msg, i) => {
+          waSteps.push({ step_type: 'wait', content: '', wait_hours: waWaits[i] });
+          waSteps.push({ step_type: 'whatsapp', content: msg, wait_hours: 0 });
+        });
+
+        // Submit all three to approvals
+        await supabase.from('approvals').insert([
+          {
+            type: 'email_sequence',
+            title: `Updated Cart Recovery Emails (7) — ${storeName}`,
+            content: `Product data changed for ${storeName}. Mahdi regenerated a 7-email cart recovery sequence with updated product names and prices. Products: ${productList.slice(0, 100)}. AOV: $${aov}. Approve to replace the previous version.`,
+            metadata: { steps: emailSteps, trigger_type: 'cart_abandoned', shop, aov, regenerated: true },
+            from_member: 'mahdi',
+            client_id,
+            status: 'pending',
+            created_at: new Date().toISOString()
+          },
+          {
+            type: 'sms_sequence',
+            title: `Updated Cart Recovery SMS (4) — ${storeName}`,
+            content: `Mahdi regenerated the 4-message SMS sequence for ${storeName} with updated product data. Approve to activate.`,
+            metadata: { steps: smsSteps, trigger_type: 'cart_abandoned', shop, aov, regenerated: true },
+            from_member: 'mahdi',
+            client_id,
+            status: 'pending',
+            created_at: new Date().toISOString()
+          },
+          {
+            type: 'whatsapp_sequence',
+            title: `Updated Cart Recovery WhatsApp (3) — ${storeName}`,
+            content: `Mahdi regenerated the 3-message WhatsApp sequence for ${storeName} with updated product data. Approve to activate.`,
+            metadata: { steps: waSteps, trigger_type: 'cart_abandoned', shop, aov, regenerated: true },
+            from_member: 'mahdi',
+            client_id,
+            status: 'pending',
+            created_at: new Date().toISOString()
+          },
+        ]);
+
+        // Update hash so we don't regenerate tomorrow unless something changes again
+        await supabase.from('shopify_connections')
+          .update({ last_product_hash: newHash })
+          .eq('id', conn.id);
+
+        changed++;
+        console.log(`[AUTO] Shopify sync — sequences regenerated for ${shop} (hash changed)`);
+      } catch (connErr) {
+        console.error(`[AUTO] Shopify sync failed for ${conn.shop}:`, connErr.message);
+      }
+    }
+
+    console.log(`[AUTO] Shopify sync complete — ${changed} updated, ${skipped} unchanged`);
+  } catch (e) {
+    console.error('[AUTO] Shopify sync error:', e.message);
+  }
+});
+
 // ─── AUTO SCHEDULER: ZAINAB — DAILY CLIENT HEALTH ────────
 // Every day at 9am
 cron.schedule('0 9 * * *', async () => {
