@@ -2345,7 +2345,7 @@ app.post('/contacts', async (req, res) => {
 // ─── ROUTE MODULES ────────────────────────────────────────
 app.use('/auth',    require('./routes/auth')({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken }));
 app.use('/',        require('./routes/ai-team')({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, verifyToken, aiLimiter }));
-app.use('/shopify', require('./routes/shopify')({ supabase, axios, crypto, processWebhookEvent }));
+app.use('/shopify', require('./routes/shopify')({ supabase, axios, crypto, processWebhookEvent, aiCall }));
 app.use('/',        require('./routes/knowledge')({ supabase, axios, importLimiter, upload, PDF2Json, YoutubeTranscript }));
 app.use('/',        require('./routes/analytics')({ supabase }));
 app.use('/',        require('./routes/integrations')({ supabase, axios, aiCall, ragSearch, getBriefingsContext, verifyToken }));

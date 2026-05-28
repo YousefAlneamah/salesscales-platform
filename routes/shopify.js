@@ -1,7 +1,85 @@
 const express = require('express');
 
-module.exports = ({ supabase, axios, crypto, processWebhookEvent }) => {
+module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
   const router = express.Router();
+
+  const generateShopifySequences = async (shop, accessToken, clientId) => {
+    const headers = { 'X-Shopify-Access-Token': accessToken, 'Content-Type': 'application/json' };
+    const base = `https://${shop}/admin/api/2026-01`;
+
+    const [productsRes, ordersRes, shopRes] = await Promise.all([
+      axios.get(`${base}/products.json?limit=10&fields=id,title,variants,product_type`, { headers }),
+      axios.get(`${base}/orders.json?status=any&limit=50&fields=total_price&financial_status=paid`, { headers }),
+      axios.get(`${base}/shop.json`, { headers }),
+    ]);
+
+    const products = productsRes.data.products || [];
+    const orders = ordersRes.data.orders || [];
+    const shopInfo = shopRes.data.shop || {};
+
+    const totalRevenue = orders.reduce((s, o) => s + parseFloat(o.total_price || 0), 0);
+    const aov = orders.length > 0 ? (totalRevenue / orders.length).toFixed(2) : '0';
+
+    const productList = products.slice(0, 6).map(p => {
+      const price = p.variants?.[0]?.price || '0';
+      return `${p.title} ($${price})`;
+    }).join(', ');
+
+    const storeName = shopInfo.name || shop;
+    const storeContext = `Store: ${storeName}\nCurrency: ${shopInfo.currency || 'USD'}\nTop products: ${productList}\nAverage order value: $${aov}`;
+
+    // Email sequence
+    const emailSeqJson = await aiCall(
+      `You are Mahdi, the Marketing and Content AI at Sales Scales. You write high-converting cart recovery email sequences. Return ONLY valid JSON, no markdown, no explanation.`,
+      `Generate a 3-email cart recovery sequence for this Shopify store.\n\n${storeContext}\n\nReturn JSON exactly:\n{"trigger_type":"cart_abandoned","steps":[{"step_type":"email","subject":"...","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":1},{"step_type":"email","subject":"...","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":24},{"step_type":"email","subject":"...","content":"...","wait_hours":0}]}\n\nReference real product names and prices. Use {{first_name}} for personalization. Write compelling copy that drives recovery.`,
+      ''
+    );
+    let emailParsed;
+    try {
+      const ec = emailSeqJson.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+      const em = ec.match(/\{[\s\S]*\}/);
+      emailParsed = JSON.parse(em ? em[0] : ec);
+    } catch { emailParsed = { trigger_type: 'cart_abandoned', steps: [] }; }
+
+    const emailCount = (emailParsed.steps || []).filter(s => s.step_type === 'email').length;
+    await supabase.from('approvals').insert([{
+      type: 'email_sequence',
+      title: `Cart Recovery Emails — ${storeName}`,
+      content: `Mahdi built a ${emailCount}-email cart recovery sequence using live product data from ${shop}. Products: ${productList.slice(0, 100)}. AOV: $${aov}. Approve to activate.`,
+      metadata: { steps: emailParsed.steps || [], trigger_type: 'cart_abandoned', shop, aov },
+      from_member: 'mahdi',
+      client_id: clientId,
+      status: 'pending',
+      created_at: new Date().toISOString()
+    }]);
+    console.log(`[AUTO] Shopify connect — email sequence queued for ${shop}`);
+
+    // SMS sequence
+    const smsSeqJson = await aiCall(
+      `You are Mahdi, the Marketing and Content AI at Sales Scales. You write concise, high-converting SMS sequences. Return ONLY valid JSON, no markdown, no explanation.`,
+      `Generate a 2-step cart recovery SMS sequence for this Shopify store.\n\n${storeContext}\n\nReturn JSON exactly:\n{"trigger_type":"cart_abandoned","steps":[{"step_type":"sms","content":"Hi {{first_name}}, you left something behind...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":24},{"step_type":"sms","content":"...","wait_hours":0}]}\n\nEach SMS must be under 160 characters. Reference real product names. Use {{first_name}}. Be conversational and direct.`,
+      ''
+    );
+    let smsParsed;
+    try {
+      const sc = smsSeqJson.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+      const sm = sc.match(/\{[\s\S]*\}/);
+      smsParsed = JSON.parse(sm ? sm[0] : sc);
+    } catch { smsParsed = { trigger_type: 'cart_abandoned', steps: [] }; }
+
+    const smsCount = (smsParsed.steps || []).filter(s => s.step_type === 'sms').length;
+    await supabase.from('approvals').insert([{
+      type: 'sms_sequence',
+      title: `Cart Recovery SMS — ${storeName}`,
+      content: `Mahdi built a ${smsCount}-step SMS cart recovery sequence for ${shop}. Approve to activate.`,
+      metadata: { steps: smsParsed.steps || [], trigger_type: 'cart_abandoned', shop, aov },
+      from_member: 'mahdi',
+      client_id: clientId,
+      status: 'pending',
+      created_at: new Date().toISOString()
+    }]);
+    console.log(`[AUTO] Shopify connect — SMS sequence queued for ${shop}`);
+  };
 
   router.get('/install', (req, res) => {
     const { shop, clientId } = req.query;
@@ -36,11 +114,17 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent }) => {
               <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
               <h2 style="color: #0f1f35; margin-bottom: 8px;">Shopify Connected</h2>
               <p style="color: #64748b; margin-bottom: 20px;">${shop} has been connected successfully.</p>
+              <p style="color: #10b981; font-size: 14px; margin-bottom: 20px;">Mahdi is building your cart recovery sequences — check Approvals in ~30 seconds.</p>
               <a href="http://localhost:3000" style="background: #0f1f35; color: white; padding: 10px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">Return to Platform</a>
             </div>
           </body>
         </html>
       `);
+      if (clientId) {
+        generateShopifySequences(shop, accessToken, clientId).catch(e => {
+          console.error('[AUTO] Shopify sequence generation failed for', shop, ':', e.message);
+        });
+      }
     } catch (e) {
       console.error('Shopify callback error:', e.message);
       res.status(500).json({ error: 'Failed to get access token', details: e.message });
