@@ -218,6 +218,27 @@ const getClientTwilio = async (clientId) => {
   };
 };
 
+// ─── HELPER: CLIENT CART LINK ────────────────────────────
+const getClientCartLink = async (clientId) => {
+  if (!clientId) return '';
+  try {
+    const { data: conn } = await supabase.from('shopify_connections')
+      .select('shop').eq('client_id', clientId).maybeSingle();
+    if (!conn?.shop) return '';
+    return `https://${conn.shop}/cart`;
+  } catch {
+    return '';
+  }
+};
+
+// ─── HELPER: RENDER MESSAGE TEMPLATE ─────────────────────
+const renderTemplate = (text, contact, cartLink) => {
+  if (!text) return text;
+  return text
+    .replace(/\{\{\s*first_name\s*\}\}/gi, contact?.first_name || 'there')
+    .replace(/\{\{\s*cart_link\s*\}\}/gi, cartLink || '');
+};
+
 // ─── HELPER: SHOPIFY LIVE STORE CONTEXT ──────────────────
 const getShopifyContext = async (clientId) => {
   if (!clientId) return '';
@@ -468,6 +489,8 @@ cron.schedule('*/15 * * * *', async () => {
 
       if (!contact) continue;
 
+      const cartLink = await getClientCartLink(enrollment.client_id);
+
       if (currentStep.step_type === 'wait') {
         const nextStepAt = new Date();
         nextStepAt.setHours(nextStepAt.getHours() + (currentStep.wait_hours || 1));
@@ -482,7 +505,7 @@ cron.schedule('*/15 * * * *', async () => {
         try {
           const { tc: twilioClient, from: twilioFrom } = await getClientTwilio(enrollment.client_id);
           await twilioClient.messages.create({
-            body: currentStep.content.replace('{{first_name}}', contact.first_name || 'there'),
+            body: renderTemplate(currentStep.content, contact, cartLink),
             from: twilioFrom,
             to: contact.phone
           });
@@ -525,7 +548,7 @@ cron.schedule('*/15 * * * *', async () => {
         try {
           const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
           await twilioClient.messages.create({
-            body: currentStep.content.replace('{{first_name}}', contact.first_name || 'there'),
+            body: renderTemplate(currentStep.content, contact, cartLink),
             from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER,
             to: 'whatsapp:' + contact.phone
           });
@@ -570,8 +593,8 @@ cron.schedule('*/15 * * * *', async () => {
           await sgMail.send({
             to: contact.email,
             from: sender,
-            subject: currentStep.subject || 'Message for you',
-            html: `<p>${currentStep.content.replace('{{first_name}}', contact.first_name || 'there')}</p>`
+            subject: renderTemplate(currentStep.subject || 'Message for you', contact, cartLink),
+            html: `<p>${renderTemplate(currentStep.content, contact, cartLink)}</p>`
           });
           console.log(`Email sent to ${contact.first_name} — step ${enrollment.current_step}`);
         } catch (e) {
