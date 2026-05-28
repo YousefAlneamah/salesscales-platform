@@ -116,6 +116,19 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
         completed_at: new Date().toISOString(),
       }], { onConflict: 'client_id' });
       if (err) throw err;
+      // Fire briefing to owner — non-blocking
+      fetch('http://localhost:3001/team/brief', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from_member: 'zainab',
+          to_member: 'yousef',
+          subject: `New Client Onboarding Complete — ${user.clientName}`,
+          content: `${user.clientName} has just completed their onboarding questionnaire. Here is a summary of what they filled in:\n\nStore URL: ${form.store_url}\nMonthly Revenue: ${form.monthly_revenue}\nAverage Order Value: ${form.average_order_value}\nMain Products: ${form.main_products}\nBrand Voice: ${form.brand_voice}\nTarget Customer: ${form.target_customer}\nCurrent Tools: ${form.current_tools.join(', ') || 'None selected'}\nMain Competitors: ${form.main_competitors || 'Not provided'}\nBiggest Challenge: ${form.biggest_challenge}\n90-Day Goals: ${form.goals}\n\nRecommended Next Steps:\n1. Review their brand voice and customise active sequences accordingly\n2. Set up a cart abandonment workflow matched to their AOV bracket (${form.average_order_value})\n3. Have Zainab schedule a welcome call to confirm expectations and introduce the AI team\n4. Connect their Shopify store to begin contact sync\n5. Tailor Hussain's weekly briefings to their niche and challenge (${form.biggest_challenge})`,
+          priority: 'high',
+          client_id: user.clientId,
+        }),
+      }).catch(() => {});
       setDone(true);
       setTimeout(() => onComplete(), 2800);
     } catch (e) {

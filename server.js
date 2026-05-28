@@ -478,6 +478,7 @@ cron.schedule('*/15 * * * *', async () => {
         console.log(`Wait step processed for ${contact.first_name}`);
 
       } else if (currentStep.step_type === 'sms' && contact.phone && currentStep.content) {
+        let stepFailed = false, failureMsg = '';
         try {
           const { tc: twilioClient, from: twilioFrom } = await getClientTwilio(enrollment.client_id);
           await twilioClient.messages.create({
@@ -488,25 +489,39 @@ cron.schedule('*/15 * * * *', async () => {
           console.log(`SMS sent to ${contact.first_name} — step ${enrollment.current_step}`);
         } catch (e) {
           console.error('SMS step error:', e.message);
+          stepFailed = true; failureMsg = e.message;
         }
-        const nextStep = steps[enrollment.current_step];
-        const nextStepAt = new Date();
-        if (nextStep && nextStep.step_type === 'wait') {
-          nextStepAt.setHours(nextStepAt.getHours() + (nextStep.wait_hours || 1));
+        if (stepFailed) {
+          const newRetry = (enrollment.retry_count || 0) + 1;
+          if (newRetry < 3) {
+            await supabase.from('workflow_enrollments').update({ retry_count: newRetry, next_step_at: new Date(Date.now() + 30 * 60 * 1000).toISOString() }).eq('id', enrollment.id);
+            console.log(`SMS step failed for ${contact.first_name} — retry ${newRetry}/3 in 30min`);
+          } else {
+            await supabase.from('workflow_enrollments').update({ status: 'cancelled', failure_reason: `SMS failed after 3 attempts: ${failureMsg}` }).eq('id', enrollment.id);
+            console.log(`SMS permanently failed for ${contact.first_name} — enrollment cancelled`);
+          }
+        } else {
+          const nextStep = steps[enrollment.current_step];
+          const nextStepAt = new Date();
+          if (nextStep && nextStep.step_type === 'wait') {
+            nextStepAt.setHours(nextStepAt.getHours() + (nextStep.wait_hours || 1));
+          }
+          await supabase.from('workflow_enrollments').update({
+            current_step: enrollment.current_step + 1,
+            next_step_at: nextStepAt.toISOString(),
+            retry_count: 0,
+          }).eq('id', enrollment.id);
+          await supabase.from('messages').insert([{
+            client_id: enrollment.client_id,
+            contact_id: enrollment.contact_id,
+            channel: 'sms', direction: 'outbound',
+            sender_name: 'Sales Scales AI',
+            content: currentStep.content, status: 'sent'
+          }]);
         }
-        await supabase.from('workflow_enrollments').update({
-          current_step: enrollment.current_step + 1,
-          next_step_at: nextStepAt.toISOString()
-        }).eq('id', enrollment.id);
-        await supabase.from('messages').insert([{
-          client_id: enrollment.client_id,
-          contact_id: enrollment.contact_id,
-          channel: 'sms', direction: 'outbound',
-          sender_name: 'Sales Scales AI',
-          content: currentStep.content, status: 'sent'
-        }]);
 
       } else if (currentStep.step_type === 'whatsapp' && contact.phone && currentStep.content) {
+        let stepFailed = false, failureMsg = '';
         try {
           const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
           await twilioClient.messages.create({
@@ -517,25 +532,39 @@ cron.schedule('*/15 * * * *', async () => {
           console.log(`WhatsApp sent to ${contact.first_name} — step ${enrollment.current_step}`);
         } catch (e) {
           console.error('WhatsApp step error:', e.message);
+          stepFailed = true; failureMsg = e.message;
         }
-        const nextStep = steps[enrollment.current_step];
-        const nextStepAt = new Date();
-        if (nextStep && nextStep.step_type === 'wait') {
-          nextStepAt.setHours(nextStepAt.getHours() + (nextStep.wait_hours || 1));
+        if (stepFailed) {
+          const newRetry = (enrollment.retry_count || 0) + 1;
+          if (newRetry < 3) {
+            await supabase.from('workflow_enrollments').update({ retry_count: newRetry, next_step_at: new Date(Date.now() + 30 * 60 * 1000).toISOString() }).eq('id', enrollment.id);
+            console.log(`WhatsApp step failed for ${contact.first_name} — retry ${newRetry}/3 in 30min`);
+          } else {
+            await supabase.from('workflow_enrollments').update({ status: 'cancelled', failure_reason: `WhatsApp failed after 3 attempts: ${failureMsg}` }).eq('id', enrollment.id);
+            console.log(`WhatsApp permanently failed for ${contact.first_name} — enrollment cancelled`);
+          }
+        } else {
+          const nextStep = steps[enrollment.current_step];
+          const nextStepAt = new Date();
+          if (nextStep && nextStep.step_type === 'wait') {
+            nextStepAt.setHours(nextStepAt.getHours() + (nextStep.wait_hours || 1));
+          }
+          await supabase.from('workflow_enrollments').update({
+            current_step: enrollment.current_step + 1,
+            next_step_at: nextStepAt.toISOString(),
+            retry_count: 0,
+          }).eq('id', enrollment.id);
+          await supabase.from('messages').insert([{
+            client_id: enrollment.client_id,
+            contact_id: enrollment.contact_id,
+            channel: 'WhatsApp', direction: 'outbound',
+            sender_name: 'Sales Scales AI',
+            content: currentStep.content, status: 'sent'
+          }]);
         }
-        await supabase.from('workflow_enrollments').update({
-          current_step: enrollment.current_step + 1,
-          next_step_at: nextStepAt.toISOString()
-        }).eq('id', enrollment.id);
-        await supabase.from('messages').insert([{
-          client_id: enrollment.client_id,
-          contact_id: enrollment.contact_id,
-          channel: 'WhatsApp', direction: 'outbound',
-          sender_name: 'Sales Scales AI',
-          content: currentStep.content, status: 'sent'
-        }]);
 
       } else if (currentStep.step_type === 'email' && contact.email && currentStep.content) {
+        let stepFailed = false, failureMsg = '';
         try {
           const sender = await getClientSender(enrollment.client_id);
           await sgMail.send({
@@ -547,23 +576,36 @@ cron.schedule('*/15 * * * *', async () => {
           console.log(`Email sent to ${contact.first_name} — step ${enrollment.current_step}`);
         } catch (e) {
           console.error('Email step error:', e.message);
+          stepFailed = true; failureMsg = e.message;
         }
-        const nextStep = steps[enrollment.current_step];
-        const nextStepAt = new Date();
-        if (nextStep && nextStep.step_type === 'wait') {
-          nextStepAt.setHours(nextStepAt.getHours() + (nextStep.wait_hours || 1));
+        if (stepFailed) {
+          const newRetry = (enrollment.retry_count || 0) + 1;
+          if (newRetry < 3) {
+            await supabase.from('workflow_enrollments').update({ retry_count: newRetry, next_step_at: new Date(Date.now() + 30 * 60 * 1000).toISOString() }).eq('id', enrollment.id);
+            console.log(`Email step failed for ${contact.first_name} — retry ${newRetry}/3 in 30min`);
+          } else {
+            await supabase.from('workflow_enrollments').update({ status: 'cancelled', failure_reason: `Email failed after 3 attempts: ${failureMsg}` }).eq('id', enrollment.id);
+            console.log(`Email permanently failed for ${contact.first_name} — enrollment cancelled`);
+          }
+        } else {
+          const nextStep = steps[enrollment.current_step];
+          const nextStepAt = new Date();
+          if (nextStep && nextStep.step_type === 'wait') {
+            nextStepAt.setHours(nextStepAt.getHours() + (nextStep.wait_hours || 1));
+          }
+          await supabase.from('workflow_enrollments').update({
+            current_step: enrollment.current_step + 1,
+            next_step_at: nextStepAt.toISOString(),
+            retry_count: 0,
+          }).eq('id', enrollment.id);
+          await supabase.from('messages').insert([{
+            client_id: enrollment.client_id,
+            contact_id: enrollment.contact_id,
+            channel: 'email', direction: 'outbound',
+            sender_name: 'Sales Scales AI',
+            content: currentStep.content, status: 'sent'
+          }]);
         }
-        await supabase.from('workflow_enrollments').update({
-          current_step: enrollment.current_step + 1,
-          next_step_at: nextStepAt.toISOString()
-        }).eq('id', enrollment.id);
-        await supabase.from('messages').insert([{
-          client_id: enrollment.client_id,
-          contact_id: enrollment.contact_id,
-          channel: 'email', direction: 'outbound',
-          sender_name: 'Sales Scales AI',
-          content: currentStep.content, status: 'sent'
-        }]);
 
       } else {
         const nextStepAt = new Date();
@@ -594,6 +636,29 @@ const storeBriefing = async (from_member, to_member, subject, content, priority 
     created_at: new Date().toISOString()
   }]);
   if (error) throw new Error(`storeBriefing failed: ${error.message}`);
+  if (priority === 'urgent') {
+    try {
+      const preview = content.length > 400 ? content.substring(0, 400) + '...' : content;
+      await sgMail.send({
+        to: 'yousef@salesscales.com',
+        from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+        subject: `Urgent Alert: ${subject}`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;">
+          <div style="background:#0a1628;padding:20px 24px;border-radius:8px 8px 0 0;border-left:4px solid #dc2626;">
+            <div style="color:#dc2626;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Urgent Alert — Sales Scales</div>
+            <div style="color:white;font-size:16px;font-weight:600;">${subject}</div>
+          </div>
+          <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 8px 8px;padding:20px 24px;">
+            <p style="color:#4a5568;font-size:13px;margin:0 0 12px;">Fatima has flagged an urgent issue that requires your immediate attention.</p>
+            <div style="background:#f8fafc;border-radius:6px;padding:14px;font-size:12px;color:#0a1628;line-height:1.7;white-space:pre-wrap;">${preview}</div>
+            <p style="color:#8896a8;font-size:11px;margin:14px 0 0;">Log in to Sales Scales → Team Briefings to view the full briefing and respond.</p>
+          </div>
+        </div>`,
+      });
+    } catch (mailErr) {
+      console.error('Urgent briefing email failed:', mailErr.message);
+    }
+  }
 };
 
 // ─── AUTO SCHEDULER: HUSSAIN — WEEKLY INTELLIGENCE ───────
@@ -725,8 +790,10 @@ cron.schedule('0 8 1 * *', async () => {
     const monthEnd = thisMonthStart.toISOString();
     const period = prevMonthStart.toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
+    const ZAINAB_TIER_FEE = { starter: 997, growth: 1997, scale: 3997, enterprise: 4997 };
     let reportsGenerated = 0;
     let emailsSentCount = 0;
+    let invoicesGenerated = 0;
 
     for (const client of clients) {
       try {
@@ -792,6 +859,36 @@ cron.schedule('0 8 1 * *', async () => {
             console.error(`[AUTO] Zainab email failed for ${client.name}:`, mailErr.message);
           }
         }
+        // Generate invoice for this client
+        try {
+          const { data: contract } = await supabase.from('contracts')
+            .select('monthly_fee').eq('client_id', client.id)
+            .in('status', ['signed', 'sent'])
+            .order('created_at', { ascending: false }).limit(1).maybeSingle();
+          const amount = contract?.monthly_fee
+            ? parseFloat(contract.monthly_fee)
+            : (ZAINAB_TIER_FEE[(client.tier || '').toLowerCase()] || 997);
+          const invoiceNumber = `SS-${Date.now().toString(36).toUpperCase()}`;
+          const issuedDate = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+          const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+          const fmtAmount = amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          const tierLabel = client.tier ? client.tier.charAt(0).toUpperCase() + client.tier.slice(1) : 'Starter';
+          const invoice_html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Invoice ${invoiceNumber} — ${client.name}</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f0f3f8;padding:40px;color:#0a1628}.inv{max-width:760px;margin:0 auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(10,22,40,.12)}.hd{background:#0a1628;padding:36px 40px;display:flex;justify-content:space-between;align-items:flex-start}.brand{color:#c9a84c;font-size:22px;font-weight:700}.inv-lbl .title{color:white;font-size:26px;font-weight:700}.inv-lbl .num{color:#c9a84c;font-size:13px;margin-top:4px;font-family:monospace}.bd{padding:36px 40px}.meta{display:flex;justify-content:space-between;margin-bottom:32px}.mb h4{font-size:9px;color:#8896a8;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:8px}.mb p{font-size:13px;color:#0a1628;line-height:1.6}.mb .co{font-size:15px;font-weight:700;margin-bottom:4px}table{width:100%;border-collapse:collapse}thead tr{background:#0a1628}thead th{padding:12px 16px;text-align:left;font-size:9px;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:1.5px;font-weight:700}tbody tr{border-bottom:1px solid #f0f3f8}tbody td{padding:16px;font-size:13px;color:#0a1628}.tots{margin:16px 0 0 auto;width:280px}.tr{display:flex;justify-content:space-between;padding:8px 0;font-size:13px}.tr.grand{border-top:2px solid #0a1628;margin-top:8px;padding-top:14px}.tr.grand .val{font-size:15px;font-weight:700;color:#c9a84c}.ft{background:#f8fafc;padding:24px 40px;border-top:1px solid #e4e9f0;display:flex;justify-content:space-between;align-items:center}.fn{font-size:11px;color:#8896a8;line-height:1.6}.badge{background:#fffbeb;color:#d97706;border:1px solid #fde68a;padding:6px 14px;border-radius:20px;font-size:11px;font-weight:700}</style>
+</head><body><div class="inv"><div class="hd"><div><div class="brand">Sales Scales</div></div><div class="inv-lbl"><div class="title">INVOICE</div><div class="num">${invoiceNumber}</div></div></div>
+<div class="bd"><div class="meta"><div class="mb"><h4>Bill To</h4><p class="co">${client.name}</p><p>${tierLabel} Plan</p><p>Period: ${period}</p></div><div class="mb" style="text-align:right"><p>Issued: ${issuedDate}</p><p>Due: ${dueDate}</p></div></div>
+<table><thead><tr><th>Description</th><th style="text-align:right">Amount</th></tr></thead><tbody><tr><td>${tierLabel} Plan — ${period}<br><span style="font-size:11px;color:#8896a8">AI-powered revenue system: email, SMS, workflows, AI team access</span></td><td style="text-align:right;font-weight:600">$${fmtAmount}</td></tr></tbody></table>
+<div class="tots"><div class="tr"><span style="color:#8896a8">Subtotal</span><span>$${fmtAmount}</span></div><div class="tr"><span style="color:#8896a8">Tax (0%)</span><span>$0.00</span></div><div class="tr grand"><span style="font-size:15px;font-weight:700">Total Due</span><span class="val">$${fmtAmount}</span></div></div></div>
+<div class="ft"><div class="fn">Payment due within 7 days.<br>Questions? billing@salesscales.com</div><div class="badge">Unpaid</div></div></div></body></html>`;
+          await supabase.from('invoices').insert({
+            client_id: client.id, client_name: client.name, amount, period,
+            status: 'unpaid', invoice_html,
+          });
+          invoicesGenerated++;
+        } catch (invoiceErr) {
+          console.error(`[AUTO] Zainab invoice failed for ${client.name}:`, invoiceErr.message);
+        }
+
       } catch (clientErr) {
         console.error(`[AUTO] Zainab report failed for ${client.name}:`, clientErr.message);
       }
@@ -799,7 +896,7 @@ cron.schedule('0 8 1 * *', async () => {
 
     await storeBriefing('zainab', 'yousef',
       `Monthly Reports Complete — ${period}`,
-      `Zainab has automatically generated and sent ${period} reports.\n\n- Reports generated: ${reportsGenerated}/${clients.length}\n- Emails sent to clients: ${emailsSentCount}\n\nAll reports are viewable in the Auto Reports page.`,
+      `Zainab has automatically generated and sent ${period} reports.\n\n- Reports generated: ${reportsGenerated}/${clients.length}\n- Invoices generated: ${invoicesGenerated}/${clients.length}\n- Emails sent to clients: ${emailsSentCount}\n\nAll reports are viewable in the Auto Reports page. All invoices are in the Billing section.`,
       'normal'
     );
     console.log(`[AUTO] Zainab monthly — ${reportsGenerated} reports, ${emailsSentCount} emails sent`);
