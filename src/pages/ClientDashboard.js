@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { supabase } from '../supabase';
 
 const parseAov = (text) => {
@@ -113,6 +114,7 @@ export default function ClientDashboard({ user, onLogout }) {
     { id: 'dashboard', label: 'Dashboard', icon: '▦' },
     { id: 'results', label: 'My Results', icon: '📈' },
     { id: 'sequences', label: 'Sequences', icon: '⚡' },
+    { id: 'approvals', label: 'My Approvals', icon: '✓' },
     { id: 'messages', label: 'Messages', icon: '💬' },
     { id: 'contacts', label: 'Contacts', icon: '👥' },
     { id: 'zainab', label: 'Zainab AI', icon: '🤖' },
@@ -123,6 +125,7 @@ export default function ClientDashboard({ user, onLogout }) {
     dashboard: 'Dashboard',
     results: 'My Results',
     sequences: 'Active Sequences',
+    approvals: 'My Approvals',
     messages: 'Messages',
     contacts: 'My Contacts',
     zainab: 'Zainab — AI Partner',
@@ -134,6 +137,7 @@ export default function ClientDashboard({ user, onLogout }) {
       case 'dashboard': return <ClientHome />;
       case 'results': return <ClientResults />;
       case 'sequences': return <ClientSequences />;
+      case 'approvals': return <ClientApprovals />;
       case 'messages': return <ClientMessages />;
       case 'contacts': return <ClientContacts />;
       case 'zainab': return <ClientZainab />;
@@ -544,8 +548,174 @@ export default function ClientDashboard({ user, onLogout }) {
     );
   };
 
+  // ─── MY APPROVALS ────────────────────────────────────
+  const ClientApprovals = () => {
+    const [approvals, setApprovals] = useState([]);
+    const [loadingA, setLoadingA] = useState(true);
+    const [selected, setSelected] = useState(null);
+    const [feedback, setFeedback] = useState('');
+    const [busy, setBusy] = useState(false);
+
+    const loadApprovals = async () => {
+      setLoadingA(true);
+      try {
+        const { data } = await supabase.from('approvals')
+          .select('*').eq('client_id', user.clientId).eq('status', 'pending')
+          .order('created_at', { ascending: false });
+        setApprovals(data || []);
+        if (data && data.length > 0) setSelected(s => s || data[0]);
+      } catch (e) {
+        console.error('Load approvals error:', e);
+      }
+      setLoadingA(false);
+    };
+
+    useEffect(() => { loadApprovals(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const act = async (approval, action) => {
+      if (action === 'reject' && !feedback.trim()) {
+        alert('Please describe the changes you would like before requesting changes.');
+        return;
+      }
+      setBusy(true);
+      try {
+        await axios.post('http://localhost:3001/approvals/action', {
+          approval_id: approval.id, action, feedback: action === 'reject' ? feedback.trim() : null,
+        });
+        setApprovals(prev => prev.filter(a => a.id !== approval.id));
+        setSelected(null);
+        setFeedback('');
+      } catch (e) {
+        alert(e.response?.data?.error || 'Something went wrong. Please try again.');
+      }
+      setBusy(false);
+    };
+
+    const steps = selected?.metadata?.steps || [];
+
+    return (
+      <div>
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Pending Review</div>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Approvals</div>
+          <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>Review and approve content before it goes live to your customers</div>
+        </div>
+
+        {loadingA ? (
+          <div style={{ color: '#8896a8', fontSize: '13px', padding: '40px 0', textAlign: 'center' }}>Loading approvals...</div>
+        ) : approvals.length === 0 ? (
+          <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '48px 24px', textAlign: 'center', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>✓</div>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: '#0a1628', marginBottom: '6px' }}>All caught up</div>
+            <div style={{ fontSize: '12px', color: '#8896a8' }}>You have no content waiting for approval right now.</div>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '16px', alignItems: 'start' }}>
+            {/* LIST */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {approvals.map(a => (
+                <div key={a.id} onClick={() => { setSelected(a); setFeedback(''); }}
+                  style={{ background: 'white', border: `1px solid ${selected?.id === a.id ? '#c9a84c' : '#e4e9f0'}`, borderLeft: `3px solid ${selected?.id === a.id ? '#c9a84c' : 'transparent'}`, borderRadius: '10px', padding: '14px 16px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+                  <div style={{ fontSize: '8px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '5px' }}>{(a.type || 'content').replace(/_/g, ' ')}</div>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628', lineHeight: 1.4 }}>{a.title}</div>
+                  <div style={{ fontSize: '10px', color: '#8896a8', marginTop: '6px' }}>{formatDate(a.created_at)}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* DETAIL */}
+            {selected ? (
+              <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+                <div style={{ background: '#0a1628', padding: '18px 22px' }}>
+                  <div style={{ fontSize: '8px', color: '#c9a84c', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '6px' }}>{(selected.type || 'content').replace(/_/g, ' ')}</div>
+                  <div style={{ fontSize: '15px', fontWeight: 700, color: 'white' }}>{selected.title}</div>
+                </div>
+                <div style={{ padding: '22px', maxHeight: '420px', overflowY: 'auto' }}>
+                  {steps.length > 0 ? (
+                    steps.map((s, i) => (
+                      <div key={i} style={{ borderBottom: i < steps.length - 1 ? '1px solid #f4f6fa' : 'none', paddingBottom: '14px', marginBottom: '14px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                          <span style={{ fontSize: '8px', padding: '3px 8px', borderRadius: '5px', background: 'rgba(201,168,76,0.12)', color: '#c9a84c', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px' }}>{s.step_type || 'step'}</span>
+                          {s.wait_hours ? <span style={{ fontSize: '10px', color: '#8896a8' }}>sends after {s.wait_hours}h</span> : null}
+                        </div>
+                        {s.subject ? <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', marginBottom: '4px' }}>{s.subject}</div> : null}
+                        <div style={{ fontSize: '12px', color: '#4a5568', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{s.content}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ fontSize: '13px', color: '#4a5568', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{selected.content || 'No content preview available.'}</div>
+                  )}
+                </div>
+                <div style={{ borderTop: '1px solid #e4e9f0', padding: '18px 22px', background: '#f8fafc' }}>
+                  <textarea value={feedback} onChange={e => setFeedback(e.target.value)} placeholder="Optional: describe any changes you'd like (required if requesting changes)"
+                    style={{ width: '100%', minHeight: '64px', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: '#0a1628', fontFamily: 'DM Sans, sans-serif', resize: 'vertical', boxSizing: 'border-box', marginBottom: '12px' }} />
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button disabled={busy} onClick={() => act(selected, 'approve')}
+                      style={{ flex: 1, padding: '11px', background: busy ? '#e4e9f0' : '#10b981', color: busy ? '#8896a8' : 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                      {busy ? 'Working...' : 'Approve & Go Live'}
+                    </button>
+                    <button disabled={busy} onClick={() => act(selected, 'reject')}
+                      style={{ flex: 1, padding: '11px', background: 'white', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '8px', fontSize: '12px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                      Request Changes
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ color: '#8896a8', fontSize: '13px', padding: '40px', textAlign: 'center' }}>Select an item to review.</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // ─── SETTINGS ────────────────────────────────────────
-  const ClientSettings = () => (
+  const ClientSettings = () => {
+    const KB_FIELDS = [
+      { key: 'brand_voice', label: 'Brand Voice & Tone', placeholder: 'How should your brand sound? e.g. friendly and casual, premium and polished, bold and direct...' },
+      { key: 'key_products', label: 'Key Products', placeholder: 'List your best-selling or flagship products, their key benefits, and price points.' },
+      { key: 'faqs', label: 'Frequently Asked Questions', placeholder: 'Common customer questions and the answers you want the AI to give.' },
+      { key: 'return_policy', label: 'Return & Refund Policy', placeholder: 'Your return window, refund process, and any conditions.' },
+    ];
+    const [profile, setProfile] = useState({ brand_voice: '', key_products: '', faqs: '', return_policy: '' });
+    const [loadingP, setLoadingP] = useState(true);
+    const [savingP, setSavingP] = useState(false);
+    const [savedP, setSavedP] = useState(false);
+
+    useEffect(() => {
+      (async () => {
+        try {
+          const { data } = await axios.get('http://localhost:3001/client-profile', { params: { client_id: user.clientId } });
+          if (data.profile) {
+            setProfile({
+              brand_voice: data.profile.brand_voice || '',
+              key_products: data.profile.key_products || '',
+              faqs: data.profile.faqs || '',
+              return_policy: data.profile.return_policy || '',
+            });
+          }
+        } catch (e) {
+          console.error('Load profile error:', e);
+        }
+        setLoadingP(false);
+      })();
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const saveProfile = async () => {
+      setSavingP(true);
+      setSavedP(false);
+      try {
+        await axios.post('http://localhost:3001/client-profile', { client_id: user.clientId, ...profile });
+        setSavedP(true);
+        setTimeout(() => setSavedP(false), 2500);
+      } catch (e) {
+        alert(e.response?.data?.error || 'Could not save. Please try again.');
+      }
+      setSavingP(false);
+    };
+
+    return (
     <div>
       <div style={{ marginBottom: '24px' }}>
         <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Account</div>
@@ -582,8 +752,44 @@ export default function ClientDashboard({ user, onLogout }) {
           </button>
         </div>
       </div>
+
+      {/* KNOWLEDGE BASE */}
+      <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)', marginTop: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase' }}>Your Store Knowledge Base</div>
+          <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', background: 'rgba(59,130,246,0.1)', color: '#3b82f6', fontWeight: 600 }}>Used by your AI team</span>
+        </div>
+        <div style={{ fontSize: '12px', color: '#8896a8', marginBottom: '18px', lineHeight: 1.6 }}>
+          Tell your AI team about your store. This information is used whenever the AI writes emails, replies, or sequences for you — so the more you share, the more on-brand everything sounds.
+        </div>
+
+        {loadingP ? (
+          <div style={{ color: '#8896a8', fontSize: '13px', padding: '20px 0' }}>Loading...</div>
+        ) : (
+          <>
+            {KB_FIELDS.map(f => (
+              <div key={f.key} style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '7px' }}>{f.label}</label>
+                <textarea
+                  value={profile[f.key]}
+                  onChange={e => setProfile(p => ({ ...p, [f.key]: e.target.value }))}
+                  placeholder={f.placeholder}
+                  style={{ width: '100%', minHeight: '72px', border: '1.5px solid #e4e9f0', borderRadius: '10px', padding: '11px 14px', fontSize: '13px', color: '#0a1628', fontFamily: 'DM Sans, sans-serif', resize: 'vertical', boxSizing: 'border-box', background: '#fafbfc', outline: 'none' }} />
+              </div>
+            ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+              <button onClick={saveProfile} disabled={savingP}
+                style={{ background: savingP ? '#e4e9f0' : '#c9a84c', color: savingP ? '#8896a8' : '#0a1628', border: 'none', borderRadius: '10px', padding: '11px 28px', fontSize: '13px', fontWeight: 700, cursor: savingP ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+                {savingP ? 'Saving...' : 'Save Knowledge Base'}
+              </button>
+              {savedP && <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 600 }}>✓ Saved — your AI team is now using this</span>}
+            </div>
+          </>
+        )}
+      </div>
     </div>
-  );
+    );
+  };
 
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'DM Sans, sans-serif', background: '#f0f3f8' }}>

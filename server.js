@@ -239,6 +239,83 @@ const renderTemplate = (text, contact, cartLink) => {
     .replace(/\{\{\s*cart_link\s*\}\}/gi, cartLink || '');
 };
 
+// ─── HELPER: BRANDED HTML EMAIL TEMPLATE ─────────────────
+const buildEmailHtml = (content, clientName, subject) => {
+  const safe = (content || '').trim();
+  const bodyHtml = safe
+    .split(/\n{2,}/)
+    .map(p => `<p style="margin:0 0 16px;color:#374151;font-size:14px;line-height:1.7;">${p.replace(/\n/g, '<br/>')}</p>`)
+    .join('');
+  const brand = clientName || 'Sales Scales';
+  const year = new Date().getFullYear();
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/></head>
+<body style="margin:0;padding:0;background:#f0f3f8;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f3f8;padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 8px 24px rgba(10,22,40,0.08);">
+        <tr><td style="background:#0a1628;padding:28px 32px;">
+          <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;">${brand}</div>
+          <div style="width:32px;height:2px;background:#c9a84c;border-radius:1px;margin-top:10px;"></div>
+        </td></tr>
+        ${subject ? `<tr><td style="padding:28px 32px 0;"><div style="color:#0a1628;font-size:19px;font-weight:700;line-height:1.3;">${subject}</div></td></tr>` : ''}
+        <tr><td style="padding:24px 32px 32px;">${bodyHtml}</td></tr>
+        <tr><td style="background:#f8fafc;border-top:1px solid #e4e9f0;padding:20px 32px;">
+          <div style="color:#8896a8;font-size:11px;line-height:1.6;">Sent by ${brand} via Sales Scales — AI Revenue System.</div>
+          <div style="color:#c4ccd6;font-size:10px;margin-top:6px;">© ${year} ${brand}. All rights reserved.</div>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+};
+
+// ─── HELPER: CLIENT KNOWLEDGE BASE CONTEXT ───────────────
+const getClientProfile = async (clientId) => {
+  if (!clientId) return '';
+  try {
+    const { data: p } = await supabase.from('client_profiles')
+      .select('brand_voice, key_products, faqs, return_policy').eq('client_id', clientId).maybeSingle();
+    if (!p) return '';
+    const parts = [];
+    if (p.brand_voice) parts.push(`Brand voice & tone:\n${p.brand_voice}`);
+    if (p.key_products) parts.push(`Key products:\n${p.key_products}`);
+    if (p.faqs) parts.push(`Frequently asked questions:\n${p.faqs}`);
+    if (p.return_policy) parts.push(`Return / refund policy:\n${p.return_policy}`);
+    if (parts.length === 0) return '';
+    return `Client knowledge base — use this when writing any content, replies, or sequences for this client:\n${parts.join('\n\n')}`;
+  } catch (e) {
+    console.log('Client profile context skipped:', e.message);
+    return '';
+  }
+};
+
+// ─── HELPER: ASSESS INBOUND MESSAGE CONFIDENCE ───────────
+const assessInboundConfidence = async (channel, content, clientName) => {
+  try {
+    const response = await axios.post(
+      'https://api.anthropic.com/v1/messages',
+      {
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 200,
+        system: `You triage inbound customer messages for an ecommerce brand. Decide whether an AI can safely auto-respond with confidence, or whether a human should handle it. Escalate (not confident) when the message involves: refunds/disputes, complaints, legal/compliance, pricing negotiation, anything angry or sensitive, or anything ambiguous you cannot answer accurately. Respond ONLY with JSON: {"confident": true|false, "reason": "short reason"}.`,
+        messages: [{ role: 'user', content: `Channel: ${channel}\nBrand: ${clientName || 'unknown'}\nCustomer message: ${content}` }]
+      },
+      { headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' } }
+    );
+    const raw = response.data.content[0].text;
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return { confident: false, reason: 'Could not assess message' };
+    const parsed = JSON.parse(match[0]);
+    return { confident: parsed.confident === true, reason: parsed.reason || '' };
+  } catch (e) {
+    console.log('Inbound assessment failed:', e.message);
+    return { confident: false, reason: 'AI assessment unavailable' };
+  }
+};
+
 // ─── HELPER: SHOPIFY LIVE STORE CONTEXT ──────────────────
 const getShopifyContext = async (clientId) => {
   if (!clientId) return '';
@@ -590,11 +667,12 @@ cron.schedule('*/15 * * * *', async () => {
         let stepFailed = false, failureMsg = '';
         try {
           const sender = await getClientSender(enrollment.client_id);
+          const emailSubject = renderTemplate(currentStep.subject || 'Message for you', contact, cartLink);
           await sgMail.send({
             to: contact.email,
             from: sender,
-            subject: renderTemplate(currentStep.subject || 'Message for you', contact, cartLink),
-            html: `<p>${renderTemplate(currentStep.content, contact, cartLink)}</p>`
+            subject: emailSubject,
+            html: buildEmailHtml(renderTemplate(currentStep.content, contact, cartLink), sender.name, emailSubject)
           });
           console.log(`Email sent to ${contact.first_name} — step ${enrollment.current_step}`);
         } catch (e) {
@@ -1426,6 +1504,15 @@ app.post('/sms/inbound', async (req, res) => {
         .eq('contact_id', contact.id)
         .eq('status', 'active');
       console.log('Inbound SMS saved and workflow paused for:', contact.first_name);
+      const { data: smsClient } = await supabase.from('clients').select('name').eq('id', contact.client_id).maybeSingle();
+      const smsAssessment = await assessInboundConfidence('SMS', Body, smsClient?.name);
+      if (!smsAssessment.confident) {
+        await storeBriefing('fatima', 'yousef',
+          `Unhandled SMS from ${contact.first_name} ${contact.last_name || ''}`.trim(),
+          `An inbound SMS needs your manual response — the AI could not respond confidently.\n\nReason: ${smsAssessment.reason}\nContact: ${contact.first_name} ${contact.last_name || ''} (${From})\nClient: ${smsClient?.name || 'unknown'}\n\nMessage:\n${Body}\n\nReply via the Inbox.`,
+          'urgent', contact.client_id
+        ).catch(e => console.error('Unhandled SMS briefing failed:', e.message));
+      }
     } else {
       await supabase.from('messages').insert([{
         channel: 'SMS', direction: 'inbound',
@@ -1464,6 +1551,15 @@ app.post('/whatsapp/inbound', async (req, res) => {
         .eq('contact_id', contact.id)
         .eq('status', 'active');
       console.log('Inbound WhatsApp saved and workflow paused for:', contact.first_name);
+      const { data: waClient } = await supabase.from('clients').select('name').eq('id', contact.client_id).maybeSingle();
+      const waAssessment = await assessInboundConfidence('WhatsApp', Body, waClient?.name);
+      if (!waAssessment.confident) {
+        await storeBriefing('fatima', 'yousef',
+          `Unhandled WhatsApp from ${contact.first_name} ${contact.last_name || ''}`.trim(),
+          `An inbound WhatsApp message needs your manual response — the AI could not respond confidently.\n\nReason: ${waAssessment.reason}\nContact: ${contact.first_name} ${contact.last_name || ''} (${phone})\nClient: ${waClient?.name || 'unknown'}\n\nMessage:\n${Body}\n\nReply via the Inbox.`,
+          'urgent', contact.client_id
+        ).catch(e => console.error('Unhandled WhatsApp briefing failed:', e.message));
+      }
     } else {
       await supabase.from('messages').insert([{
         channel: 'WhatsApp', direction: 'inbound',
@@ -2042,6 +2138,41 @@ app.post('/approvals/action', async (req, res) => {
   }
 });
 
+// ─── CLIENT KNOWLEDGE BASE (PROFILE) ──────────────────────
+app.get('/client-profile', async (req, res) => {
+  const { client_id } = req.query;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+  try {
+    const { data, error } = await supabase.from('client_profiles')
+      .select('*').eq('client_id', client_id).maybeSingle();
+    if (error) throw error;
+    res.json({ profile: data || null });
+  } catch (e) {
+    console.error('/client-profile GET error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/client-profile', async (req, res) => {
+  const { client_id, brand_voice, key_products, faqs, return_policy } = req.body;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+  try {
+    const { data, error } = await supabase.from('client_profiles').upsert([{
+      client_id,
+      brand_voice: brand_voice || null,
+      key_products: key_products || null,
+      faqs: faqs || null,
+      return_policy: return_policy || null,
+      updated_at: new Date().toISOString(),
+    }], { onConflict: 'client_id' }).select().single();
+    if (error) throw error;
+    res.json({ profile: data });
+  } catch (e) {
+    console.error('/client-profile POST error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── VOICE AGENT (ELEVENLABS) ─────────────────────────────
 app.get('/voice-agent/voices', async (req, res) => {
   try {
@@ -2537,7 +2668,7 @@ app.post('/contacts', async (req, res) => {
 
 // ─── ROUTE MODULES ────────────────────────────────────────
 app.use('/auth',    require('./routes/auth')({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken }));
-app.use('/',        require('./routes/ai-team')({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, verifyToken, aiLimiter }));
+app.use('/',        require('./routes/ai-team')({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, getClientProfile, verifyToken, aiLimiter }));
 app.use('/shopify', require('./routes/shopify')({ supabase, axios, crypto, processWebhookEvent, aiCall }));
 app.use('/',        require('./routes/knowledge')({ supabase, axios, importLimiter, upload, PDF2Json, YoutubeTranscript }));
 app.use('/',        require('./routes/analytics')({ supabase }));
