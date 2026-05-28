@@ -41,6 +41,7 @@ import Settings from "./pages/Settings";
 import Referrals from "./pages/Referrals";
 import ClientDashboard from "./pages/ClientDashboard";
 import ClientOnboardingFlow from "./pages/ClientOnboardingFlow";
+import ClientSignup from "./pages/ClientSignup";
 import Hussain from "./pages/Hussain";
 import Hassan from "./pages/Hassan";
 import Ali from "./pages/Ali";
@@ -188,6 +189,8 @@ function App() {
     delete axios.defaults.headers.common["Authorization"];
     setUser(null);
   };
+
+  if (window.location.pathname === '/signup') return <ClientSignup />;
 
   if (!user) return <Login onLogin={handleLogin} />;
 

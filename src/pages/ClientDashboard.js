@@ -1,6 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabase';
 
+const parseAov = (text) => {
+  if (!text) return 75;
+  if (text.includes('Under')) return 25;
+  if (text === '$30–$75') return 52;
+  if (text === '$75–$150') return 112;
+  if (text === '$150–$300') return 225;
+  if (text.includes('Over')) return 350;
+  return 75;
+};
+
 export default function ClientDashboard({ user, onLogout }) {
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [stats, setStats] = useState({
@@ -12,10 +22,13 @@ export default function ClientDashboard({ user, onLogout }) {
     smsSentMonth: 0,
     contactsAddedMonth: 0,
     enrollmentsMonth: 0,
+    revenueRecovered: 0,
+    completedEnrollments: 0,
   });
   const [workflows, setWorkflows] = useState([]);
   const [messages, setMessages] = useState([]);
   const [contacts, setContacts] = useState([]);
+  const [enrollmentsByWorkflow, setEnrollmentsByWorkflow] = useState({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { fetchData(); }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -24,7 +37,11 @@ export default function ClientDashboard({ user, onLogout }) {
     setLoading(true);
     try {
       const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-      const [contactsRes, workflowsRes, messagesRes, emailsRes, smsRes, contactsMonthRes, enrollmentsRes] = await Promise.all([
+      const [
+        contactsRes, workflowsRes, messagesRes,
+        emailsRes, smsRes, contactsMonthRes, enrollmentsRes,
+        onboardingRes, allEnrollmentsRes,
+      ] = await Promise.all([
         supabase.from('contacts').select('*').eq('client_id', user.clientId).order('created_at', { ascending: false }),
         supabase.from('workflows').select('*').eq('client_id', user.clientId),
         supabase.from('messages').select('*').eq('client_id', user.clientId).order('created_at', { ascending: false }),
@@ -32,11 +49,27 @@ export default function ClientDashboard({ user, onLogout }) {
         supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId).eq('channel', 'SMS').eq('direction', 'outbound').gte('created_at', monthStart),
         supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId).gte('created_at', monthStart),
         supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId).gte('enrolled_at', monthStart),
+        supabase.from('client_onboarding').select('average_order_value').eq('client_id', user.clientId).maybeSingle(),
+        supabase.from('workflow_enrollments').select('workflow_id, status').eq('client_id', user.clientId),
       ]);
 
       const msgs = messagesRes.data || [];
       const wfs = workflowsRes.data || [];
       const cts = contactsRes.data || [];
+      const allEnrollments = allEnrollmentsRes.data || [];
+
+      // Per-workflow enrollment breakdown
+      const byWorkflow = {};
+      for (const e of allEnrollments) {
+        if (!byWorkflow[e.workflow_id]) byWorkflow[e.workflow_id] = { total: 0, completed: 0, active: 0 };
+        byWorkflow[e.workflow_id].total++;
+        if (e.status === 'completed') byWorkflow[e.workflow_id].completed++;
+        if (e.status === 'active') byWorkflow[e.workflow_id].active++;
+      }
+      setEnrollmentsByWorkflow(byWorkflow);
+
+      const aov = parseAov(onboardingRes.data?.average_order_value);
+      const completedTotal = allEnrollments.filter(e => e.status === 'completed').length;
 
       setContacts(cts);
       setWorkflows(wfs);
@@ -50,6 +83,8 @@ export default function ClientDashboard({ user, onLogout }) {
         smsSentMonth: smsRes.count || 0,
         contactsAddedMonth: contactsMonthRes.count || 0,
         enrollmentsMonth: enrollmentsRes.count || 0,
+        revenueRecovered: completedTotal * aov,
+        completedEnrollments: completedTotal,
       });
     } catch (e) {
       console.error('Client dashboard error:', e);
@@ -116,6 +151,21 @@ export default function ClientDashboard({ user, onLogout }) {
         <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>Your AI revenue system is working for you 24/7</div>
       </div>
 
+      {/* Revenue Recovered Hero Card */}
+      <div style={{ background: 'linear-gradient(135deg, #0a1628 0%, #112240 100%)', border: '1px solid rgba(201,168,76,0.3)', borderRadius: '14px', padding: '24px 28px', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 4px 20px rgba(10,22,40,0.15)' }}>
+        <div>
+          <div style={{ fontSize: '9px', color: '#c9a84c', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>Revenue Recovered</div>
+          <div style={{ fontSize: '38px', fontWeight: 800, color: '#c9a84c', letterSpacing: '-1.5px', lineHeight: 1 }}>${stats.revenueRecovered.toLocaleString()}</div>
+          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: '8px' }}>
+            {stats.completedEnrollments} sequences completed · estimated from your average order value
+          </div>
+        </div>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(201,168,76,0.12)', border: '1.5px solid rgba(201,168,76,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>💰</div>
+          <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.2)', marginTop: '8px', letterSpacing: '1px' }}>ALL TIME</div>
+        </div>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '24px' }}>
         {[
           { label: 'Total Contacts', value: stats.totalContacts, sub: 'in your database', color: '#c9a84c' },
@@ -154,27 +204,37 @@ export default function ClientDashboard({ user, onLogout }) {
               <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628', marginBottom: '6px' }}>No active sequences yet</div>
               <div style={{ fontSize: '11px', color: '#8896a8' }}>Your AI team is setting things up</div>
             </div>
-          ) : workflows.filter(w => w.status === 'active').map(workflow => (
-            <div key={workflow.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '16px 18px', marginBottom: '8px', boxShadow: '0 1px 3px rgba(10,22,40,0.04)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628' }}>{workflow.name}</div>
-                <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' }}>● Active</span>
-              </div>
-              <div style={{ fontSize: '11px', color: '#8896a8', marginBottom: '12px' }}>Trigger: {workflow.trigger_type}</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                {[
-                  { label: 'Enrolled', value: workflow.enrolled_count || 0 },
-                  { label: 'Active', value: workflow.active_count || 0 },
-                  { label: 'Converted', value: workflow.converted_count || 0 },
-                ].map(s => (
-                  <div key={s.label} style={{ background: '#f8fafc', borderRadius: '8px', padding: '8px', textAlign: 'center' }}>
-                    <div style={{ fontSize: '16px', fontWeight: 700, color: '#0a1628' }}>{s.value}</div>
-                    <div style={{ fontSize: '9px', color: '#8896a8' }}>{s.label}</div>
+          ) : workflows.filter(w => w.status === 'active').map(workflow => {
+            const wfStats = enrollmentsByWorkflow[workflow.id] || { total: 0, completed: 0, active: 0 };
+            const completionRate = wfStats.total > 0 ? Math.round((wfStats.completed / wfStats.total) * 100) : 0;
+            return (
+              <div key={workflow.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '16px 18px', marginBottom: '8px', boxShadow: '0 1px 3px rgba(10,22,40,0.04)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628' }}>{workflow.name}</div>
+                  <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' }}>● Active</span>
+                </div>
+                <div style={{ fontSize: '11px', color: '#8896a8', marginBottom: '12px' }}>Trigger: {workflow.trigger_type}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '12px' }}>
+                  {[
+                    { label: 'Enrolled', value: wfStats.total },
+                    { label: 'Active', value: wfStats.active },
+                    { label: 'Completed', value: wfStats.completed },
+                  ].map(s => (
+                    <div key={s.label} style={{ background: '#f8fafc', borderRadius: '8px', padding: '8px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '16px', fontWeight: 700, color: '#0a1628' }}>{s.value}</div>
+                      <div style={{ fontSize: '9px', color: '#8896a8' }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ flex: 1, height: '5px', background: '#f0f3f8', borderRadius: '3px', overflow: 'hidden' }}>
+                    <div style={{ width: `${completionRate}%`, height: '100%', background: completionRate >= 50 ? '#10b981' : '#c9a84c', borderRadius: '3px', transition: 'width 0.5s' }} />
                   </div>
-                ))}
+                  <div style={{ fontSize: '10px', fontWeight: 700, color: completionRate >= 50 ? '#10b981' : '#c9a84c', minWidth: '32px', textAlign: 'right' }}>{completionRate}%</div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -278,31 +338,43 @@ export default function ClientDashboard({ user, onLogout }) {
           <div style={{ fontSize: '14px', fontWeight: 600, color: '#0a1628', marginBottom: '6px' }}>No sequences yet</div>
           <div style={{ fontSize: '12px', color: '#8896a8' }}>Your AI team is building your sequences</div>
         </div>
-      ) : workflows.map(workflow => (
-        <div key={workflow.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', marginBottom: '10px', boxShadow: '0 1px 3px rgba(10,22,40,0.04)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628', marginBottom: '4px' }}>{workflow.name}</div>
-              <div style={{ fontSize: '11px', color: '#8896a8' }}>Trigger: {workflow.trigger_type} · Created {formatDate(workflow.created_at)}</div>
-            </div>
-            <span style={{ fontSize: '9px', padding: '4px 12px', borderRadius: '20px', fontWeight: 600, background: workflow.status === 'active' ? '#ecfdf5' : '#fffbeb', color: workflow.status === 'active' ? '#059669' : '#d97706', border: `1px solid ${workflow.status === 'active' ? '#a7f3d0' : '#fde68a'}` }}>
-              {workflow.status === 'active' ? '● Active' : '○ Paused'}
-            </span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
-            {[
-              { label: 'Total Enrolled', value: workflow.enrolled_count || 0, color: '#c9a84c' },
-              { label: 'Currently Active', value: workflow.active_count || 0, color: '#3b82f6' },
-              { label: 'Converted', value: workflow.converted_count || 0, color: '#10b981' },
-            ].map(s => (
-              <div key={s.label} style={{ background: '#f8fafc', borderRadius: '10px', padding: '14px', textAlign: 'center', border: '1px solid #f0f3f8' }}>
-                <div style={{ fontSize: '22px', fontWeight: 700, color: s.color, marginBottom: '4px' }}>{s.value}</div>
-                <div style={{ fontSize: '10px', color: '#8896a8' }}>{s.label}</div>
+      ) : workflows.map(workflow => {
+        const wfStats = enrollmentsByWorkflow[workflow.id] || { total: 0, completed: 0, active: 0 };
+        const completionRate = wfStats.total > 0 ? Math.round((wfStats.completed / wfStats.total) * 100) : 0;
+        return (
+          <div key={workflow.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', marginBottom: '10px', boxShadow: '0 1px 3px rgba(10,22,40,0.04)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628', marginBottom: '4px' }}>{workflow.name}</div>
+                <div style={{ fontSize: '11px', color: '#8896a8' }}>Trigger: {workflow.trigger_type} · Created {formatDate(workflow.created_at)}</div>
               </div>
-            ))}
+              <span style={{ fontSize: '9px', padding: '4px 12px', borderRadius: '20px', fontWeight: 600, background: workflow.status === 'active' ? '#ecfdf5' : '#fffbeb', color: workflow.status === 'active' ? '#059669' : '#d97706', border: `1px solid ${workflow.status === 'active' ? '#a7f3d0' : '#fde68a'}` }}>
+                {workflow.status === 'active' ? '● Active' : '○ Paused'}
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '14px' }}>
+              {[
+                { label: 'Total Enrolled', value: wfStats.total, color: '#c9a84c' },
+                { label: 'Currently Active', value: wfStats.active, color: '#3b82f6' },
+                { label: 'Completed', value: wfStats.completed, color: '#10b981' },
+                { label: 'Completion Rate', value: `${completionRate}%`, color: completionRate >= 50 ? '#10b981' : '#c9a84c' },
+              ].map(s => (
+                <div key={s.label} style={{ background: '#f8fafc', borderRadius: '10px', padding: '14px', textAlign: 'center', border: '1px solid #f0f3f8' }}>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: s.color, marginBottom: '4px' }}>{s.value}</div>
+                  <div style={{ fontSize: '10px', color: '#8896a8' }}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ fontSize: '9px', color: '#8896a8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', whiteSpace: 'nowrap' }}>Completion</div>
+              <div style={{ flex: 1, height: '6px', background: '#f0f3f8', borderRadius: '4px', overflow: 'hidden' }}>
+                <div style={{ width: `${completionRate}%`, height: '100%', background: `linear-gradient(90deg, ${completionRate >= 50 ? '#10b981' : '#c9a84c'}, ${completionRate >= 50 ? '#059669' : '#a07234'})`, borderRadius: '4px', transition: 'width 0.6s' }} />
+              </div>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: completionRate >= 50 ? '#10b981' : '#c9a84c', minWidth: '36px' }}>{completionRate}%</div>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 
