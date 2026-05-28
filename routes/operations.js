@@ -83,6 +83,80 @@ module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToke
     }
   });
 
+  // ─── REFERRAL REWARD ─────────────────────────────────────
+  router.post('/referrals/reward', async (req, res) => {
+    try {
+      const { referral_id } = req.body;
+      if (!referral_id) return res.status(400).json({ error: 'referral_id required' });
+
+      const { data: referral, error: fetchErr } = await supabase
+        .from('referrals').select('*').eq('id', referral_id).maybeSingle();
+      if (fetchErr) throw fetchErr;
+      if (!referral) return res.status(404).json({ error: 'Referral not found' });
+      if (referral.status !== 'converted') {
+        return res.status(400).json({ error: 'Referral must be converted before issuing a reward' });
+      }
+      if (referral.rewarded_at) {
+        return res.status(409).json({ error: 'Reward already issued for this referral', rewarded_at: referral.rewarded_at });
+      }
+
+      const rewarded_at = new Date().toISOString();
+      const { error: updateErr } = await supabase.from('referrals')
+        .update({ rewarded_at }).eq('id', referral_id);
+      if (updateErr) throw updateErr;
+
+      await supabase.from('team_briefings').insert([{
+        from_member: 'zainab',
+        to_member: 'yousef',
+        subject: `Referral Reward Owed — ${referral.referred_business}`,
+        content: `A referral has converted and a reward needs to be processed.\n\nReferrer: ${referral.referrer_name}${referral.referrer_email ? ` (${referral.referrer_email})` : ''}\nReferred Business: ${referral.referred_business}\nConverted: ✓\nRewarded At: ${new Date(rewarded_at).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}${referral.notes ? `\n\nNotes: ${referral.notes}` : ''}\n\nPlease process the referral reward for ${referral.referrer_name} at your earliest convenience.`,
+        priority: 'high',
+        is_read: false,
+        created_at: rewarded_at,
+      }]);
+
+      console.log(`Referral reward flagged: ${referral.referred_business} → ${referral.referrer_name}`);
+      res.json({ ok: true, rewarded_at, referral: { ...referral, rewarded_at } });
+    } catch (e) {
+      console.error('Referral reward error:', e.message);
+      res.status(500).json({ error: 'Failed to process referral reward', details: e.message });
+    }
+  });
+
+  // ─── REFERRAL LINK GENERATION ────────────────────────────
+  router.get('/referrals/link', async (req, res) => {
+    try {
+      const { client_id } = req.query;
+      if (!client_id) return res.status(400).json({ error: 'client_id required' });
+
+      const { data: client, error: fetchErr } = await supabase
+        .from('clients').select('id, name, referral_code').eq('id', client_id).maybeSingle();
+      if (fetchErr) throw fetchErr;
+      if (!client) return res.status(404).json({ error: 'Client not found' });
+
+      let code = client.referral_code;
+      if (!code) {
+        const nameSlug = (client.name || 'REF').replace(/[^a-zA-Z0-9]/g, '').substring(0, 3).toUpperCase();
+        const randomPart = Math.random().toString(36).substring(2, 8).toUpperCase();
+        code = `${nameSlug}-${randomPart}`;
+        const { error: updateErr } = await supabase.from('clients')
+          .update({ referral_code: code }).eq('id', client_id);
+        if (updateErr) throw updateErr;
+      }
+
+      const BASE_URL = process.env.APP_URL || 'https://salesscales.com';
+      res.json({
+        client_id,
+        client_name: client.name,
+        referral_code: code,
+        referral_link: `${BASE_URL}/refer?code=${code}`,
+      });
+    } catch (e) {
+      console.error('Referral link error:', e.message);
+      res.status(500).json({ error: 'Failed to generate referral link', details: e.message });
+    }
+  });
+
   // ─── SEQUENCES FEEDBACK ──────────────────────────────────
   router.post('/sequences/feedback', async (req, res) => {
     try {

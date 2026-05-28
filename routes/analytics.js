@@ -302,5 +302,54 @@ module.exports = ({ supabase }) => {
     }
   });
 
+  // ─── REVENUE ATTRIBUTION ─────────────────────────────────
+  router.get('/revenue/attributed', async (req, res) => {
+    try {
+      const [
+        { data: clients },
+        { data: onboarding },
+        { data: completedEnrollments },
+      ] = await Promise.all([
+        supabase.from('clients').select('id, name, tier').eq('status', 'active'),
+        supabase.from('client_onboarding').select('client_id, average_order_value'),
+        supabase.from('workflow_enrollments').select('client_id').eq('status', 'completed'),
+      ]);
+
+      const aovMap = {};
+      for (const o of (onboarding || [])) {
+        const v = parseFloat(o.average_order_value);
+        if (o.client_id && !isNaN(v) && v > 0) aovMap[o.client_id] = v;
+      }
+
+      const conversionMap = {};
+      for (const e of (completedEnrollments || [])) {
+        conversionMap[e.client_id] = (conversionMap[e.client_id] || 0) + 1;
+      }
+
+      const DEFAULT_AOV = 75;
+      const attribution = (clients || []).map(c => {
+        const conversions = conversionMap[c.id] || 0;
+        const average_order_value = aovMap[c.id] || DEFAULT_AOV;
+        return {
+          client_id: c.id,
+          client_name: c.name,
+          tier: c.tier,
+          conversions,
+          average_order_value,
+          revenue_recovered: Math.round(conversions * average_order_value),
+          has_onboarding_data: !!aovMap[c.id],
+        };
+      }).sort((a, b) => b.revenue_recovered - a.revenue_recovered);
+
+      const total_revenue_recovered = attribution.reduce((s, c) => s + c.revenue_recovered, 0);
+      const total_conversions = attribution.reduce((s, c) => s + c.conversions, 0);
+
+      res.json({ attribution, total_revenue_recovered, total_conversions });
+    } catch (e) {
+      console.error('Revenue attributed error:', e.message);
+      res.status(500).json({ error: 'Failed to calculate revenue attribution', details: e.message });
+    }
+  });
+
   return router;
 };
