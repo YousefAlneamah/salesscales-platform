@@ -199,6 +199,25 @@ const getClientSender = async (clientId) => {
   }
 };
 
+// ─── HELPER: PER-CLIENT TWILIO CREDENTIALS ───────────────
+const getClientTwilio = async (clientId) => {
+  if (clientId) {
+    try {
+      const { data: c } = await supabase
+        .from('clients')
+        .select('twilio_subaccount_sid, twilio_subaccount_token, twilio_phone_number')
+        .eq('id', clientId).maybeSingle();
+      if (c?.twilio_subaccount_sid && c?.twilio_subaccount_token && c?.twilio_phone_number) {
+        return { tc: twilio(c.twilio_subaccount_sid, c.twilio_subaccount_token), from: c.twilio_phone_number };
+      }
+    } catch {}
+  }
+  return {
+    tc: twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN),
+    from: process.env.TWILIO_PHONE_NUMBER,
+  };
+};
+
 // ─── HELPER: SHOPIFY LIVE STORE CONTEXT ──────────────────
 const getShopifyContext = async (clientId) => {
   if (!clientId) return '';
@@ -257,10 +276,10 @@ const enrollContactInWorkflow = async (workflowId, contactId, clientId, contactE
   const firstStep = steps[0];
   if (firstStep.step_type !== 'wait' && firstStep.content) {
     if (firstStep.step_type === 'sms' && contactPhone) {
-      const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      const { tc: twilioClient, from: twilioFrom } = await getClientTwilio(clientId);
       await twilioClient.messages.create({
         body: firstStep.content.replace('{{first_name}}', contactName || 'there'),
-        from: process.env.TWILIO_PHONE_NUMBER, to: contactPhone
+        from: twilioFrom, to: contactPhone
       });
     } else if (firstStep.step_type === 'whatsapp' && contactPhone) {
       const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -416,10 +435,10 @@ cron.schedule('*/15 * * * *', async () => {
 
       } else if (currentStep.step_type === 'sms' && contact.phone && currentStep.content) {
         try {
-          const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+          const { tc: twilioClient, from: twilioFrom } = await getClientTwilio(enrollment.client_id);
           await twilioClient.messages.create({
             body: currentStep.content.replace('{{first_name}}', contact.first_name || 'there'),
-            from: process.env.TWILIO_PHONE_NUMBER,
+            from: twilioFrom,
             to: contact.phone
           });
           console.log(`SMS sent to ${contact.first_name} — step ${enrollment.current_step}`);
@@ -1065,13 +1084,73 @@ app.post('/generate-reply', async (req, res) => {
   }
 });
 
+// ─── TWILIO SUB-ACCOUNT PROVISIONING ─────────────────────
+app.post('/twilio/provision-number', async (req, res) => {
+  const { client_id, area_code } = req.body;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+    return res.status(500).json({ error: 'Master Twilio credentials not configured' });
+  }
+  try {
+    const { data: client } = await supabase
+      .from('clients').select('id, name, twilio_subaccount_sid').eq('id', client_id).maybeSingle();
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+    if (client.twilio_subaccount_sid) {
+      return res.status(409).json({ error: 'Client already has a Twilio sub-account. Release it before provisioning a new one.' });
+    }
+
+    const masterClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+
+    // Create sub-account under master
+    const subAccount = await masterClient.api.accounts.create({
+      friendlyName: `Sales Scales — ${client.name}`,
+    });
+    const { sid: subSid, authToken: subToken } = subAccount;
+
+    // Use sub-account credentials to search for a local US number
+    const subClient = twilio(subSid, subToken);
+    const searchParams = { smsEnabled: true, limit: 1 };
+    if (area_code) searchParams.areaCode = area_code;
+    const available = await subClient.availablePhoneNumbers('US').local.list(searchParams);
+    if (!available || available.length === 0) {
+      // Clean up the sub-account we just created since we can't get a number
+      await masterClient.api.accounts(subSid).update({ status: 'closed' });
+      return res.status(404).json({ error: 'No available phone numbers found for that area code. Try a different area code or leave it blank.' });
+    }
+
+    // Purchase the number inside the sub-account
+    const purchased = await subClient.incomingPhoneNumbers.create({
+      phoneNumber: available[0].phoneNumber,
+    });
+
+    // Persist all three values to the clients table
+    const { error: updateErr } = await supabase.from('clients').update({
+      twilio_subaccount_sid: subSid,
+      twilio_subaccount_token: subToken,
+      twilio_phone_number: purchased.phoneNumber,
+    }).eq('id', client_id);
+    if (updateErr) throw updateErr;
+
+    console.log(`Twilio number provisioned for ${client.name}: ${purchased.phoneNumber} (sub-account ${subSid})`);
+    res.json({
+      ok: true,
+      phone_number: purchased.phoneNumber,
+      subaccount_sid: subSid,
+      friendly_name: purchased.friendlyName,
+    });
+  } catch (e) {
+    console.error('Twilio provision error:', e.message);
+    res.status(500).json({ error: 'Failed to provision number', details: e.message });
+  }
+});
+
 // ─── SEND SMS ─────────────────────────────────────────────
 app.post('/send-sms', async (req, res) => {
-  const { to, message } = req.body;
+  const { to, message, clientId } = req.body;
   if (!to || !message) return res.status(400).json({ error: 'Missing to or message' });
   try {
-    const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    const result = await client.messages.create({ body: message, from: process.env.TWILIO_PHONE_NUMBER, to });
+    const { tc: client, from } = await getClientTwilio(clientId);
+    const result = await client.messages.create({ body: message, from, to });
     console.log('SMS sent:', result.sid);
     res.json({ success: true, sid: result.sid });
   } catch (e) {
@@ -1120,8 +1199,8 @@ app.post('/execute-step', async (req, res) => {
   if (!to || !message) return res.status(400).json({ error: 'Missing to or message' });
   try {
     if (stepType === 'sms') {
-      const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-      const result = await client.messages.create({ body: message, from: process.env.TWILIO_PHONE_NUMBER, to });
+      const { tc: client, from } = await getClientTwilio(clientId);
+      const result = await client.messages.create({ body: message, from, to });
       res.json({ success: true, channel: 'sms', sid: result.sid });
     } else if (stepType === 'whatsapp') {
       const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -1155,8 +1234,8 @@ app.post('/enroll-contact', async (req, res) => {
     const firstStep = steps[0];
     if (firstStep.step_type !== 'wait' && firstStep.content) {
       if (firstStep.step_type === 'sms' && contactPhone) {
-        const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-        await twilioClient.messages.create({ body: firstStep.content.replace('{{first_name}}', contactName || 'there'), from: process.env.TWILIO_PHONE_NUMBER, to: contactPhone });
+        const { tc: twilioClient, from: twilioFrom } = await getClientTwilio(clientId);
+        await twilioClient.messages.create({ body: firstStep.content.replace('{{first_name}}', contactName || 'there'), from: twilioFrom, to: contactPhone });
       } else if (firstStep.step_type === 'whatsapp' && contactPhone) {
         const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await twilioClient.messages.create({ body: firstStep.content.replace('{{first_name}}', contactName || 'there'), from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER, to: 'whatsapp:' + contactPhone });

@@ -8,6 +8,8 @@ export default function Settings() {
   const [emailConfig, setEmailConfig] = useState({});
   const [emailSaving, setEmailSaving] = useState(null);
   const [emailSaved, setEmailSaved] = useState(null);
+  const [twilioProvisioning, setTwilioProvisioning] = useState(null);
+  const [twilioResult, setTwilioResult] = useState({});
 
   const [profile, setProfile] = useState({
     businessName: 'Sales Scales',
@@ -50,14 +52,35 @@ export default function Settings() {
   });
 
   useEffect(() => {
-    supabase.from('clients').select('id, name, from_email, from_name, klaviyo_api_key, meta_access_token, meta_ad_account_id, hubspot_api_key, hubspot_portal_id').order('name').then(({ data }) => {
+    supabase.from('clients').select('id, name, from_email, from_name, klaviyo_api_key, meta_access_token, meta_ad_account_id, hubspot_api_key, hubspot_portal_id, twilio_phone_number, twilio_subaccount_sid').order('name').then(({ data }) => {
       if (!data) return;
       setClients(data);
       const cfg = {};
       data.forEach(c => { cfg[c.id] = { from_email: c.from_email || '', from_name: c.from_name || '', klaviyo_api_key: c.klaviyo_api_key || '', meta_access_token: c.meta_access_token || '', meta_ad_account_id: c.meta_ad_account_id || '', hubspot_api_key: c.hubspot_api_key || '', hubspot_portal_id: c.hubspot_portal_id || '' }; });
       setEmailConfig(cfg);
+      const tr = {};
+      data.forEach(c => { if (c.twilio_phone_number) tr[c.id] = { phone: c.twilio_phone_number, sid: c.twilio_subaccount_sid }; });
+      setTwilioResult(tr);
     });
   }, []);
+
+  const provisionNumber = async (clientId, areaCode) => {
+    setTwilioProvisioning(clientId);
+    try {
+      const res = await fetch('http://localhost:3001/twilio/provision-number', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: clientId, area_code: areaCode || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Provisioning failed');
+      setTwilioResult(prev => ({ ...prev, [clientId]: { phone: data.phone_number, sid: data.subaccount_sid } }));
+    } catch (e) {
+      alert('Provisioning failed: ' + e.message);
+    } finally {
+      setTwilioProvisioning(null);
+    }
+  };
 
   const saveEmailConfig = async (clientId) => {
     setEmailSaving(clientId);
@@ -102,6 +125,28 @@ export default function Settings() {
   const labelStyle = {
     fontSize: '10px', color: '#8896a8', marginBottom: '6px',
     fontWeight: 600, display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px'
+  };
+
+  const TwilioAreaInput = ({ clientId, provisioning, onProvision }) => {
+    const [areaCode, setAreaCode] = React.useState('');
+    return (
+      <>
+        <input
+          type="text"
+          value={areaCode}
+          onChange={e => setAreaCode(e.target.value.replace(/\D/g, '').slice(0, 3))}
+          placeholder="Area code (optional)"
+          style={{ width: '140px', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '7px 10px', fontSize: '11px', color: '#0a1628', outline: 'none', background: 'white', fontFamily: 'DM Mono, monospace' }}
+        />
+        <button
+          onClick={() => onProvision(clientId, areaCode)}
+          disabled={provisioning}
+          style={{ background: provisioning ? '#8896a8' : '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 700, cursor: provisioning ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}>
+          {provisioning ? 'Provisioning...' : '+ Provision Number'}
+        </button>
+        <span style={{ fontSize: '10px', color: '#8896a8' }}>Creates a Twilio sub-account and purchases a dedicated US number</span>
+      </>
+    );
   };
 
   const Toggle = ({ value, onChange }) => (
@@ -371,6 +416,24 @@ export default function Settings() {
                           style={{ background: isDone ? '#10b981' : '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 16px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', transition: 'background 0.2s' }}>
                           {isSaving ? 'Saving...' : isDone ? '✓ Saved' : 'Save'}
                         </button>
+                      </div>
+
+                      {/* TWILIO NUMBER */}
+                      <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #e4e9f0' }}>
+                        <div style={{ fontSize: '10px', color: '#8896a8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
+                          Dedicated SMS Number
+                        </div>
+                        {twilioResult[client.id] ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', fontWeight: 600 }}>● Active</span>
+                            <span style={{ fontSize: '12px', fontWeight: 700, color: '#0a1628', fontFamily: 'DM Mono, monospace' }}>{twilioResult[client.id].phone}</span>
+                            <span style={{ fontSize: '10px', color: '#8896a8' }}>Sub-account: {twilioResult[client.id].sid}</span>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <TwilioAreaInput clientId={client.id} provisioning={twilioProvisioning === client.id} onProvision={provisionNumber} />
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
