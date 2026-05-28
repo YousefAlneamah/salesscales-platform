@@ -359,6 +359,14 @@ const processWebhookEvent = async (topic, shop, payload) => {
       last_activity: new Date().toISOString()
     }]).select().single();
     contact = newContact;
+  } else {
+    // Duplicate detected — update stale fields without overwriting existing data
+    const updates = { last_activity: new Date().toISOString() };
+    if (customerData.phone && !contact.phone) updates.phone = customerData.phone;
+    if (customerData.first_name && !contact.first_name) updates.first_name = customerData.first_name;
+    if (customerData.id && !contact.shopify_customer_id) updates.shopify_customer_id = customerData.id.toString();
+    await supabase.from('contacts').update(updates).eq('id', contact.id);
+    contact = { ...contact, ...updates };
   }
 
   if (!contact) return;
@@ -401,6 +409,23 @@ const processWebhookEvent = async (topic, shop, payload) => {
   }]);
 
   console.log(`Webhook processed: ${contact.email} → ${triggerType} → ${workflow.name}`);
+};
+
+// ─── HELPER: PIPELINE STAGE AUTO-PROGRESSION ─────────────
+const PIPELINE_PROGRESSION = { 'New Lead': 'Engaged', 'Engaged': 'Qualified' };
+
+const advancePipelineStage = async (contactId) => {
+  try {
+    const { data: contact } = await supabase.from('contacts')
+      .select('id, pipeline_stage').eq('id', contactId).maybeSingle();
+    if (!contact) return;
+    const next = PIPELINE_PROGRESSION[contact.pipeline_stage];
+    if (!next) return;
+    await supabase.from('contacts').update({ pipeline_stage: next }).eq('id', contactId);
+    console.log(`Pipeline: contact ${contactId} → ${next}`);
+  } catch (e) {
+    console.error('advancePipelineStage error:', e.message);
+  }
 };
 
 // ─── SCHEDULER ────────────────────────────────────────────
@@ -553,6 +578,7 @@ cron.schedule('*/15 * * * *', async () => {
           .update({ status: 'completed', completed_at: now })
           .eq('id', enrollment.id);
         console.log(`Enrollment completed for ${contact.first_name}`);
+        await advancePipelineStage(contact.id);
       }
     }
   } catch (e) {
@@ -1789,6 +1815,105 @@ app.post('/test/trigger-webhook', async (req, res) => {
     step('FATAL ERROR', { message: e.message });
     console.error('[TEST WEBHOOK] Fatal:', e.message);
     res.status(500).json({ ok: false, error: e.message, log });
+  }
+});
+
+// ─── CLIENT ONBOARDING ───────────────────────────────────
+app.post('/clients/onboard', async (req, res) => {
+  const { name, email, password, business_type, niche, tier } = req.body;
+  if (!name || !email || !password) return res.status(400).json({ error: 'name, email, and password required' });
+  try {
+    const { data: client, error: clientErr } = await supabase.from('clients').insert([{
+      name,
+      business_type: business_type || null,
+      niche: niche || null,
+      tier: tier || 'Starter',
+      status: 'active',
+    }]).select().single();
+    if (clientErr) throw clientErr;
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const { data: clientUser, error: userErr } = await supabase.from('client_users').insert([{
+      name, email, password: passwordHash, client_id: client.id,
+    }]).select('id, name, email, client_id').single();
+    if (userErr) throw userErr;
+
+    try {
+      await sgMail.send({
+        to: email,
+        from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Zainab — Sales Scales' },
+        subject: `Welcome to Sales Scales, ${name}!`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f0f3f8;padding:32px;">
+          <div style="background:#0a1628;padding:24px 32px;border-radius:8px 8px 0 0;">
+            <h1 style="color:#c9a84c;margin:0;font-size:20px;">Sales Scales</h1>
+            <p style="color:#8896a8;margin:6px 0 0;font-size:13px;">AI-Powered Revenue System</p>
+          </div>
+          <div style="background:#ffffff;padding:32px;border-radius:0 0 8px 8px;">
+            <h2 style="color:#0a1628;margin:0 0 16px;">Welcome, ${name}!</h2>
+            <p style="color:#4a5568;line-height:1.7;margin:0 0 14px;">I'm Zainab, your dedicated Client Partner at Sales Scales. I'm thrilled to have you on board and will be with you every step of the way.</p>
+            <p style="color:#4a5568;line-height:1.7;margin:0 0 14px;">Here are your login credentials:</p>
+            <div style="background:#f0f3f8;padding:16px 20px;border-radius:8px;margin:0 0 20px;font-family:monospace;font-size:13px;">
+              <div><strong>Email:</strong> ${email}</div>
+              <div style="margin-top:8px;"><strong>Password:</strong> ${password}</div>
+            </div>
+            <p style="color:#4a5568;line-height:1.7;margin:0 0 10px;"><strong>Getting started:</strong></p>
+            <ol style="color:#4a5568;line-height:2;margin:0 0 20px;padding-left:20px;">
+              <li>Log in to your Sales Scales dashboard</li>
+              <li>Complete your onboarding questionnaire</li>
+              <li>Connect your Shopify store</li>
+              <li>Your AI team (Hussain, Mahdi, Ali, Hassan, Fatima, and I) start working for you immediately</li>
+            </ol>
+            <p style="color:#4a5568;line-height:1.7;margin:0 0 24px;">Reply to this email anytime — I personally monitor it and will get back to you within the hour.</p>
+            <p style="color:#4a5568;margin:0;">Warmly,<br><strong>Zainab</strong><br><span style="color:#8896a8;font-size:12px;">Client Partner — Sales Scales AI Team</span></p>
+          </div>
+        </div>`,
+      });
+    } catch (mailErr) {
+      console.error('Welcome email failed (non-fatal):', mailErr.message);
+    }
+
+    console.log(`Client onboarded: ${name} (${email}) — client_id ${client.id}`);
+    res.json({ ok: true, client, client_user: clientUser });
+  } catch (e) {
+    console.error('Client onboard error:', e.message);
+    res.status(500).json({ error: 'Failed to onboard client', details: e.message });
+  }
+});
+
+// ─── CREATE CONTACT (with dedup) ─────────────────────────
+app.post('/contacts', async (req, res) => {
+  const { first_name, last_name, email, phone, source, channel, pipeline_stage, notes, client_id } = req.body;
+  if (!first_name || !email) return res.status(400).json({ error: 'first_name and email required' });
+  try {
+    const { data: existing } = await supabase.from('contacts')
+      .select('*').eq('email', email).eq('client_id', client_id).maybeSingle();
+    if (existing) {
+      await supabase.from('contacts').update({
+        first_name: first_name || existing.first_name,
+        last_name: last_name ?? existing.last_name,
+        phone: phone || existing.phone,
+        source: source || existing.source,
+        channel: channel || existing.channel,
+        pipeline_stage: pipeline_stage || existing.pipeline_stage,
+        notes: notes ?? existing.notes,
+        last_activity: new Date().toISOString(),
+      }).eq('id', existing.id);
+      return res.json({ contact: { ...existing, first_name, last_name, phone }, duplicate: true });
+    }
+    const { data: contact, error } = await supabase.from('contacts').insert([{
+      first_name, last_name, email, phone,
+      source: source || 'Manual',
+      channel: channel || 'Email',
+      pipeline_stage: pipeline_stage || 'New Lead',
+      notes: notes || null,
+      client_id: client_id || null,
+      last_activity: new Date().toISOString(),
+    }]).select().single();
+    if (error) throw error;
+    res.json({ contact, duplicate: false });
+  } catch (e) {
+    console.error('Create contact error:', e.message);
+    res.status(500).json({ error: 'Failed to create contact', details: e.message });
   }
 });
 
