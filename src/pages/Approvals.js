@@ -1,16 +1,44 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { supabase } from '../supabase';
+
+const TYPE_LABELS = {
+  email_sequence: 'Email Sequence',
+  sms_sequence: 'SMS Sequence',
+  outreach_message: 'Outreach Message',
+  client_checkin: 'Client Check-in',
+  prospect: 'Prospect',
+};
+
+const TYPE_COLORS = {
+  email_sequence: { bg: '#eff6ff', color: '#2563eb', border: '#bfdbfe' },
+  sms_sequence:   { bg: '#f0fdf4', color: '#16a34a', border: '#bbf7d0' },
+  outreach_message: { bg: '#fdf4ff', color: '#9333ea', border: '#e9d5ff' },
+  client_checkin: { bg: '#fff7ed', color: '#ea580c', border: '#fed7aa' },
+  prospect:       { bg: '#fefce8', color: '#ca8a04', border: '#fde68a' },
+};
+
+const MEMBER_COLORS = {
+  hussain: '#3b82f6', hassan: '#10b981', ali: '#c9a84c',
+  mahdi: '#8b5cf6', fatima: '#f59e0b', zainab: '#ec4899',
+};
+
+const MEMBER_LABELS = {
+  hussain: 'Hussain AI', hassan: 'Hassan AI', ali: 'Ali AI',
+  mahdi: 'Mahdi AI', fatima: 'Fatima AI', zainab: 'Zainab AI', system: 'System',
+};
 
 export default function Approvals() {
   const [approvals, setApprovals] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filterPriority, setFilterPriority] = useState('All');
-  const [filterStatus, setFilterStatus] = useState('All');
+  const [filterStatus, setFilterStatus] = useState('pending');
+  const [filterType, setFilterType] = useState('All');
   const [filterClient, setFilterClient] = useState('All');
-  const [selectedApproval, setSelectedApproval] = useState(null);
-  const [rejectReason, setRejectReason] = useState('');
-  const [showRejectForm, setShowRejectForm] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [feedback, setFeedback] = useState('');
+  const [showReject, setShowReject] = useState(false);
+  const [actioning, setActioning] = useState(false);
 
   useEffect(() => {
     fetchApprovals();
@@ -29,61 +57,47 @@ export default function Approvals() {
     if (data) setClients(data);
   };
 
-  const approve = async (approval) => {
-    await supabase.from('approvals').update({ status: 'approved', reviewed_at: new Date().toISOString() }).eq('id', approval.id);
-    fetchApprovals();
-    if (selectedApproval?.id === approval.id) setSelectedApproval(null);
-  };
-
-  const reject = async (approval) => {
-    if (!rejectReason) { alert('Please provide a reason'); return; }
-    await supabase.from('approvals').update({ status: 'rejected', reviewed_at: new Date().toISOString(), rejection_reason: rejectReason }).eq('id', approval.id);
-    setRejectReason('');
-    setShowRejectForm(false);
-    fetchApprovals();
-    if (selectedApproval?.id === approval.id) setSelectedApproval(null);
-  };
-
-  const addTestApproval = async () => {
-    const tests = [
-      { title: 'Cart Recovery Email — 47 Customers', description: 'AI wants to send cart recovery email to 47 customers who abandoned carts over $150 in the last 24 hours.', content: 'Subject: You left something behind...\n\nHi {{first_name}},\n\nWe noticed you left your Luux bag in your cart. It is still waiting for you — and so is our lifetime warranty.\n\nComplete your order before it sells out.\n\nThe Luux Bags Team', type: 'email', channel: 'Email', priority: 'urgent', confidence: 72 },
-      { title: 'Win-Back SMS — 340 Customers', description: 'AI identified 340 customers who purchased over 6 months ago with no activity. Estimated recovery $4,800.', content: 'Hi {{first_name}}, we miss you! Your next Luux Bag is waiting. Shop our new collection now and get free shipping on orders over $100.', type: 'sms', channel: 'SMS', priority: 'important', confidence: 88 },
-      { title: 'Post Purchase Follow-Up — 23 Orders', description: 'AI wants to send a post-purchase check-in to customers who received their order in the last 3 days.', content: 'Hi {{first_name}}, how are you loving your new Luux bag? We would love to hear your feedback. Reply to this message anytime.', type: 'email', channel: 'Email', priority: 'low', confidence: 91 },
-    ];
-    const firstClient = clients[0];
-    const random = tests[Math.floor(Math.random() * tests.length)];
-    await supabase.from('approvals').insert([{ ...random, client_id: firstClient?.id || null, status: 'pending' }]);
-    fetchApprovals();
+  const action = async (approvalId, act) => {
+    setActioning(true);
+    try {
+      await axios.post('http://localhost:3001/approvals/action', {
+        approval_id: approvalId,
+        action: act,
+        feedback: feedback || undefined,
+      });
+      setFeedback('');
+      setShowReject(false);
+      setSelected(null);
+      await fetchApprovals();
+    } catch (e) {
+      alert(e.response?.data?.error || 'Action failed');
+    } finally {
+      setActioning(false);
+    }
   };
 
   const getClientName = (id) => clients.find(c => c.id === id)?.name || '—';
 
   const formatTime = (d) => {
     if (!d) return '—';
-    const diff = new Date() - new Date(d);
+    const diff = Date.now() - new Date(d);
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
+    if (hours < 1) return 'just now';
     if (hours < 24) return `${hours}h ago`;
     return `${days}d ago`;
   };
 
-  const priorityStyle = (p) => {
-    if (p === 'urgent') return { bg: '#fef2f2', color: '#dc2626', border: '#fecaca' };
-    if (p === 'important') return { bg: '#fffbeb', color: '#d97706', border: '#fde68a' };
-    return { bg: '#ecfdf5', color: '#059669', border: '#a7f3d0' };
-  };
-
-  const channelIcon = (ch) => ({ Email: '✉', SMS: '💬', WhatsApp: '📱', Instagram: '📸', Facebook: '👥' }[ch] || '📋');
+  const typeStyle = (t) => TYPE_COLORS[t] || { bg: '#f8fafc', color: '#64748b', border: '#e4e9f0' };
 
   const filtered = approvals.filter(a => {
-    const matchP = filterPriority === 'All' || a.priority === filterPriority;
     const matchS = filterStatus === 'All' || a.status === filterStatus;
+    const matchT = filterType === 'All' || a.type === filterType;
     const matchC = filterClient === 'All' || a.client_id === filterClient;
-    return matchP && matchS && matchC;
+    return matchS && matchT && matchC;
   });
 
   const pendingCount = approvals.filter(a => a.status === 'pending').length;
-  const urgentCount = approvals.filter(a => a.priority === 'urgent' && a.status === 'pending').length;
 
   const inputStyle = {
     width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px',
@@ -99,22 +113,20 @@ export default function Approvals() {
         <div>
           <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Approval Queue</div>
           <div style={{ fontSize: '13px', color: '#0a1628', fontWeight: 600 }}>
-            {pendingCount > 0 ? <span><span style={{ color: '#c9a84c' }}>{pendingCount} pending</span>{urgentCount > 0 ? ` · ${urgentCount} urgent` : ''}</span> : 'All clear'}
+            {pendingCount > 0
+              ? <><span style={{ color: '#c9a84c' }}>{pendingCount} pending</span> — approve or reject each action</>
+              : 'All clear'}
           </div>
         </div>
-        <button onClick={addTestApproval}
-          style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
-          + Test Approval
-        </button>
       </div>
 
       {/* STATS */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
         {[
           { label: 'Pending Review', value: approvals.filter(a => a.status === 'pending').length, sub: 'waiting for you', color: '#d97706' },
-          { label: 'Urgent', value: urgentCount, sub: 'time sensitive', color: '#dc2626' },
-          { label: 'Approved', value: approvals.filter(a => a.status === 'approved').length, sub: 'actions live', color: '#10b981' },
-          { label: 'Rejected', value: approvals.filter(a => a.status === 'rejected').length, sub: 'AI learning', color: '#8896a8' },
+          { label: 'Sequences', value: approvals.filter(a => a.status === 'pending' && (a.type === 'email_sequence' || a.type === 'sms_sequence')).length, sub: 'ready to activate', color: '#2563eb' },
+          { label: 'Approved', value: approvals.filter(a => a.status === 'approved').length, sub: 'actions executed', color: '#10b981' },
+          { label: 'Rejected', value: approvals.filter(a => a.status === 'rejected').length, sub: 'AI feedback logged', color: '#8896a8' },
         ].map(stat => (
           <div key={stat.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '16px 18px', borderTop: `2px solid ${stat.color}`, boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
             <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>{stat.label}</div>
@@ -126,16 +138,17 @@ export default function Approvals() {
 
       {/* FILTERS */}
       <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-        {['All', 'pending', 'approved', 'rejected'].map(s => (
+        {['pending', 'approved', 'rejected', 'All'].map(s => (
           <button key={s} onClick={() => setFilterStatus(s)}
             style={{ padding: '6px 14px', borderRadius: '20px', border: '1px solid', fontSize: '11px', cursor: 'pointer', fontWeight: filterStatus === s ? 600 : 400, background: filterStatus === s ? '#0a1628' : 'white', color: filterStatus === s ? 'white' : '#8896a8', borderColor: filterStatus === s ? '#0a1628' : '#e4e9f0' }}>
-            {s.charAt(0).toUpperCase() + s.slice(1)}
+            {s === 'All' ? 'All Status' : s.charAt(0).toUpperCase() + s.slice(1)}
           </button>
         ))}
-        {['All', 'urgent', 'important', 'low'].map(p => (
-          <button key={p} onClick={() => setFilterPriority(p)}
-            style={{ padding: '6px 14px', borderRadius: '20px', border: '1px solid', fontSize: '11px', cursor: 'pointer', fontWeight: filterPriority === p ? 600 : 400, background: filterPriority === p ? '#c9a84c' : 'white', color: filterPriority === p ? '#0a1628' : '#8896a8', borderColor: filterPriority === p ? '#c9a84c' : '#e4e9f0' }}>
-            {p === 'All' ? 'All Priority' : p.charAt(0).toUpperCase() + p.slice(1)}
+        <div style={{ width: '1px', height: '20px', background: '#e4e9f0', margin: '0 4px' }} />
+        {['All', 'email_sequence', 'sms_sequence', 'client_checkin', 'prospect', 'outreach_message'].map(t => (
+          <button key={t} onClick={() => setFilterType(t)}
+            style={{ padding: '6px 14px', borderRadius: '20px', border: '1px solid', fontSize: '11px', cursor: 'pointer', fontWeight: filterType === t ? 600 : 400, ...(filterType === t && t !== 'All' ? { background: typeStyle(t).bg, color: typeStyle(t).color, borderColor: typeStyle(t).border } : filterType === t ? { background: '#c9a84c', color: '#0a1628', borderColor: '#c9a84c' } : { background: 'white', color: '#8896a8', borderColor: '#e4e9f0' }) }}>
+            {t === 'All' ? 'All Types' : TYPE_LABELS[t] || t}
           </button>
         ))}
         <select value={filterClient} onChange={e => setFilterClient(e.target.value)} style={{ ...inputStyle, width: '150px', marginLeft: 'auto' }}>
@@ -144,7 +157,7 @@ export default function Approvals() {
         </select>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: selectedApproval ? '1fr 1fr' : '1fr', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 420px' : '1fr', gap: '16px' }}>
         {/* LIST */}
         <div>
           {loading ? (
@@ -158,53 +171,52 @@ export default function Approvals() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {filtered.map(approval => {
-                const ps = priorityStyle(approval.priority);
+                const ts = typeStyle(approval.type);
+                const memberColor = MEMBER_COLORS[approval.from_member] || '#8896a8';
                 return (
                   <div key={approval.id}
-                    onClick={() => setSelectedApproval(selectedApproval?.id === approval.id ? null : approval)}
-                    style={{ background: 'white', border: `1px solid ${selectedApproval?.id === approval.id ? '#c9a84c' : '#e4e9f0'}`, borderRadius: '12px', padding: '16px 18px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(10,22,40,0.04)', transition: 'border-color 0.1s' }}>
+                    onClick={() => { setSelected(selected?.id === approval.id ? null : approval); setShowReject(false); setFeedback(''); }}
+                    style={{ background: 'white', border: `1px solid ${selected?.id === approval.id ? '#c9a84c' : '#e4e9f0'}`, borderRadius: '12px', padding: '16px 18px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(10,22,40,0.04)', transition: 'border-color 0.1s' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                        <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', border: '1px solid #e4e9f0', flexShrink: 0 }}>
-                          {channelIcon(approval.channel)}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap' }}>
+                          {approval.type && (
+                            <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', fontWeight: 700, letterSpacing: '0.5px', background: ts.bg, color: ts.color, border: `1px solid ${ts.border}` }}>
+                              {TYPE_LABELS[approval.type] || approval.type}
+                            </span>
+                          )}
+                          {approval.from_member && (
+                            <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', fontWeight: 600, background: memberColor + '18', color: memberColor, border: `1px solid ${memberColor}30` }}>
+                              {MEMBER_LABELS[approval.from_member] || approval.from_member}
+                            </span>
+                          )}
+                          <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', fontWeight: 600, background: approval.status === 'approved' ? '#ecfdf5' : approval.status === 'rejected' ? '#fef2f2' : '#fffbeb', color: approval.status === 'approved' ? '#059669' : approval.status === 'rejected' ? '#dc2626' : '#d97706', border: `1px solid ${approval.status === 'approved' ? '#a7f3d0' : approval.status === 'rejected' ? '#fecaca' : '#fde68a'}` }}>
+                            {approval.status.charAt(0).toUpperCase() + approval.status.slice(1)}
+                          </span>
                         </div>
-                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628' }}>{approval.title}</div>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628', marginBottom: '4px' }}>{approval.title}</div>
+                        {approval.content && (
+                          <div style={{ fontSize: '11px', color: '#8896a8', lineHeight: '1.5', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '500px' }}>
+                            {approval.content}
+                          </div>
+                        )}
                       </div>
-                      <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-                        <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: ps.bg, color: ps.color, border: `1px solid ${ps.border}` }}>
-                          {approval.priority.charAt(0).toUpperCase() + approval.priority.slice(1)}
-                        </span>
-                        <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: approval.status === 'approved' ? '#ecfdf5' : approval.status === 'rejected' ? '#fef2f2' : '#fffbeb', color: approval.status === 'approved' ? '#059669' : approval.status === 'rejected' ? '#dc2626' : '#d97706', border: `1px solid ${approval.status === 'approved' ? '#a7f3d0' : approval.status === 'rejected' ? '#fecaca' : '#fde68a'}` }}>
-                          {approval.status.charAt(0).toUpperCase() + approval.status.slice(1)}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* CONFIDENCE BAR */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                      <div style={{ fontSize: '9px', color: '#8896a8', width: '80px' }}>AI Confidence</div>
-                      <div style={{ flex: 1, height: '3px', background: '#f0f3f8', borderRadius: '2px' }}>
-                        <div style={{ height: '100%', borderRadius: '2px', background: approval.confidence >= 80 ? '#10b981' : approval.confidence >= 60 ? '#d97706' : '#dc2626', width: `${approval.confidence}%` }}></div>
-                      </div>
-                      <div style={{ fontSize: '10px', fontWeight: 600, color: '#0a1628', width: '30px', textAlign: 'right' }}>{approval.confidence}%</div>
-                    </div>
-
-                    <div style={{ fontSize: '11px', color: '#8896a8', marginBottom: '12px', lineHeight: '1.5' }}>{approval.description}</div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ fontSize: '10px', color: '#8896a8' }}>{getClientName(approval.client_id)} · {formatTime(approval.created_at)}</div>
                       {approval.status === 'pending' && (
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button onClick={e => { e.stopPropagation(); approve(approval); }}
+                        <div style={{ display: 'flex', gap: '6px', flexShrink: 0, marginLeft: '12px' }} onClick={e => e.stopPropagation()}>
+                          <button onClick={() => action(approval.id, 'approve')}
                             style={{ background: '#10b981', color: 'white', border: 'none', borderRadius: '7px', padding: '6px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
-                            ✓ Approve
+                            ✓
                           </button>
-                          <button onClick={e => { e.stopPropagation(); setSelectedApproval(approval); setShowRejectForm(true); }}
+                          <button onClick={() => { setSelected(approval); setShowReject(true); }}
                             style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '7px', padding: '6px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
-                            ✗ Reject
+                            ✗
                           </button>
                         </div>
                       )}
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#8896a8' }}>
+                      {getClientName(approval.client_id)} · {formatTime(approval.created_at)}
+                      {approval.actioned_at && ` · actioned ${formatTime(approval.actioned_at)}`}
                     </div>
                   </div>
                 );
@@ -213,54 +225,100 @@ export default function Approvals() {
           )}
         </div>
 
-        {/* DETAIL */}
-        {selectedApproval && (
-          <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', height: 'fit-content', position: 'sticky', top: 0, boxShadow: '0 4px 6px rgba(10,22,40,0.05)' }}>
+        {/* DETAIL PANEL */}
+        {selected && (
+          <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', height: 'fit-content', position: 'sticky', top: 0, boxShadow: '0 4px 12px rgba(10,22,40,0.08)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628' }}>Review Content</div>
-              <button onClick={() => { setSelectedApproval(null); setShowRejectForm(false); }}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '20px', lineHeight: 1 }}>×</button>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628' }}>Review</div>
+              <button onClick={() => { setSelected(null); setShowReject(false); setFeedback(''); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '20px', lineHeight: 1, padding: 0 }}>×</button>
             </div>
 
             <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
-              {(() => { const ps = priorityStyle(selectedApproval.priority); return (
-                <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: ps.bg, color: ps.color, border: `1px solid ${ps.border}` }}>{selectedApproval.priority}</span>
+              {selected.type && (() => { const ts = typeStyle(selected.type); return (
+                <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 700, background: ts.bg, color: ts.color, border: `1px solid ${ts.border}` }}>{TYPE_LABELS[selected.type] || selected.type}</span>
               );})()}
-              <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', background: '#f8fafc', color: '#64748b', border: '1px solid #e4e9f0', fontWeight: 500 }}>{selectedApproval.channel}</span>
-              <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', background: '#f8fafc', color: '#64748b', border: '1px solid #e4e9f0', fontWeight: 500 }}>{getClientName(selectedApproval.client_id)}</span>
+              {selected.from_member && (() => { const mc = MEMBER_COLORS[selected.from_member] || '#8896a8'; return (
+                <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: mc + '18', color: mc, border: `1px solid ${mc}30` }}>{MEMBER_LABELS[selected.from_member] || selected.from_member}</span>
+              );})()}
+              {selected.client_id && (
+                <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', background: '#f8fafc', color: '#64748b', border: '1px solid #e4e9f0', fontWeight: 500 }}>{getClientName(selected.client_id)}</span>
+              )}
             </div>
 
-            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>AI Generated Content</div>
-            <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '14px', marginBottom: '16px', fontSize: '12px', color: '#475569', lineHeight: '1.7', whiteSpace: 'pre-wrap', border: '1px solid #f0f3f8' }}>
-              {selectedApproval.content}
-            </div>
-
-            {selectedApproval.rejection_reason && (
-              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '12px', marginBottom: '14px', fontSize: '11px', color: '#dc2626' }}>
-                <strong>Rejection reason:</strong> {selectedApproval.rejection_reason}
+            {/* Metadata details */}
+            {selected.metadata && Object.keys(selected.metadata).length > 0 && selected.type !== 'email_sequence' && selected.type !== 'sms_sequence' && (
+              <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '10px 12px', marginBottom: '14px', border: '1px solid #f0f3f8' }}>
+                {selected.metadata.to_email && <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}><strong>To:</strong> {selected.metadata.to_email}</div>}
+                {selected.metadata.subject && <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}><strong>Subject:</strong> {selected.metadata.subject}</div>}
+                {selected.metadata.channel && <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}><strong>Channel:</strong> {selected.metadata.channel}</div>}
+                {selected.metadata.niche && <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}><strong>Niche:</strong> {selected.metadata.niche}</div>}
+                {selected.metadata.pain_point && <div style={{ fontSize: '11px', color: '#64748b' }}><strong>Pain Point:</strong> {selected.metadata.pain_point}</div>}
               </div>
             )}
 
-            {showRejectForm && selectedApproval.status === 'pending' && (
+            {/* Steps preview for sequences */}
+            {(selected.type === 'email_sequence' || selected.type === 'sms_sequence') && selected.metadata?.steps?.length > 0 && (
               <div style={{ marginBottom: '14px' }}>
-                <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>Reason for Rejection</div>
-                <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>{selected.metadata.steps.filter(s => s.step_type !== 'wait').length} Steps · {selected.metadata.trigger_type || 'manual'} trigger</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {selected.metadata.steps.map((step, i) => (
+                    <div key={i} style={{ background: step.step_type === 'wait' ? '#f8fafc' : '#f0f3f8', borderRadius: '6px', padding: '8px 10px', border: '1px solid #e4e9f0' }}>
+                      <div style={{ fontSize: '9px', fontWeight: 700, color: step.step_type === 'wait' ? '#8896a8' : '#0a1628', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: step.step_type !== 'wait' ? '4px' : 0 }}>
+                        {step.step_type === 'wait' ? `⏱ Wait ${step.wait_hours || 0}h` : `Step ${i + 1} — ${step.step_type}`}
+                      </div>
+                      {step.subject && <div style={{ fontSize: '11px', color: '#4a5568', marginBottom: '2px' }}><strong>Subject:</strong> {step.subject}</div>}
+                      {step.content && step.step_type !== 'wait' && (
+                        <div style={{ fontSize: '11px', color: '#64748b', lineHeight: '1.5', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{step.content}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Content */}
+            {selected.content && (
+              <div style={{ marginBottom: '14px' }}>
+                <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>Content</div>
+                <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '12px', fontSize: '12px', color: '#475569', lineHeight: '1.7', whiteSpace: 'pre-wrap', border: '1px solid #f0f3f8', maxHeight: '200px', overflowY: 'auto' }}>
+                  {selected.content}
+                </div>
+              </div>
+            )}
+
+            {selected.feedback && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '10px 12px', marginBottom: '14px', fontSize: '11px', color: '#dc2626' }}>
+                <strong>Feedback logged:</strong> {selected.feedback}
+              </div>
+            )}
+
+            {showReject && selected.status === 'pending' && (
+              <div style={{ marginBottom: '14px' }}>
+                <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>Feedback for AI</div>
+                <textarea value={feedback} onChange={e => setFeedback(e.target.value)}
                   placeholder="Tell the AI why this is wrong so it learns and improves..."
                   rows={3} style={{ ...inputStyle, resize: 'none', marginBottom: '8px' }} />
-                <button onClick={() => reject(selectedApproval)}
-                  style={{ background: '#dc2626', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', width: '100%' }}>
-                  Confirm Rejection
-                </button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button onClick={() => action(selected.id, 'reject')} disabled={actioning}
+                    style={{ background: '#dc2626', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', flex: 1, opacity: actioning ? 0.6 : 1 }}>
+                    Confirm Rejection
+                  </button>
+                  <button onClick={() => { setShowReject(false); setFeedback(''); }}
+                    style={{ background: 'white', border: '1px solid #e4e9f0', color: '#64748b', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
 
-            {selectedApproval.status === 'pending' && !showRejectForm && (
+            {selected.status === 'pending' && !showReject && (
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={() => approve(selectedApproval)}
-                  style={{ background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', padding: '10px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', flex: 1 }}>
-                  ✓ Approve & Send
+                <button onClick={() => action(selected.id, 'approve')} disabled={actioning}
+                  style={{ background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', padding: '10px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', flex: 1, opacity: actioning ? 0.6 : 1 }}>
+                  ✓ Approve & Execute
                 </button>
-                <button onClick={() => setShowRejectForm(true)}
+                <button onClick={() => setShowReject(true)}
                   style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '8px', padding: '10px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', flex: 1 }}>
                   ✗ Reject
                 </button>

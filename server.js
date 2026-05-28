@@ -713,6 +713,60 @@ cron.schedule('0 9 * * 1', async () => {
       briefing, 'normal'
     );
     console.log(`[AUTO] Hussain weekly briefing stored — ${clients.length} clients analyzed`);
+
+    // Hussain→Mahdi: generate email + SMS sequence approvals for each client
+    for (const client of clientData) {
+      try {
+        const emailSeqJson = await aiCall(
+          `You are Mahdi, the Marketing and Content AI at Sales Scales. You write high-converting sequences. Return ONLY valid JSON, no markdown, no explanation.`,
+          `Generate a 3-step email sequence for ${client.name} (niche: ${client.niche || 'ecommerce'}, weekly enrollments this week: ${client.enrollments}).
+Return JSON exactly: {"trigger_type":"manual","steps":[{"step_type":"email","subject":"...","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":24},{"step_type":"email","subject":"...","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":48},{"step_type":"email","subject":"...","content":"...","wait_hours":0}]}`,
+          client.ragCtx || ''
+        );
+        let emailParsed;
+        try {
+          const ec = emailSeqJson.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+          const em = ec.match(/\{[\s\S]*\}/);
+          emailParsed = JSON.parse(em ? em[0] : ec);
+        } catch { emailParsed = { steps: [] }; }
+        await supabase.from('approvals').insert([{
+          type: 'email_sequence',
+          title: `Email Sequence — ${client.name}`,
+          content: `Mahdi drafted a ${(emailParsed.steps || []).filter(s => s.step_type === 'email').length}-email sequence for ${client.name} based on this week's performance.`,
+          metadata: { steps: emailParsed.steps || [], trigger_type: emailParsed.trigger_type || 'manual' },
+          from_member: 'mahdi',
+          client_id: client.id,
+          status: 'pending',
+          created_at: new Date().toISOString()
+        }]);
+
+        const smsSeqJson = await aiCall(
+          `You are Mahdi, the Marketing and Content AI at Sales Scales. Return ONLY valid JSON, no markdown, no explanation.`,
+          `Generate a 2-step SMS sequence for ${client.name} (niche: ${client.niche || 'ecommerce'}).
+Return JSON exactly: {"trigger_type":"cart_abandoned","steps":[{"step_type":"sms","content":"Hi {{first_name}}, ...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":48},{"step_type":"sms","content":"...","wait_hours":0}]}`,
+          client.ragCtx || ''
+        );
+        let smsParsed;
+        try {
+          const sc = smsSeqJson.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+          const sm = sc.match(/\{[\s\S]*\}/);
+          smsParsed = JSON.parse(sm ? sm[0] : sc);
+        } catch { smsParsed = { steps: [] }; }
+        await supabase.from('approvals').insert([{
+          type: 'sms_sequence',
+          title: `SMS Sequence — ${client.name}`,
+          content: `Mahdi drafted a ${(smsParsed.steps || []).filter(s => s.step_type === 'sms').length}-step SMS sequence for ${client.name}.`,
+          metadata: { steps: smsParsed.steps || [], trigger_type: smsParsed.trigger_type || 'cart_abandoned' },
+          from_member: 'mahdi',
+          client_id: client.id,
+          status: 'pending',
+          created_at: new Date().toISOString()
+        }]);
+        console.log(`[AUTO] Hussain→Mahdi sequences queued for ${client.name}`);
+      } catch (clientErr) {
+        console.error(`[AUTO] Hussain→Mahdi sequences failed for ${client.name}:`, clientErr.message);
+      }
+    }
   } catch (e) {
     console.error('[AUTO] Hussain weekly error:', e.message);
   }
@@ -766,6 +820,37 @@ cron.schedule('0 * * * *', async () => {
       'urgent'
     );
     console.log(`[AUTO] Fatima flagged ${alerts.length} alert(s)`);
+
+    // Fatima→Hussain: draft a client_checkin approval for each flagged client
+    const seenClientIds = new Set();
+    for (const alert of alerts) {
+      const flaggedClient = clients.find(c => alert.includes(c.name));
+      if (!flaggedClient || seenClientIds.has(flaggedClient.id)) continue;
+      seenClientIds.add(flaggedClient.id);
+      try {
+        const { data: clientUser } = await supabase.from('client_users')
+          .select('email, name').eq('client_id', flaggedClient.id).maybeSingle();
+        if (!clientUser?.email) continue;
+        const checkinContent = await aiCall(
+          `You are Hussain, the Intelligence and Strategy AI at Sales Scales. Write brief, professional check-in emails. Be helpful and specific, not alarming.`,
+          `Write a 3–4 sentence check-in email to ${flaggedClient.name}'s team. Context: ${alert}. Offer specific help. Do not mention internal metrics or system alerts.`,
+          ''
+        );
+        await supabase.from('approvals').insert([{
+          type: 'client_checkin',
+          title: `Client Check-in — ${flaggedClient.name}`,
+          content: checkinContent,
+          metadata: { to_email: clientUser.email, to_name: clientUser.name || flaggedClient.name, subject: `Quick check-in from Sales Scales` },
+          from_member: 'fatima',
+          client_id: flaggedClient.id,
+          status: 'pending',
+          created_at: new Date().toISOString()
+        }]);
+        console.log(`[AUTO] Fatima — check-in approval drafted for ${flaggedClient.name}`);
+      } catch (clientErr) {
+        console.error(`[AUTO] Fatima check-in failed for ${flaggedClient.name}:`, clientErr.message);
+      }
+    }
   } catch (e) {
     console.error('[AUTO] Fatima hourly error:', e.message);
   }
@@ -965,8 +1050,106 @@ cron.schedule('0 11 * * *', async () => {
       'normal'
     );
     console.log('[AUTO] Hassan daily prospect outreach stored');
+
+    // Hassan→Ali: submit individual prospect approvals
+    const prospectRagCtx = await ragSearch('ideal ecommerce client profile Shopify store owner');
+    const prospectsJson = await aiCall(
+      `You are Hassan, the Growth and Outreach AI at Sales Scales. Return ONLY valid JSON, no markdown, no explanation.`,
+      `Generate 3 prospect profiles for outreach today. Each is a Shopify store owner Sales Scales can help.
+Return JSON: {"prospects":[{"name":"...","niche":"...","channel":"Email","pain_point":"...","subject":"...","message":"..."},{"name":"...","niche":"...","channel":"LinkedIn DM","pain_point":"...","subject":"...","message":"..."},{"name":"...","niche":"...","channel":"Instagram DM","pain_point":"...","subject":"...","message":"..."}]}`,
+      prospectRagCtx
+    );
+    try {
+      const pc = prospectsJson.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+      const pm = pc.match(/\{[\s\S]*\}/);
+      const parsed = JSON.parse(pm ? pm[0] : pc);
+      for (const p of (parsed.prospects || [])) {
+        await supabase.from('approvals').insert([{
+          type: 'prospect',
+          title: `Prospect: ${p.name || (p.niche + ' store owner')}`,
+          content: p.message || '',
+          metadata: { prospect_name: p.name, niche: p.niche, channel: p.channel, pain_point: p.pain_point, subject: p.subject },
+          from_member: 'hassan',
+          client_id: null,
+          status: 'pending',
+          created_at: new Date().toISOString()
+        }]);
+      }
+      console.log(`[AUTO] Hassan — ${(parsed.prospects || []).length} prospect(s) submitted for approval`);
+    } catch (parseErr) {
+      console.error('[AUTO] Hassan prospects parse error:', parseErr.message);
+    }
   } catch (e) {
     console.error('[AUTO] Hassan daily error:', e.message);
+  }
+});
+
+// ─── AUTO SCHEDULER: ZAINAB — DAILY CLIENT HEALTH ────────
+// Every day at 9am
+cron.schedule('0 9 * * *', async () => {
+  console.log('[AUTO] Zainab — daily client health check starting...');
+  try {
+    const { data: clients } = await supabase.from('clients').select('id, name, tier').eq('status', 'active');
+    if (!clients || clients.length === 0) return;
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+
+    for (const client of clients) {
+      try {
+        const [enrollRes, clientUserRes] = await Promise.all([
+          supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true })
+            .eq('client_id', client.id).gte('enrolled_at', sevenDaysAgo),
+          supabase.from('client_users').select('email, name, last_login').eq('client_id', client.id).maybeSingle(),
+        ]);
+        const enrollCount = enrollRes.count || 0;
+        const clientUser = clientUserRes.data;
+
+        if (enrollCount === 0 && clientUser?.email) {
+          const checkinContent = await aiCall(
+            `You are Zainab, the Client Partner AI at Sales Scales. Write warm, professional check-in emails that feel personal.`,
+            `Write a brief check-in email to ${client.name}. They have had zero workflow enrollments in the past 7 days. Offer to review their sequences together. 3–4 sentences, friendly tone.`,
+            ''
+          );
+          await supabase.from('approvals').insert([{
+            type: 'client_checkin',
+            title: `Low Engagement Check-in — ${client.name}`,
+            content: checkinContent,
+            metadata: { to_email: clientUser.email, to_name: clientUser.name || client.name, subject: `Checking in — ${client.name}` },
+            from_member: 'zainab',
+            client_id: client.id,
+            status: 'pending',
+            created_at: new Date().toISOString()
+          }]);
+          console.log(`[AUTO] Zainab — check-in drafted for ${client.name} (0 enrollments this week)`);
+        }
+
+        if (clientUser?.email && clientUser.last_login && new Date(clientUser.last_login) < new Date(fourteenDaysAgo)) {
+          const daysSince = Math.floor((Date.now() - new Date(clientUser.last_login)) / 86400000);
+          const reengageContent = await aiCall(
+            `You are Zainab, the Client Partner AI at Sales Scales. Write warm re-engagement emails that bring clients back.`,
+            `Write a re-engagement email to ${client.name}. They haven't logged in for ${daysSince} days. Remind them of the value they're missing, mention their AI team is ready, include a CTA to log in and review their active sequences. 4–5 sentences.`,
+            ''
+          );
+          await supabase.from('approvals').insert([{
+            type: 'client_checkin',
+            title: `Re-engagement Email — ${client.name}`,
+            content: reengageContent,
+            metadata: { to_email: clientUser.email, to_name: clientUser.name || client.name, subject: `We miss you — ${client.name}` },
+            from_member: 'zainab',
+            client_id: client.id,
+            status: 'pending',
+            created_at: new Date().toISOString()
+          }]);
+          console.log(`[AUTO] Zainab — re-engagement drafted for ${client.name} (${daysSince}d inactive)`);
+        }
+      } catch (clientErr) {
+        console.error(`[AUTO] Zainab daily failed for ${client.name}:`, clientErr.message);
+      }
+    }
+    console.log(`[AUTO] Zainab daily health check complete — ${clients.length} clients reviewed`);
+  } catch (e) {
+    console.error('[AUTO] Zainab daily error:', e.message);
   }
 });
 
@@ -1545,6 +1728,124 @@ app.get('/team/briefings', async (req, res) => {
   } catch (e) {
     console.error('Briefings fetch error:', e.message);
     res.status(500).json({ error: 'Failed to fetch briefings', details: e.message });
+  }
+});
+
+// ─── APPROVAL ENDPOINTS ──────────────────────────────────
+app.post('/approvals/submit', async (req, res) => {
+  const { type, title, content, metadata, from_member, client_id } = req.body;
+  if (!type || !title) return res.status(400).json({ error: 'type and title are required' });
+  try {
+    const { data, error } = await supabase.from('approvals').insert([{
+      type, title, content: content || '',
+      metadata: metadata || {},
+      from_member: from_member || 'system',
+      client_id: client_id || null,
+      status: 'pending',
+      created_at: new Date().toISOString()
+    }]).select().single();
+    if (error) throw error;
+    res.json({ approval: data });
+  } catch (e) {
+    console.error('/approvals/submit error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/approvals/action', async (req, res) => {
+  const { approval_id, action, feedback } = req.body;
+  if (!approval_id || !action) return res.status(400).json({ error: 'approval_id and action required' });
+  try {
+    const { data: approval, error: fetchErr } = await supabase.from('approvals').select('*').eq('id', approval_id).single();
+    if (fetchErr || !approval) return res.status(404).json({ error: 'Approval not found' });
+
+    if (action === 'reject') {
+      await supabase.from('approvals').update({
+        status: 'rejected', feedback: feedback || null, actioned_at: new Date().toISOString()
+      }).eq('id', approval_id);
+      return res.json({ ok: true });
+    }
+
+    if (action !== 'approve') return res.status(400).json({ error: 'action must be approve or reject' });
+
+    const meta = approval.metadata || {};
+
+    if (approval.type === 'email_sequence' || approval.type === 'sms_sequence') {
+      const steps = meta.steps || [];
+      const { data: workflow, error: wfErr } = await supabase.from('workflows').insert([{
+        name: approval.title,
+        client_id: approval.client_id,
+        trigger_type: meta.trigger_type || 'manual',
+        status: 'active',
+        enrolled_count: 0,
+      }]).select().single();
+      if (wfErr) throw wfErr;
+      if (steps.length > 0) {
+        await supabase.from('workflow_steps').insert(
+          steps.map((s, i) => ({
+            workflow_id: workflow.id,
+            step_order: i,
+            step_type: s.step_type || (approval.type === 'sms_sequence' ? 'sms' : 'email'),
+            content: s.content || '',
+            subject: s.subject || null,
+            wait_hours: s.wait_hours || 0,
+          }))
+        );
+      }
+    } else if (approval.type === 'outreach_message') {
+      if (meta.channel === 'sms' && meta.to_phone) {
+        const { tc: twilioClient, from } = await getClientTwilio(approval.client_id);
+        await twilioClient.messages.create({ body: approval.content, from, to: meta.to_phone });
+      } else if (meta.to_email) {
+        const sender = await getClientSender(approval.client_id);
+        await sgMail.send({
+          to: meta.to_email, from: sender,
+          subject: meta.subject || 'Message from Sales Scales',
+          html: `<p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#374151;">${approval.content}</p>`
+        });
+      }
+    } else if (approval.type === 'client_checkin') {
+      const sender = await getClientSender(approval.client_id);
+      await sgMail.send({
+        to: meta.to_email, from: sender,
+        subject: meta.subject || 'Check-in from Sales Scales',
+        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+          <div style="background:#0a1628;padding:20px 24px;border-radius:8px 8px 0 0;">
+            <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Sales Scales</div>
+            <div style="color:white;font-size:16px;font-weight:600;">${meta.subject || 'A message for you'}</div>
+          </div>
+          <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 8px 8px;padding:24px;">
+            <div style="color:#4a5568;font-size:13px;line-height:1.8;white-space:pre-wrap;">${approval.content}</div>
+            <hr style="border:none;border-top:1px solid #e4e9f0;margin:18px 0;" />
+            <p style="color:#8896a8;font-size:11px;margin:0;">Sales Scales — AI Revenue System</p>
+          </div>
+        </div>`
+      });
+    } else if (approval.type === 'prospect') {
+      await supabase.from('my_pipeline').insert([{
+        name: meta.prospect_name || approval.title,
+        niche: meta.niche || null,
+        channel: meta.channel || null,
+        pain_point: meta.pain_point || null,
+        source: 'hassan_ai',
+        notes: approval.content,
+        stage: 'new',
+      }]);
+      await storeBriefing('hassan', 'ali',
+        `New Prospect to Close: ${meta.prospect_name || approval.title}`,
+        `Hassan has sourced a new prospect that Yousef approved.\n\nProspect: ${meta.prospect_name || approval.title}\nNiche: ${meta.niche || 'unknown'}\nChannel: ${meta.channel || 'unknown'}\nPain Point: ${meta.pain_point || 'unknown'}\n\nOutreach message sent:\n${approval.content}\n\nDraft a NEPQ-based closing script for this prospect and prepare follow-up questions.`,
+        'high'
+      );
+    }
+
+    await supabase.from('approvals').update({
+      status: 'approved', feedback: feedback || null, actioned_at: new Date().toISOString()
+    }).eq('id', approval_id);
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('/approvals/action error:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
