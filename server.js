@@ -522,6 +522,353 @@ cron.schedule('*/15 * * * *', async () => {
   }
 });
 
+// ─── HELPER: STORE TEAM BRIEFING ─────────────────────────
+const storeBriefing = async (from_member, to_member, subject, content, priority = 'normal', client_id = null) => {
+  const { error } = await supabase.from('team_briefings').insert([{
+    from_member, to_member, subject, content,
+    priority, client_id, is_read: false,
+    created_at: new Date().toISOString()
+  }]);
+  if (error) throw new Error(`storeBriefing failed: ${error.message}`);
+};
+
+// ─── AUTO SCHEDULER: HUSSAIN — WEEKLY INTELLIGENCE ───────
+// Every Monday at 9am
+cron.schedule('0 9 * * 1', async () => {
+  console.log('[AUTO] Hussain — weekly intelligence briefing starting...');
+  try {
+    const { data: clients, error } = await supabase
+      .from('clients').select('id, name, niche, tier, health_score')
+      .eq('status', 'active');
+    if (error || !clients || clients.length === 0) {
+      console.log('[AUTO] Hussain weekly — no active clients');
+      return;
+    }
+
+    const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const clientData = await Promise.all(clients.map(async (client) => {
+      const [ragCtx, enrollRes, contactRes, pipelineRes] = await Promise.all([
+        ragSearch(`weekly performance insights ${client.name}`, client.id),
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true })
+          .eq('client_id', client.id).gte('enrolled_at', weekStart),
+        supabase.from('contacts').select('id', { count: 'exact', head: true })
+          .eq('client_id', client.id).gte('created_at', weekStart),
+        supabase.from('pipeline_deals').select('value').eq('client_id', client.id),
+      ]);
+      return {
+        ...client,
+        enrollments: enrollRes.count || 0,
+        newContacts: contactRes.count || 0,
+        pipelineValue: (pipelineRes.data || []).reduce((s, d) => s + parseFloat(d.value || 0), 0),
+        ragCtx,
+      };
+    }));
+
+    const sorted = [...clientData].sort((a, b) => b.enrollments - a.enrollments);
+    const top = sorted[0];
+    const bottom = sorted[sorted.length - 1];
+    const summaryLines = clientData.map(c =>
+      `${c.name} (${c.niche || 'ecommerce'}): ${c.enrollments} enrollments, ${c.newContacts} new contacts, $${c.pipelineValue.toFixed(0)} pipeline`
+    ).join('\n');
+    const ragContext = clientData.map(c => c.ragCtx).filter(Boolean).join('\n\n');
+
+    const briefing = await aiCall(
+      `You are Hussain, the Intelligence and Strategy AI at Sales Scales. You are sharp, data-driven, and think like a founder. You give direct, actionable insights with no fluff. You are Hussain — never mention Claude.`,
+      `Generate a weekly intelligence briefing for Yousef. ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}.\n\nClient performance this week:\n${summaryLines}\n\nTop performer: ${top.name} (${top.enrollments} enrollments)\nNeeds attention: ${bottom.name} (${bottom.enrollments} enrollments)\n\nWrite a briefing with these sections:\n1. TOP PERFORMER — what's working for ${top.name} and why\n2. NEEDS ATTENTION — specific issues with ${bottom.name} and immediate fixes\n3. WEEKLY PRIORITIES — 3 highest-impact actions Yousef should take this week\n4. MARKET INSIGHTS — 1–2 patterns or opportunities spotted across all clients\n\nBe direct, specific, no filler.`,
+      ragContext
+    );
+
+    await storeBriefing('hussain', 'yousef',
+      `Weekly Intelligence Briefing — ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}`,
+      briefing, 'normal'
+    );
+    console.log(`[AUTO] Hussain weekly briefing stored — ${clients.length} clients analyzed`);
+  } catch (e) {
+    console.error('[AUTO] Hussain weekly error:', e.message);
+  }
+});
+
+// ─── AUTO SCHEDULER: FATIMA — HOURLY ENROLLMENT MONITOR ──
+// Every hour
+cron.schedule('0 * * * *', async () => {
+  console.log('[AUTO] Fatima — hourly enrollment health check...');
+  try {
+    const { data: clients } = await supabase
+      .from('clients').select('id, name').eq('status', 'active');
+    if (!clients || clients.length === 0) return;
+
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const alerts = [];
+
+    await Promise.all(clients.map(async (client) => {
+      const [recentRes, workflowsRes] = await Promise.all([
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true })
+          .eq('client_id', client.id).gte('enrolled_at', since24h),
+        supabase.from('workflows').select('id, name, enrolled_count')
+          .eq('client_id', client.id).eq('status', 'active'),
+      ]);
+
+      if ((recentRes.count || 0) === 0) {
+        alerts.push(`ZERO ENROLLMENTS: ${client.name} has had 0 workflow enrollments in the past 24 hours. Sequences may be inactive or audience is not being reached.`);
+      }
+
+      for (const wf of (workflowsRes.data || [])) {
+        const total = wf.enrolled_count || 0;
+        if (total < 10) continue;
+        const { count: cancelled } = await supabase
+          .from('workflow_enrollments').select('id', { count: 'exact', head: true })
+          .eq('workflow_id', wf.id).eq('status', 'cancelled');
+        const dropOff = ((cancelled || 0) / total) * 100;
+        if (dropOff > 40) {
+          alerts.push(`HIGH DROP-OFF: ${client.name} → "${wf.name}" has ${dropOff.toFixed(0)}% drop-off (${cancelled} cancelled / ${total} total). Sequence content may need revision.`);
+        }
+      }
+    }));
+
+    if (alerts.length === 0) {
+      console.log('[AUTO] Fatima hourly — all clients healthy');
+      return;
+    }
+
+    await storeBriefing('fatima', 'yousef',
+      `Operations Alert — ${alerts.length} Issue(s) Detected`,
+      `Fatima has flagged ${alerts.length} operational issue(s) requiring your attention:\n\n${alerts.join('\n\n')}\n\nReview the Sequences and Contacts pages to take action.`,
+      'urgent'
+    );
+    console.log(`[AUTO] Fatima flagged ${alerts.length} alert(s)`);
+  } catch (e) {
+    console.error('[AUTO] Fatima hourly error:', e.message);
+  }
+});
+
+// ─── AUTO SCHEDULER: ZAINAB — MONTHLY REPORTS ────────────
+// 1st of every month at 8am
+cron.schedule('0 8 1 * *', async () => {
+  console.log('[AUTO] Zainab — monthly report generation starting...');
+  try {
+    const { data: clients } = await supabase
+      .from('clients').select('id, name, niche, tier').eq('status', 'active');
+    if (!clients || clients.length === 0) {
+      console.log('[AUTO] Zainab monthly — no active clients');
+      return;
+    }
+
+    const now = new Date();
+    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthStart = prevMonthStart.toISOString();
+    const monthEnd = thisMonthStart.toISOString();
+    const period = prevMonthStart.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+    let reportsGenerated = 0;
+    let emailsSentCount = 0;
+
+    for (const client of clients) {
+      try {
+        const [
+          emailRes, smsRes, waRes, contactsRes, enrollRes,
+          seqRes, ragContext, briefingsCtx, clientUsersRes,
+        ] = await Promise.all([
+          supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', client.id).eq('channel', 'email').eq('direction', 'outbound').gte('created_at', monthStart).lt('created_at', monthEnd),
+          supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', client.id).eq('channel', 'sms').eq('direction', 'outbound').gte('created_at', monthStart).lt('created_at', monthEnd),
+          supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', client.id).eq('channel', 'whatsapp').eq('direction', 'outbound').gte('created_at', monthStart).lt('created_at', monthEnd),
+          supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('client_id', client.id).gte('created_at', monthStart).lt('created_at', monthEnd),
+          supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('client_id', client.id).gte('enrolled_at', monthStart).lt('enrolled_at', monthEnd),
+          supabase.from('workflows').select('name, enrolled_count').eq('client_id', client.id).eq('status', 'active').order('enrolled_count', { ascending: false }).limit(1),
+          ragSearch(`monthly report ${client.name}`, client.id),
+          getBriefingsContext('zainab'),
+          supabase.from('client_users').select('email, name').eq('client_id', client.id).limit(1),
+        ]);
+
+        const emailsSent    = emailRes.count    || 0;
+        const smsSent       = smsRes.count      || 0;
+        const whatsappSent  = waRes.count       || 0;
+        const contactsAdded = contactsRes.count || 0;
+        const enrollments   = enrollRes.count   || 0;
+        const topSequence   = seqRes.data?.[0]?.name || 'None';
+        const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+
+        const summary = await aiCall(
+          `You are Zainab, the Client Partner AI at Sales Scales. You write monthly performance reports that are honest, insightful, and actionable. Never break character or mention Claude.`,
+          `Write a monthly performance report for ${client.name} (${client.niche || 'ecommerce'}) for ${period}.\n\nData:\n- Emails sent: ${emailsSent}\n- SMS sent: ${smsSent}\n- WhatsApp sent: ${whatsappSent}\n- New contacts: ${contactsAdded}\n- Workflow enrollments: ${enrollments}\n- Top sequence: ${topSequence}\n\n5 sections:\n1. MONTHLY OVERVIEW\n2. CHANNEL PERFORMANCE\n3. GROWTH & CONTACTS\n4. SEQUENCE PERFORMANCE\n5. RECOMMENDATIONS FOR NEXT MONTH\n\nBe specific, warm, actionable.`,
+          context
+        );
+
+        await supabase.from('reports').insert({
+          client_id: client.id, period,
+          emails_sent: emailsSent, sms_sent: smsSent,
+          whatsapp_sent: whatsappSent, contacts_added: contactsAdded,
+          workflow_enrollments: enrollments, top_sequence: topSequence, summary,
+        });
+        reportsGenerated++;
+
+        const clientUser = clientUsersRes.data?.[0];
+        if (clientUser?.email) {
+          try {
+            await sgMail.send({
+              to: clientUser.email,
+              from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+              subject: `Your ${period} Performance Report — ${client.name}`,
+              html: `<div style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto;padding:32px;background:#f0f3f8;">
+                <div style="background:#0a1628;padding:24px 32px;border-radius:8px 8px 0 0;">
+                  <h1 style="color:#c9a84c;margin:0;font-size:20px;">Sales Scales</h1>
+                  <p style="color:#8896a8;margin:8px 0 0;font-size:14px;">Monthly Performance Report — ${period}</p>
+                </div>
+                <div style="background:#ffffff;padding:32px;border-radius:0 0 8px 8px;">
+                  <p style="color:#4a5568;margin:0 0 16px;">Hi ${clientUser.name || client.name},</p>
+                  <p style="color:#4a5568;margin:0 0 24px;">Here is your ${period} performance report from Zainab, your Sales Scales Client Partner.</p>
+                  <div style="background:#f0f3f8;padding:24px;border-radius:6px;white-space:pre-wrap;font-size:14px;color:#0a1628;line-height:1.7;">${summary}</div>
+                  <p style="color:#8896a8;font-size:12px;margin:24px 0 0;">Log in to your Sales Scales portal to view your full dashboard.</p>
+                </div>
+              </div>`,
+            });
+            emailsSentCount++;
+          } catch (mailErr) {
+            console.error(`[AUTO] Zainab email failed for ${client.name}:`, mailErr.message);
+          }
+        }
+      } catch (clientErr) {
+        console.error(`[AUTO] Zainab report failed for ${client.name}:`, clientErr.message);
+      }
+    }
+
+    await storeBriefing('zainab', 'yousef',
+      `Monthly Reports Complete — ${period}`,
+      `Zainab has automatically generated and sent ${period} reports.\n\n- Reports generated: ${reportsGenerated}/${clients.length}\n- Emails sent to clients: ${emailsSentCount}\n\nAll reports are viewable in the Auto Reports page.`,
+      'normal'
+    );
+    console.log(`[AUTO] Zainab monthly — ${reportsGenerated} reports, ${emailsSentCount} emails sent`);
+  } catch (e) {
+    console.error('[AUTO] Zainab monthly error:', e.message);
+  }
+});
+
+// ─── AUTO SCHEDULER: MAHDI — DAILY CONTENT IDEAS ─────────
+// Every day at 10am
+cron.schedule('0 10 * * *', async () => {
+  console.log('[AUTO] Mahdi — daily content ideas starting...');
+  try {
+    const { data: clients } = await supabase
+      .from('clients').select('id, name, niche, tier').eq('status', 'active');
+    if (!clients || clients.length === 0) return;
+
+    const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    for (const client of clients) {
+      try {
+        const [ragContext, enrollRes, contactRes] = await Promise.all([
+          ragSearch(`content marketing brand voice products ${client.name}`, client.id),
+          supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true })
+            .eq('client_id', client.id).gte('enrolled_at', since7d),
+          supabase.from('contacts').select('id', { count: 'exact', head: true })
+            .eq('client_id', client.id).gte('created_at', since7d),
+        ]);
+
+        const ideas = await aiCall(
+          `You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world class copywriter and email marketer. You write campaigns that convert in the exact brand voice of each client. You are Mahdi — never mention Claude.`,
+          `Generate exactly 3 high-converting content ideas for ${client.name} (${client.niche || 'ecommerce'}).\n\nLast 7 days: ${enrollRes.count || 0} enrollments, ${contactRes.count || 0} new contacts.\n\nFor each idea:\n- TYPE: (Email sequence / SMS campaign / Social post / Ad copy)\n- TITLE: campaign name\n- HOOK: opening line or subject line\n- WHY NOW: why this is timely\n\nFormat: IDEA 1: ... IDEA 2: ... IDEA 3:\n\nMake these specific to their niche and immediately executable.`,
+          ragContext
+        );
+
+        await storeBriefing('mahdi', 'yousef',
+          `Daily Content Ideas — ${client.name}`,
+          ideas, 'normal', client.id
+        );
+      } catch (clientErr) {
+        console.error(`[AUTO] Mahdi ideas failed for ${client.name}:`, clientErr.message);
+      }
+    }
+    console.log(`[AUTO] Mahdi daily content ideas stored for ${clients.length} client(s)`);
+  } catch (e) {
+    console.error('[AUTO] Mahdi daily error:', e.message);
+  }
+});
+
+// ─── AUTO SCHEDULER: HASSAN — DAILY PROSPECT OUTREACH ────
+// Every day at 11am
+cron.schedule('0 11 * * *', async () => {
+  console.log('[AUTO] Hassan — daily prospect outreach starting...');
+  try {
+    const ragContext = await ragSearch('ideal client profile ecommerce Shopify store owner agency services revenue growth');
+
+    const outreach = await aiCall(
+      `You are Hassan, the Growth and Outreach AI at Sales Scales. You are creative, persuasive, and a master of personalized communication. You find prospects and write outreach that converts. You are Hassan — never mention Claude.`,
+      `Generate 5 personalized cold outreach messages for potential Shopify store owner prospects for Sales Scales.\n\nSales Scales is an AI-powered revenue system for ecommerce agencies — email sequences, SMS campaigns, AI team, growth automation.\n\nFor each prospect:\n- PROSPECT TYPE: ideal store owner profile (e.g. "7-figure fashion brand owner")\n- NICHE: their store niche\n- CHANNEL: Email / LinkedIn DM / Instagram DM\n- SUBJECT/OPENER: subject line or opening message\n- MESSAGE: 3–4 sentence personalized outreach hitting their pain point and positioning Sales Scales as the solution\n- PAIN POINT: core problem Sales Scales solves for them\n\nFormat: PROSPECT 1: ... through PROSPECT 5:\n\nMake these feel handcrafted, not generic.`,
+      ragContext
+    );
+
+    await storeBriefing('hassan', 'yousef',
+      `Daily Prospect Outreach — ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}`,
+      `Hassan has generated 5 prospect outreach messages for your review. Approve and send manually, or hand off to Hassan for follow-up.\n\n${outreach}`,
+      'normal'
+    );
+    console.log('[AUTO] Hassan daily prospect outreach stored');
+  } catch (e) {
+    console.error('[AUTO] Hassan daily error:', e.message);
+  }
+});
+
+// ─── AUTO SCHEDULER: HUSSAIN — FRIDAY STRATEGY REPORT ────
+// Every Friday at 4pm
+cron.schedule('0 16 * * 5', async () => {
+  console.log('[AUTO] Hussain — Friday strategy report starting...');
+  try {
+    const { data: clients } = await supabase
+      .from('clients').select('id, name, niche, tier, health_score').eq('status', 'active');
+    if (!clients || clients.length === 0) {
+      console.log('[AUTO] Hussain Friday — no active clients');
+      return;
+    }
+
+    const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const weeklyData = await Promise.all(clients.map(async (client) => {
+      const [ragCtx, enrollRes, contactRes, msgRes, completedRes] = await Promise.all([
+        ragSearch(`weekly strategy performance ${client.name}`, client.id),
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true })
+          .eq('client_id', client.id).gte('enrolled_at', weekStart),
+        supabase.from('contacts').select('id', { count: 'exact', head: true })
+          .eq('client_id', client.id).gte('created_at', weekStart),
+        supabase.from('messages').select('id', { count: 'exact', head: true })
+          .eq('client_id', client.id).eq('direction', 'outbound').gte('created_at', weekStart),
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true })
+          .eq('client_id', client.id).eq('status', 'completed').gte('completed_at', weekStart),
+      ]);
+      return {
+        name: client.name, niche: client.niche || 'ecommerce',
+        enrollments: enrollRes.count || 0,
+        newContacts: contactRes.count || 0,
+        messagesSent: msgRes.count || 0,
+        completedWorkflows: completedRes.count || 0,
+        ragCtx,
+      };
+    }));
+
+    const weekSummary = weeklyData.map(c =>
+      `${c.name}: ${c.enrollments} enrollments, ${c.newContacts} contacts, ${c.messagesSent} messages, ${c.completedWorkflows} completed workflows`
+    ).join('\n');
+    const sortedByEnrolls = [...weeklyData].sort((a, b) => b.enrollments - a.enrollments);
+    const bestClient = sortedByEnrolls[0];
+    const weakestClient = sortedByEnrolls[sortedByEnrolls.length - 1];
+    const ragContext = weeklyData.map(c => c.ragCtx).filter(Boolean).join('\n\n');
+
+    const report = await aiCall(
+      `You are Hussain, the Intelligence and Strategy AI at Sales Scales. You are sharp, data-driven, and think like a founder. Direct, actionable, no fluff. You are Hussain — never mention Claude.`,
+      `Generate a Friday end-of-week strategy report for Yousef. Week ending ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}.\n\nThis week:\n${weekSummary}\n\nBest: ${bestClient.name} | Needs work: ${weakestClient.name}\n\nWrite a sharp strategy report:\n1. WHAT WORKED THIS WEEK — top 2–3 wins with client names and numbers\n2. WHAT NEEDS FIXING — 2–3 problems to address immediately\n3. OPPORTUNITIES — 2–3 specific growth plays for next week\n4. PRIORITIES FOR NEXT WEEK — ranked list of 4–5 actions, most impactful first\n5. FOUNDER NOTE — one forward-looking strategic insight for Yousef\n\nBe direct. Name names. Use the numbers.`,
+      ragContext
+    );
+
+    await storeBriefing('hussain', 'yousef',
+      `Friday Strategy Report — Week of ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}`,
+      report, 'high'
+    );
+    console.log(`[AUTO] Hussain Friday strategy report stored — ${clients.length} clients analyzed`);
+  } catch (e) {
+    console.error('[AUTO] Hussain Friday error:', e.message);
+  }
+});
+
 // ─── INBOUND SMS WEBHOOK ──────────────────────────────────
 app.post('/sms/inbound', async (req, res) => {
   const { From, Body } = req.body;
