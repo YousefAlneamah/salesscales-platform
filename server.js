@@ -363,6 +363,25 @@ const processWebhookEvent = async (topic, shop, payload) => {
 
   if (!contact) return;
 
+  // On purchase: complete all active sequences before enrolling in post-purchase flow
+  if (topic === 'orders/create') {
+    const now = new Date().toISOString();
+    const { data: active } = await supabase.from('workflow_enrollments')
+      .update({ status: 'completed', completed_at: now })
+      .eq('contact_id', contact.id).eq('client_id', clientId).eq('status', 'active')
+      .select('id');
+    const unenrolledCount = active?.length || 0;
+    if (unenrolledCount > 0) {
+      await supabase.from('activity').insert([{
+        contact_id: contact.id, client_id: clientId,
+        type: 'unenrolled',
+        description: `Unenrolled from ${unenrolledCount} active sequence${unenrolledCount !== 1 ? 's' : ''} — customer purchased`,
+        created_at: now,
+      }]);
+      console.log(`Purchase unenroll: ${contact.email} removed from ${unenrolledCount} sequence(s)`);
+    }
+  }
+
   const { data: workflows } = await supabase.from('workflows')
     .select('*').eq('client_id', clientId).eq('trigger_type', triggerType).eq('status', 'active');
 
@@ -1216,6 +1235,35 @@ app.post('/execute-step', async (req, res) => {
   } catch (e) {
     console.error('Execute step error:', e.message);
     res.status(500).json({ error: 'Failed to execute step', details: e.message });
+  }
+});
+
+// ─── UNENROLL CONTACT FROM ALL ACTIVE SEQUENCES ──────────
+app.post('/enrollments/unenroll', async (req, res) => {
+  const { contact_id, client_id } = req.body;
+  if (!contact_id) return res.status(400).json({ error: 'contact_id required' });
+  try {
+    const now = new Date().toISOString();
+    let query = supabase.from('workflow_enrollments')
+      .update({ status: 'cancelled', completed_at: now })
+      .eq('contact_id', contact_id).eq('status', 'active');
+    if (client_id) query = query.eq('client_id', client_id);
+    const { data, error } = await query.select('id');
+    if (error) throw error;
+    const count = data?.length || 0;
+    if (count > 0) {
+      await supabase.from('activity').insert([{
+        contact_id,
+        client_id: client_id || null,
+        type: 'unenrolled',
+        description: `Manually unenrolled from ${count} active sequence${count !== 1 ? 's' : ''}`,
+        created_at: now,
+      }]);
+    }
+    res.json({ ok: true, cancelled: count });
+  } catch (e) {
+    console.error('Unenroll error:', e.message);
+    res.status(500).json({ error: 'Failed to unenroll', details: e.message });
   }
 });
 

@@ -18,6 +18,7 @@ export default function Contacts() {
   const [stage, setStage] = useState('New Lead');
   const [notes, setNotes] = useState('');
   const [clientId, setClientId] = useState('');
+  const [unenrolling, setUnenrolling] = useState(false);
 
   useEffect(() => {
     fetchContacts();
@@ -107,6 +108,31 @@ export default function Contacts() {
       }
     } catch (e) {
       alert('Error: ' + e.message);
+    }
+  };
+
+  const unenrollContact = async (contact) => {
+    if (!window.confirm(`Remove ${contact.first_name} from all active sequences?`)) return;
+    setUnenrolling(true);
+    try {
+      const res = await fetch(`${API_BASE}/enrollments/unenroll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contact_id: contact.id, client_id: contact.client_id }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        alert(data.cancelled > 0
+          ? `Unenrolled ${contact.first_name} from ${data.cancelled} sequence${data.cancelled !== 1 ? 's' : ''}.`
+          : `${contact.first_name} had no active sequence enrollments.`
+        );
+      } else {
+        alert('Failed: ' + data.error);
+      }
+    } catch (e) {
+      alert('Error: ' + e.message);
+    } finally {
+      setUnenrolling(false);
     }
   };
 
@@ -290,6 +316,12 @@ export default function Contacts() {
               <button onClick={() => enrollContact(selectedContact)}
                 style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '7px', fontSize: '11px', padding: '7px 14px', cursor: 'pointer', fontWeight: 600 }}>
                 Enroll in Workflow
+              </button>
+              <button
+                onClick={() => unenrollContact(selectedContact)}
+                disabled={unenrolling}
+                style={{ background: unenrolling ? '#f3f4f6' : '#fef2f2', color: unenrolling ? '#9ca3af' : '#dc2626', border: '1px solid #fecaca', borderRadius: '7px', fontSize: '11px', padding: '7px 14px', cursor: unenrolling ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
+                {unenrolling ? 'Unenrolling...' : 'Unenroll'}
               </button>
               <button onClick={() => setSelectedContact(null)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '20px', lineHeight: 1 }}>×</button>
