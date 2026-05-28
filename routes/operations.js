@@ -1,5 +1,7 @@
 const express = require('express');
 
+const TIER_FEE_DEFAULT = { starter: 997, growth: 1997, scale: 3997, enterprise: 4997 };
+
 const TIER_SERVICE_MAP = {
   starter:    'AI-powered email marketing, SMS campaigns, workflow automation (up to 3 sequences), CRM contact management, monthly analytics report, and access to the full AI team (Hussain, Hassan, Ali, Mahdi, Fatima, Zainab)',
   growth:     'Everything in Starter, plus WhatsApp automation, unlimited sequences, Klaviyo integration, Meta Ads reporting, HubSpot CRM sync, weekly strategy calls, and priority AI team support',
@@ -323,6 +325,182 @@ module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToke
       res.json({ reports: data || [] });
     } catch (e) {
       console.error('reports/list error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── INVOICES ────────────────────────────────────────────
+  router.post('/invoices/generate', async (req, res) => {
+    const { client_id, month, amount: overrideAmount } = req.body;
+    if (!client_id || !month) return res.status(400).json({ error: 'client_id and month required' });
+    try {
+      const { data: client } = await supabase.from('clients')
+        .select('id, name, tier').eq('id', client_id).maybeSingle();
+      if (!client) return res.status(404).json({ error: 'Client not found' });
+
+      // Resolve fee: param override → latest signed contract → tier default
+      let amount = overrideAmount ? parseFloat(overrideAmount) : null;
+      if (!amount) {
+        const { data: contract } = await supabase.from('contracts')
+          .select('monthly_fee').eq('client_id', client_id)
+          .in('status', ['signed', 'sent'])
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+        amount = contract?.monthly_fee ? parseFloat(contract.monthly_fee) : null;
+      }
+      if (!amount) {
+        amount = TIER_FEE_DEFAULT[(client.tier || '').toLowerCase()] || 997;
+      }
+
+      const invoiceNumber = `SS-${Date.now().toString(36).toUpperCase()}`;
+      const issuedDate = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+      const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+      const fmtAmount = amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const tierLabel = client.tier ? client.tier.charAt(0).toUpperCase() + client.tier.slice(1) : 'Starter';
+
+      const invoice_html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Invoice ${invoiceNumber} — ${client.name}</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:Arial,sans-serif;background:#f0f3f8;padding:40px;color:#0a1628}
+  .inv{max-width:760px;margin:0 auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(10,22,40,.12)}
+  .hd{background:#0a1628;padding:36px 40px;display:flex;justify-content:space-between;align-items:flex-start}
+  .brand{color:#c9a84c;font-size:22px;font-weight:700}.brand-sub{color:rgba(255,255,255,.4);font-size:11px;margin-top:4px;letter-spacing:1px;text-transform:uppercase}
+  .inv-lbl{text-align:right}.inv-lbl .title{color:white;font-size:26px;font-weight:700}.inv-lbl .num{color:#c9a84c;font-size:13px;margin-top:4px;font-family:monospace}
+  .bd{padding:36px 40px}
+  .meta{display:flex;justify-content:space-between;margin-bottom:32px}
+  .mb h4{font-size:9px;color:#8896a8;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:8px}
+  .mb p{font-size:13px;color:#0a1628;line-height:1.6}.mb .co{font-size:15px;font-weight:700;margin-bottom:4px}
+  .dr{text-align:right}.dr .drow{display:flex;justify-content:flex-end;gap:20px;margin-bottom:6px}
+  .dl{font-size:10px;color:#8896a8;text-transform:uppercase;letter-spacing:.5px}.dv{font-size:12px;font-weight:600;min-width:130px;text-align:right}
+  table{width:100%;border-collapse:collapse}
+  thead tr{background:#0a1628}thead th{padding:12px 16px;text-align:left;font-size:9px;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:1.5px;font-weight:700}
+  thead th:last-child{text-align:right}tbody tr{border-bottom:1px solid #f0f3f8}tbody td{padding:16px;font-size:13px;color:#0a1628;vertical-align:top}tbody td:last-child{text-align:right;font-weight:600}
+  .dm{font-weight:600;margin-bottom:3px}.ds{font-size:11px;color:#8896a8;line-height:1.5}
+  .tots{margin:16px 0 0 auto;width:280px}.tr{display:flex;justify-content:space-between;padding:8px 0;font-size:13px}
+  .tr.grand{border-top:2px solid #0a1628;margin-top:8px;padding-top:14px}.tr.grand .lbl{font-size:15px;font-weight:700}.tr.grand .val{font-size:15px;font-weight:700;color:#c9a84c}
+  .ft{background:#f8fafc;padding:24px 40px;border-top:1px solid #e4e9f0;display:flex;justify-content:space-between;align-items:center}
+  .fn{font-size:11px;color:#8896a8;line-height:1.6}
+  .badge{background:#fffbeb;color:#d97706;border:1px solid #fde68a;padding:6px 14px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px}
+  @media print{body{background:white;padding:0}.inv{box-shadow:none;border-radius:0}}
+</style>
+</head>
+<body>
+<div class="inv">
+  <div class="hd">
+    <div><div class="brand">Sales Scales</div><div class="brand-sub">AI-Powered Revenue System</div></div>
+    <div class="inv-lbl"><div class="title">INVOICE</div><div class="num">${invoiceNumber}</div></div>
+  </div>
+  <div class="bd">
+    <div class="meta">
+      <div class="mb">
+        <h4>Bill To</h4>
+        <p class="co">${client.name}</p>
+        <p>${tierLabel} Plan</p>
+        <p>Period: ${month}</p>
+      </div>
+      <div class="mb dr">
+        <div class="drow"><span class="dl">Issued</span><span class="dv">${issuedDate}</span></div>
+        <div class="drow"><span class="dl">Due</span><span class="dv">${dueDate}</span></div>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>
+            <div class="dm">Sales Scales ${tierLabel} Plan — ${month}</div>
+            <div class="ds">AI-powered revenue system: email sequences, SMS campaigns, workflow automation,<br>AI team access (Hussain, Hassan, Ali, Mahdi, Fatima, Zainab), CRM, and analytics</div>
+          </td>
+          <td>$${fmtAmount}</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="tots">
+      <div class="tr"><span style="color:#8896a8">Subtotal</span><span>$${fmtAmount}</span></div>
+      <div class="tr"><span style="color:#8896a8">Tax (0%)</span><span>$0.00</span></div>
+      <div class="tr grand"><span class="lbl">Total Due</span><span class="val">$${fmtAmount}</span></div>
+    </div>
+  </div>
+  <div class="ft">
+    <div class="fn">Payment due within 7 days of issue date.<br>Questions? Contact billing@salesscales.com</div>
+    <div class="badge">Unpaid</div>
+  </div>
+</div>
+</body>
+</html>`;
+
+      const { data: invoice, error: insertErr } = await supabase.from('invoices').insert({
+        client_id, client_name: client.name, amount, period: month,
+        status: 'unpaid', invoice_html,
+      }).select('id, client_id, client_name, amount, period, status, created_at').single();
+      if (insertErr) throw insertErr;
+
+      res.json({ invoice, invoice_html });
+    } catch (e) {
+      console.error('invoices/generate error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.get('/invoices/overdue', async (req, res) => {
+    try {
+      const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: overdue, error } = await supabase.from('invoices')
+        .select('id, client_id, client_name, amount, period, created_at')
+        .eq('status', 'unpaid')
+        .lt('created_at', cutoff)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+
+      for (const inv of (overdue || [])) {
+        const agedays = Math.floor((Date.now() - new Date(inv.created_at)) / 86_400_000);
+        const overdaysDays = agedays - 7;
+        const fmtAmt = parseFloat(inv.amount).toLocaleString('en-US', { minimumFractionDigits: 2 });
+        await supabase.from('team_briefings').insert([{
+          from_member: 'zainab',
+          to_member: 'yousef',
+          subject: `Overdue Invoice — ${inv.client_name} ($${fmtAmt})`,
+          content: `An invoice is overdue and requires your follow-up.\n\nInvoice Details:\n- Client: ${inv.client_name}\n- Amount: $${fmtAmt}\n- Period: ${inv.period}\n- Issued: ${new Date(inv.created_at).toLocaleDateString('en-US', { dateStyle: 'medium' })}\n- Days past due: ${overdaysDays} day${overdaysDays !== 1 ? 's' : ''}\n\nRecommended actions:\n1. Send a payment reminder to the client\n2. Check if any support issues are blocking payment\n3. If no response within 3 days, escalate\n\nPlease follow up with ${inv.client_name} as soon as possible.`,
+          priority: 'urgent',
+          is_read: false,
+          created_at: new Date().toISOString(),
+        }]);
+      }
+
+      res.json({ overdue: overdue || [], count: (overdue || []).length });
+    } catch (e) {
+      console.error('invoices/overdue error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.get('/invoices/list', async (req, res) => {
+    const { client_id } = req.query;
+    try {
+      let q = supabase.from('invoices')
+        .select('id, client_id, client_name, amount, period, status, created_at')
+        .order('created_at', { ascending: false }).limit(100);
+      if (client_id) q = q.eq('client_id', client_id);
+      const { data, error } = await q;
+      if (error) throw error;
+      res.json({ invoices: data || [] });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.patch('/invoices/:id/status', async (req, res) => {
+    const { status } = req.body;
+    if (!['unpaid', 'paid'].includes(status)) return res.status(400).json({ error: 'status must be unpaid or paid' });
+    try {
+      const { data, error } = await supabase.from('invoices')
+        .update({ status }).eq('id', req.params.id).select('id, status').single();
+      if (error) throw error;
+      res.json({ invoice: data });
+    } catch (e) {
       res.status(500).json({ error: e.message });
     }
   });

@@ -1056,6 +1056,33 @@ app.post('/email/tracking', async (req, res) => {
   }
 });
 
+// ─── EMAIL OPEN / CLICK TRACKING ─────────────────────────
+app.post('/email/track-open', async (req, res) => {
+  const { message_id } = req.body;
+  if (!message_id) return res.status(400).json({ error: 'message_id required' });
+  try {
+    await supabase.from('messages')
+      .update({ opened_at: new Date().toISOString() })
+      .eq('id', message_id).is('opened_at', null);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/email/track-click', async (req, res) => {
+  const { message_id } = req.body;
+  if (!message_id) return res.status(400).json({ error: 'message_id required' });
+  try {
+    await supabase.from('messages')
+      .update({ clicked_at: new Date().toISOString() })
+      .eq('id', message_id).is('clicked_at', null);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── AUDIT ────────────────────────────────────────────────
 app.post('/audit', async (req, res) => {
   const { url } = req.body;
