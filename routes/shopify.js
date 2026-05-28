@@ -3,6 +3,12 @@ const express = require('express');
 module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
   const router = express.Router();
 
+  const parseJson = (raw) => {
+    const clean = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    const match = clean.match(/\{[\s\S]*\}/);
+    return JSON.parse(match ? match[0] : clean);
+  };
+
   const generateShopifySequences = async (shop, accessToken, clientId) => {
     const headers = { 'X-Shopify-Access-Token': accessToken, 'Content-Type': 'application/json' };
     const base = `https://${shop}/admin/api/2026-01`;
@@ -26,59 +32,107 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
     }).join(', ');
 
     const storeName = shopInfo.name || shop;
-    const storeContext = `Store: ${storeName}\nCurrency: ${shopInfo.currency || 'USD'}\nTop products: ${productList}\nAverage order value: $${aov}`;
+    const ctx = `Store: ${storeName}\nCurrency: ${shopInfo.currency || 'USD'}\nTop products: ${productList}\nAverage order value: $${aov}`;
+    const mahdiSystem = `You are Mahdi, the Marketing and Content AI at Sales Scales. You write high-converting cart recovery copy. Return ONLY valid JSON, no markdown, no explanation.`;
 
-    // Email sequence
-    const emailSeqJson = await aiCall(
-      `You are Mahdi, the Marketing and Content AI at Sales Scales. You write high-converting cart recovery email sequences. Return ONLY valid JSON, no markdown, no explanation.`,
-      `Generate a 3-email cart recovery sequence for this Shopify store.\n\n${storeContext}\n\nReturn JSON exactly:\n{"trigger_type":"cart_abandoned","steps":[{"step_type":"email","subject":"...","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":1},{"step_type":"email","subject":"...","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":24},{"step_type":"email","subject":"...","content":"...","wait_hours":0}]}\n\nReference real product names and prices. Use {{first_name}} for personalization. Write compelling copy that drives recovery.`,
-      ''
-    );
-    let emailParsed;
-    try {
-      const ec = emailSeqJson.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-      const em = ec.match(/\{[\s\S]*\}/);
-      emailParsed = JSON.parse(em ? em[0] : ec);
-    } catch { emailParsed = { trigger_type: 'cart_abandoned', steps: [] }; }
+    // ── EMAIL SEQUENCE (7 emails) ──────────────────────────
+    // Split across two calls to stay within max_tokens: 1000.
+    // Waits between emails: 1h → E1 → 23h → E2 → 48h → E3 → 48h → E4 → 48h → E5 → 72h → E6 → 96h → E7
+    // Cumulative: 1h, 24h, 72h, 5d, 7d, 10d, 14d
 
-    const emailCount = (emailParsed.steps || []).filter(s => s.step_type === 'email').length;
+    const [emails1to3Raw, emails4to7Raw] = await Promise.all([
+      aiCall(mahdiSystem,
+        `Write 3 cart recovery emails (subjects + body copy) for this store.\n\n${ctx}\n\nAngles:\nEmail 1 (sent 1h after abandonment): urgency — cart items waiting, personalised opener\nEmail 2 (24h): social proof — customer reviews, bestseller status\nEmail 3 (72h): product benefits — key features and why it matters\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."}]}\nUse {{first_name}}. Keep each email body under 120 words. Reference real product names and prices.`,
+        ''),
+      aiCall(mahdiSystem,
+        `Write 4 cart recovery emails (subjects + body copy) for this store.\n\n${ctx}\n\nAngles:\nEmail 4 (5 days after abandonment): objection handling — price, quality, shipping concerns\nEmail 5 (7 days): scarcity — stock running low, don't miss out\nEmail 6 (10 days): value + guarantee — risk-free, easy returns, quality promise\nEmail 7 (14 days): final offer — last chance, make it count\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."}]}\nUse {{first_name}}. Keep each email body under 120 words. Reference real product names and prices.`,
+        ''),
+    ]);
+
+    let emails1to3 = { emails: [] }, emails4to7 = { emails: [] };
+    try { emails1to3 = parseJson(emails1to3Raw); } catch { /* use default */ }
+    try { emails4to7 = parseJson(emails4to7Raw); } catch { /* use default */ }
+
+    const allEmails = [...(emails1to3.emails || []), ...(emails4to7.emails || [])];
+    // wait_hours before each email (index-matched)
+    const emailWaits = [1, 23, 48, 48, 48, 72, 96];
+    const emailSteps = [];
+    allEmails.forEach((email, i) => {
+      emailSteps.push({ step_type: 'wait', content: '', wait_hours: emailWaits[i] || 24 });
+      emailSteps.push({ step_type: 'email', subject: email.subject || '', content: email.content || '', wait_hours: 0 });
+    });
+
     await supabase.from('approvals').insert([{
       type: 'email_sequence',
-      title: `Cart Recovery Emails — ${storeName}`,
-      content: `Mahdi built a ${emailCount}-email cart recovery sequence using live product data from ${shop}. Products: ${productList.slice(0, 100)}. AOV: $${aov}. Approve to activate.`,
-      metadata: { steps: emailParsed.steps || [], trigger_type: 'cart_abandoned', shop, aov },
+      title: `Cart Recovery Emails (7) — ${storeName}`,
+      content: `Mahdi built a 7-email cart recovery sequence for ${storeName} using live store data. Angles: urgency → social proof → benefits → objection handling → scarcity → guarantee → final offer. AOV: $${aov}. Products: ${productList.slice(0, 100)}. Approve to activate.`,
+      metadata: { steps: emailSteps, trigger_type: 'cart_abandoned', shop, aov },
       from_member: 'mahdi',
       client_id: clientId,
       status: 'pending',
       created_at: new Date().toISOString()
     }]);
-    console.log(`[AUTO] Shopify connect — email sequence queued for ${shop}`);
+    console.log(`[AUTO] Shopify connect — 7-email sequence queued for ${shop}`);
 
-    // SMS sequence
-    const smsSeqJson = await aiCall(
-      `You are Mahdi, the Marketing and Content AI at Sales Scales. You write concise, high-converting SMS sequences. Return ONLY valid JSON, no markdown, no explanation.`,
-      `Generate a 2-step cart recovery SMS sequence for this Shopify store.\n\n${storeContext}\n\nReturn JSON exactly:\n{"trigger_type":"cart_abandoned","steps":[{"step_type":"sms","content":"Hi {{first_name}}, you left something behind...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":24},{"step_type":"sms","content":"...","wait_hours":0}]}\n\nEach SMS must be under 160 characters. Reference real product names. Use {{first_name}}. Be conversational and direct.`,
-      ''
-    );
-    let smsParsed;
-    try {
-      const sc = smsSeqJson.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-      const sm = sc.match(/\{[\s\S]*\}/);
-      smsParsed = JSON.parse(sm ? sm[0] : sc);
-    } catch { smsParsed = { trigger_type: 'cart_abandoned', steps: [] }; }
+    // ── SMS SEQUENCE (4 messages) ──────────────────────────
+    // Timing: 0h, 24h, 72h, 7 days
+    const smsRaw = await aiCall(mahdiSystem,
+      `Write 4 cart recovery SMS messages for this store.\n\n${ctx}\n\nTiming & angles:\nSMS 1 (immediately): short opener with product name and direct link nudge\nSMS 2 (24h later): social proof one-liner\nSMS 3 (72h later): scarcity/urgency\nSMS 4 (7 days later): final nudge with incentive hint\n\nReturn JSON: {"messages":["...","...","...","..."]}\nEach message must be under 160 characters. Use {{first_name}}. Reference real product name.`,
+      '');
 
-    const smsCount = (smsParsed.steps || []).filter(s => s.step_type === 'sms').length;
+    let smsParsed = { messages: [] };
+    try { smsParsed = parseJson(smsRaw); } catch { /* use default */ }
+
+    const smsMessages = (smsParsed.messages || []).slice(0, 4);
+    // wait before each SMS: 0h, 24h, 48h, 96h (cumulative: 0, 24, 72, 168h)
+    const smsWaits = [0, 24, 48, 96];
+    const smsSteps = [];
+    smsMessages.forEach((msg, i) => {
+      if (smsWaits[i] > 0) smsSteps.push({ step_type: 'wait', content: '', wait_hours: smsWaits[i] });
+      smsSteps.push({ step_type: 'sms', content: msg, wait_hours: 0 });
+    });
+
     await supabase.from('approvals').insert([{
       type: 'sms_sequence',
-      title: `Cart Recovery SMS — ${storeName}`,
-      content: `Mahdi built a ${smsCount}-step SMS cart recovery sequence for ${shop}. Approve to activate.`,
-      metadata: { steps: smsParsed.steps || [], trigger_type: 'cart_abandoned', shop, aov },
+      title: `Cart Recovery SMS (4) — ${storeName}`,
+      content: `Mahdi built a 4-message SMS cart recovery sequence for ${storeName}. Timing: immediate, 24h, 72h, 7 days. Approve to activate.`,
+      metadata: { steps: smsSteps, trigger_type: 'cart_abandoned', shop, aov },
       from_member: 'mahdi',
       client_id: clientId,
       status: 'pending',
       created_at: new Date().toISOString()
     }]);
-    console.log(`[AUTO] Shopify connect — SMS sequence queued for ${shop}`);
+    console.log(`[AUTO] Shopify connect — 4-SMS sequence queued for ${shop}`);
+
+    // ── WHATSAPP SEQUENCE (3 messages) ────────────────────
+    // Timing: 2h, 48h, 7 days
+    const waRaw = await aiCall(mahdiSystem,
+      `Write 3 cart recovery WhatsApp messages for this store.\n\n${ctx}\n\nTiming & angles:\nMessage 1 (2h after abandonment): warm, conversational — "noticed you left something" with product name\nMessage 2 (48h later): value highlight — key benefit + easy reply CTA\nMessage 3 (7 days later): final personal check-in, friendly last nudge\n\nReturn JSON: {"messages":["...","...","..."]}\nKeep each message under 200 characters. Use {{first_name}}. Feel personal, not spammy.`,
+      '');
+
+    let waParsed = { messages: [] };
+    try { waParsed = parseJson(waRaw); } catch { /* use default */ }
+
+    const waMessages = (waParsed.messages || []).slice(0, 3);
+    // wait before each WA: 2h, 46h, 120h (cumulative: 2h, 48h, 168h = 7 days)
+    const waWaits = [2, 46, 120];
+    const waSteps = [];
+    waMessages.forEach((msg, i) => {
+      waSteps.push({ step_type: 'wait', content: '', wait_hours: waWaits[i] });
+      waSteps.push({ step_type: 'whatsapp', content: msg, wait_hours: 0 });
+    });
+
+    await supabase.from('approvals').insert([{
+      type: 'whatsapp_sequence',
+      title: `Cart Recovery WhatsApp (3) — ${storeName}`,
+      content: `Mahdi built a 3-message WhatsApp cart recovery sequence for ${storeName}. Timing: 2h, 48h, 7 days. Approve to activate.`,
+      metadata: { steps: waSteps, trigger_type: 'cart_abandoned', shop, aov },
+      from_member: 'mahdi',
+      client_id: clientId,
+      status: 'pending',
+      created_at: new Date().toISOString()
+    }]);
+    console.log(`[AUTO] Shopify connect — 3-WhatsApp sequence queued for ${shop}`);
   };
 
   router.get('/install', (req, res) => {

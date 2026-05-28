@@ -1770,7 +1770,7 @@ app.post('/approvals/action', async (req, res) => {
 
     const meta = approval.metadata || {};
 
-    if (approval.type === 'email_sequence' || approval.type === 'sms_sequence') {
+    if (approval.type === 'email_sequence' || approval.type === 'sms_sequence' || approval.type === 'whatsapp_sequence') {
       const steps = meta.steps || [];
       const { data: workflow, error: wfErr } = await supabase.from('workflows').insert([{
         name: approval.title,
