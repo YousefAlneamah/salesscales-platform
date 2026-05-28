@@ -231,7 +231,7 @@ module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToke
     try {
       let q = supabase
         .from('contracts')
-        .select('id, client_id, client_name, tier, monthly_fee, start_date, status, contract_text, created_at')
+        .select('id, client_id, client_name, tier, monthly_fee, start_date, status, contract_text, signee_name, signed_at, created_at')
         .order('created_at', { ascending: false })
         .limit(100);
       if (client_id) q = q.eq('client_id', client_id);
@@ -251,6 +251,21 @@ module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToke
     if (!valid.includes(status)) return res.status(400).json({ error: `status must be one of: ${valid.join(', ')}` });
     try {
       const { data, error } = await supabase.from('contracts').update({ status }).eq('id', id).select().single();
+      if (error) throw error;
+      res.json({ contract: data });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.patch('/contracts/:id/sign', async (req, res) => {
+    const { id } = req.params;
+    const { signee_name, signed_at } = req.body;
+    if (!signee_name) return res.status(400).json({ error: 'signee_name is required' });
+    try {
+      const { data, error } = await supabase.from('contracts')
+        .update({ status: 'signed', signee_name, signed_at: signed_at || new Date().toISOString() })
+        .eq('id', id).select().single();
       if (error) throw error;
       res.json({ contract: data });
     } catch (e) {

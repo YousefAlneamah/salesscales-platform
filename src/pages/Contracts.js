@@ -62,6 +62,9 @@ export default function Contracts() {
   const [genError, setGenError] = useState('');
 
   const [updatingStatus, setUpdatingStatus] = useState(null);
+  const [signModal, setSignModal] = useState(false);
+  const [signeeName, setSigneeName] = useState('');
+  const [signing, setSigning] = useState(false);
 
   useEffect(() => {
     supabase.from('clients').select('id, name, tier').order('name').then(({ data }) => {
@@ -109,6 +112,21 @@ export default function Contracts() {
       setContracts(prev => prev.map(c => c.id === id ? { ...c, status } : c));
     } catch {}
     finally { setUpdatingStatus(null); }
+  };
+
+  const signContract = async () => {
+    if (!signeeName.trim() || !selectedId) return;
+    setSigning(true);
+    try {
+      const { data } = await axios.patch(`${API_BASE}/contracts/${selectedId}/sign`, {
+        signee_name: signeeName.trim(),
+        signed_at: new Date().toISOString(),
+      });
+      setContracts(prev => prev.map(c => c.id === selectedId ? { ...c, ...data.contract } : c));
+      setSignModal(false);
+      setSigneeName('');
+    } catch {}
+    finally { setSigning(false); }
   };
 
   const selected = contracts.find(c => c.id === selectedId);
@@ -314,6 +332,15 @@ export default function Contracts() {
                     <option value="signed">Signed</option>
                     <option value="cancelled">Cancelled</option>
                   </select>
+                  {selected.status !== 'signed' && (
+                    <button
+                      onClick={() => { setSigneeName(''); setSignModal(true); }}
+                      style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.35)', borderRadius: '7px', padding: '7px 14px', fontSize: '11px', fontWeight: 700, color: '#10b981', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
+                    >
+                      <i className="ti ti-signature" style={{ fontSize: '12px' }} />
+                      Sign Contract
+                    </button>
+                  )}
                   <button
                     onClick={() => downloadPDF(selected)}
                     style={{ background: '#c9a84c', border: 'none', borderRadius: '7px', padding: '7px 16px', fontSize: '11px', fontWeight: 700, color: '#0a1628', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
@@ -337,8 +364,59 @@ export default function Contracts() {
                   <i className="ti ti-info-circle" style={{ marginRight: '5px', color: '#c9a84c' }} />
                   Click <strong>Download PDF</strong> to open a print-ready version. In the print dialog, select "Save as PDF" to download. Mark as <strong>Sent</strong> once dispatched to the client, and <strong>Signed</strong> once executed.
                 </div>
+
+                {selected.status === 'signed' && selected.signee_name && (
+                  <div style={{ marginTop: '12px', padding: '12px 16px', background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <i className="ti ti-circle-check" style={{ fontSize: '18px', color: '#10b981' }} />
+                    <div>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#065f46' }}>Signed by {selected.signee_name}</div>
+                      <div style={{ fontSize: '10px', color: '#10b981', marginTop: '2px' }}>
+                        {selected.signed_at ? new Date(selected.signed_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
+          )}
+
+          {signModal && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,22,40,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ background: 'white', borderRadius: '14px', padding: '28px', width: '380px', boxShadow: '0 20px 60px rgba(10,22,40,0.25)' }}>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="ti ti-signature" style={{ color: '#10b981' }} />
+                  Sign Contract
+                </div>
+                <div style={{ fontSize: '11px', color: '#8896a8', marginBottom: '20px', lineHeight: '1.6' }}>
+                  Enter the full name of the signee. This will be recorded with a timestamp as the electronic signature.
+                </div>
+                <div style={{ fontSize: '10px', color: '#8896a8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>Signee Name</div>
+                <input
+                  type="text"
+                  value={signeeName}
+                  onChange={e => setSigneeName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && signContract()}
+                  placeholder="Full name of signee"
+                  autoFocus
+                  style={{ width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '10px 12px', fontSize: '13px', color: '#0a1628', outline: 'none', boxSizing: 'border-box', marginBottom: '16px' }}
+                />
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    onClick={() => setSignModal(false)}
+                    style={{ flex: 1, padding: '10px', border: '1px solid #e4e9f0', borderRadius: '8px', background: 'white', fontSize: '12px', fontWeight: 600, color: '#4a5568', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={signContract}
+                    disabled={!signeeName.trim() || signing}
+                    style={{ flex: 1, padding: '10px', border: 'none', borderRadius: '8px', background: signing || !signeeName.trim() ? '#a7f3d0' : '#10b981', fontSize: '12px', fontWeight: 700, color: 'white', cursor: signing || !signeeName.trim() ? 'not-allowed' : 'pointer' }}
+                  >
+                    {signing ? 'Signing...' : 'Confirm Signature'}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>

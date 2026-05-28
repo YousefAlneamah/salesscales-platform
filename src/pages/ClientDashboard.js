@@ -8,6 +8,10 @@ export default function ClientDashboard({ user, onLogout }) {
     activeWorkflows: 0,
     messagesSent: 0,
     messagesReceived: 0,
+    emailsSentMonth: 0,
+    smsSentMonth: 0,
+    contactsAddedMonth: 0,
+    enrollmentsMonth: 0,
   });
   const [workflows, setWorkflows] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -19,10 +23,15 @@ export default function ClientDashboard({ user, onLogout }) {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [contactsRes, workflowsRes, messagesRes] = await Promise.all([
+      const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+      const [contactsRes, workflowsRes, messagesRes, emailsRes, smsRes, contactsMonthRes, enrollmentsRes] = await Promise.all([
         supabase.from('contacts').select('*').eq('client_id', user.clientId).order('created_at', { ascending: false }),
         supabase.from('workflows').select('*').eq('client_id', user.clientId),
         supabase.from('messages').select('*').eq('client_id', user.clientId).order('created_at', { ascending: false }),
+        supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId).eq('channel', 'Email').eq('direction', 'outbound').gte('created_at', monthStart),
+        supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId).eq('channel', 'SMS').eq('direction', 'outbound').gte('created_at', monthStart),
+        supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId).gte('created_at', monthStart),
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId).gte('enrolled_at', monthStart),
       ]);
 
       const msgs = messagesRes.data || [];
@@ -37,6 +46,10 @@ export default function ClientDashboard({ user, onLogout }) {
         activeWorkflows: wfs.filter(w => w.status === 'active').length,
         messagesSent: msgs.filter(m => m.direction === 'outbound').length,
         messagesReceived: msgs.filter(m => m.direction === 'inbound').length,
+        emailsSentMonth: emailsRes.count || 0,
+        smsSentMonth: smsRes.count || 0,
+        contactsAddedMonth: contactsMonthRes.count || 0,
+        enrollmentsMonth: enrollmentsRes.count || 0,
       });
     } catch (e) {
       console.error('Client dashboard error:', e);
@@ -107,8 +120,22 @@ export default function ClientDashboard({ user, onLogout }) {
         {[
           { label: 'Total Contacts', value: stats.totalContacts, sub: 'in your database', color: '#c9a84c' },
           { label: 'Active Sequences', value: stats.activeWorkflows, sub: 'running automatically', color: '#c9a84c' },
-          { label: 'Messages Sent', value: stats.messagesSent, sub: 'by AI this month', color: '#10b981' },
-          { label: 'Replies Received', value: stats.messagesReceived, sub: 'from customers', color: '#3b82f6' },
+          { label: 'Emails Sent', value: stats.emailsSentMonth, sub: 'this month', color: '#10b981' },
+          { label: 'SMS Sent', value: stats.smsSentMonth, sub: 'this month', color: '#3b82f6' },
+        ].map(stat => (
+          <div key={stat.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '18px 20px', borderTop: `2px solid ${stat.color}`, boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '10px' }}>{stat.label}</div>
+            <div style={{ fontSize: '28px', fontWeight: 700, color: '#0a1628', letterSpacing: '-0.5px', marginBottom: '5px' }}>{stat.value}</div>
+            <div style={{ fontSize: '11px', color: stat.color, fontWeight: 500 }}>{stat.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px', marginBottom: '24px' }}>
+        {[
+          { label: 'Contacts Added', value: stats.contactsAddedMonth, sub: 'this month', color: '#c9a84c' },
+          { label: 'Enrollments', value: stats.enrollmentsMonth, sub: 'in sequences this month', color: '#10b981' },
+          { label: 'Messages Received', value: stats.messagesReceived, sub: 'replies from customers', color: '#3b82f6' },
         ].map(stat => (
           <div key={stat.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '18px 20px', borderTop: `2px solid ${stat.color}`, boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
             <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '10px' }}>{stat.label}</div>
