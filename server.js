@@ -932,6 +932,64 @@ cron.schedule('0 10 * * *', async () => {
   }
 });
 
+// ─── AUTO: UPSELL AUTOMATION (daily 2pm) ─────────────────
+cron.schedule('0 14 * * *', async () => {
+  console.log('[AUTO] Upsell scan starting...');
+  try {
+    const { data: clients } = await supabase.from('clients')
+      .select('id, name, tier, niche').in('status', ['active', 'live']);
+    if (!clients) return;
+    for (const c of clients) {
+      if (c.tier !== 'starter') continue;
+      const { data: enrollments } = await supabase.from('workflow_enrollments')
+        .select('id').eq('client_id', c.id).eq('status', 'completed');
+      const completed = enrollments?.length || 0;
+      const { data: onboarding } = await supabase.from('client_onboarding')
+        .select('average_order_value').eq('client_id', c.id).maybeSingle();
+      const aov = AOV_MAP[onboarding?.average_order_value] || 75;
+      const revenue = completed * aov;
+      if (revenue <= 5000) continue;
+      // Skip if an upsell has already been flagged for this client
+      const { count: existing } = await supabase.from('team_briefings')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_id', c.id).ilike('subject', '%Upgrade%Growth%');
+      if (existing && existing > 0) continue;
+      const content = await aiCall(
+        `You are Hussain, Intelligence & Strategy AI at Sales Scales. You spot revenue expansion opportunities and write sharp, persuasive internal recommendations. Never break character or mention Claude.`,
+        `Write an internal upsell recommendation for Yousef (agency owner) about upgrading a client from Starter to Growth tier.\n\nClient: ${c.name} (${c.niche || 'ecommerce'})\nCurrent tier: Starter\nRevenue recovered so far: $${revenue.toLocaleString()} (${completed} completed sequences)\n\nWrite:\n1. The Opportunity (lead with the revenue numbers)\n2. Why Growth Tier Now — specific features they'd unlock (WhatsApp automation, unlimited sequences, Klaviyo integration, weekly strategy calls)\n3. Why The Timing Is Right (their momentum and results)\n4. Talking Points for the upgrade conversation`,
+        ''
+      );
+      await storeBriefing('hussain', 'yousef',
+        `Upsell Opportunity: Upgrade ${c.name} to Growth tier`,
+        content, 'high', c.id
+      ).catch(e => console.error('Upsell briefing failed:', e.message));
+      console.log(`[AUTO] Upsell briefing generated for ${c.name}`);
+    }
+  } catch (e) {
+    console.error('[AUTO] Upsell scan error:', e.message);
+  }
+});
+
+// ─── ONE-TIME: LINKEDIN DAY 6 "BEHIND THE BUILD" POST ────
+(async () => {
+  try {
+    const subject = 'LinkedIn Day 6 — Behind the Build';
+    const { data: existing } = await supabase.from('team_briefings')
+      .select('id').eq('subject', subject).limit(1).maybeSingle();
+    if (existing) return;
+    const post = await aiCall(
+      `You are Mahdi, Marketing & Content AI at Sales Scales. You write scroll-stopping LinkedIn content in a founder's authentic voice. Never break character or mention Claude.`,
+      `Write Day 6 of a "Behind the Build" LinkedIn series documenting the journey of building Sales Scales — an AI-powered revenue system for ecommerce agencies.\n\nDay 6 theme: a specific lesson or milestone from building the platform. Make it personal, concrete, and engaging.\n\nFormat:\n- A strong hook line\n- Short punchy paragraphs with line breaks between them (LinkedIn style)\n- A genuine lesson learned\n- A closing line that invites engagement\n- 3-5 relevant hashtags`,
+      ''
+    );
+    await storeBriefing('mahdi', 'yousef', subject, post, 'normal', null)
+      .catch(e => console.error('LinkedIn Day 6 briefing failed:', e.message));
+    console.log('[INIT] LinkedIn Day 6 post generated and stored');
+  } catch (e) {
+    console.error('[INIT] LinkedIn Day 6 generation error:', e.message);
+  }
+})();
+
 // ─── AUTO SCHEDULER: HUSSAIN — WEEKLY INTELLIGENCE ───────
 // Every Monday at 9am
 cron.schedule('0 9 * * 1', async () => {

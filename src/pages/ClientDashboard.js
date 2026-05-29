@@ -29,6 +29,7 @@ export default function ClientDashboard({ user, onLogout }) {
   const [workflows, setWorkflows] = useState([]);
   const [messages, setMessages] = useState([]);
   const [contacts, setContacts] = useState([]);
+  const [products, setProducts] = useState([]);
   const [enrollmentsByWorkflow, setEnrollmentsByWorkflow] = useState({});
   const [loading, setLoading] = useState(true);
   const [chatMessages, setChatMessages] = useState([
@@ -36,6 +37,12 @@ export default function ClientDashboard({ user, onLogout }) {
   ]);
 
   useEffect(() => { fetchData(); }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    axios.get(`http://localhost:3001/shopify/products?client_id=${user.clientId}`)
+      .then(r => setProducts(r.data.products || []))
+      .catch(() => setProducts([]));
+  }, [user.clientId]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -286,6 +293,30 @@ export default function ClientDashboard({ user, onLogout }) {
           </div>
         </div>
       </div>
+
+      {/* MY PRODUCTS */}
+      {products.length > 0 && (
+        <div style={{ marginTop: '24px' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '12px' }}>My Products</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
+            {products.map((p, i) => (
+              <div key={i} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+                <div style={{ width: '100%', height: '120px', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                  {p.image ? (
+                    <img src={p.image} alt={p.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <div style={{ fontSize: '28px' }}>🛍️</div>
+                  )}
+                </div>
+                <div style={{ padding: '12px 14px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.title}</div>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#c9a84c', marginTop: '4px' }}>${p.price}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 

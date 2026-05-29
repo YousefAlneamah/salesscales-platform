@@ -301,6 +301,32 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
     }
   });
 
+  router.get('/products', async (req, res) => {
+    const { client_id } = req.query;
+    if (!client_id) return res.status(400).json({ error: 'Missing client_id' });
+    try {
+      const { data: conn } = await supabase.from('shopify_connections')
+        .select('*').eq('client_id', client_id).maybeSingle();
+      if (!conn) return res.status(404).json({ error: 'No Shopify store connected for this client' });
+
+      const { shop, access_token } = conn;
+      const headers = { 'X-Shopify-Access-Token': access_token, 'Content-Type': 'application/json' };
+      const base = `https://${shop}/admin/api/2026-01`;
+
+      const productsRes = await axios.get(`${base}/products.json?limit=10`, { headers });
+      const products = (productsRes.data.products || []).map(p => ({
+        title: p.title,
+        price: p.variants?.[0]?.price || '0.00',
+        image: p.image?.src || p.images?.[0]?.src || null,
+      }));
+
+      res.json({ shop, connected: true, products });
+    } catch (e) {
+      console.error('Shopify products error:', e.message);
+      res.status(500).json({ error: 'Failed to fetch products', details: e.response?.data || e.message });
+    }
+  });
+
   router.post('/webhook', async (req, res) => {
     const hmac = req.headers['x-shopify-hmac-sha256'];
     const topic = req.headers['x-shopify-topic'];
