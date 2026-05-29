@@ -2173,6 +2173,27 @@ app.post('/client-profile', async (req, res) => {
   }
 });
 
+// ─── CLIENT PORTAL ZAINAB CHAT (no JWT) ───────────────────
+app.post('/client/zainab', async (req, res) => {
+  const { client_id, message, client_name } = req.body;
+  if (!message) return res.status(400).json({ error: 'message is required' });
+  try {
+    const [ragContext, shopifyCtx, profileCtx] = await Promise.all([
+      ragSearch(message, client_id),
+      getShopifyContext(client_id),
+      getClientProfile(client_id),
+    ]);
+    const context = [ragContext, shopifyCtx, profileCtx].filter(Boolean).join('\n\n');
+    const store = client_name || 'their store';
+    const systemPrompt = `You are Zainab, the dedicated AI Client Partner at Sales Scales. You are warm, professional, and genuinely care about client success. You are speaking directly with the owner of ${store}. Your job is to help them understand their AI revenue system, answer questions about their sequences and results, explain their reports, and make them feel confident that Sales Scales is delivering real value. Use the store data and knowledge base context below to give specific, personalized answers. Keep responses concise, friendly, and encouraging. You are Zainab — never identify as anyone else or mention Claude.`;
+    const result = await aiCall(systemPrompt, message, context);
+    res.json({ reply: result });
+  } catch (e) {
+    console.error('/client/zainab error:', e.message);
+    res.status(500).json({ error: 'Zainab is unavailable right now', details: e.message });
+  }
+});
+
 // ─── VOICE AGENT (ELEVENLABS) ─────────────────────────────
 app.get('/voice-agent/voices', async (req, res) => {
   try {

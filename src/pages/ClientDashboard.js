@@ -117,7 +117,10 @@ export default function ClientDashboard({ user, onLogout }) {
     { id: 'approvals', label: 'My Approvals', icon: '✓' },
     { id: 'messages', label: 'Messages', icon: '💬' },
     { id: 'contacts', label: 'Contacts', icon: '👥' },
+    { id: 'reports', label: 'My Reports', icon: '📄' },
+    { id: 'invoices', label: 'My Invoices', icon: '🧾' },
     { id: 'zainab', label: 'Zainab AI', icon: '🤖' },
+    { id: 'help', label: 'Help', icon: '❔' },
     { id: 'settings', label: 'Settings', icon: '⚙' },
   ];
 
@@ -128,7 +131,10 @@ export default function ClientDashboard({ user, onLogout }) {
     approvals: 'My Approvals',
     messages: 'Messages',
     contacts: 'My Contacts',
+    reports: 'My Reports',
+    invoices: 'My Invoices',
     zainab: 'Zainab — AI Partner',
+    help: 'Help & Support',
     settings: 'Settings',
   };
 
@@ -140,7 +146,10 @@ export default function ClientDashboard({ user, onLogout }) {
       case 'approvals': return <ClientApprovals />;
       case 'messages': return <ClientMessages />;
       case 'contacts': return <ClientContacts />;
+      case 'reports': return <ClientReports />;
+      case 'invoices': return <ClientInvoices />;
       case 'zainab': return <ClientZainab />;
+      case 'help': return <ClientHelp />;
       case 'settings': return <ClientSettings />;
       default: return <ClientHome />;
     }
@@ -482,11 +491,10 @@ export default function ClientDashboard({ user, onLogout }) {
       setGenerating(true);
 
       try {
-        const { data } = await axios.post('http://localhost:3001/generate-reply', {
-          channel: 'Client Portal',
-          senderName: user.name,
-          clientName: user.clientName,
-          content: userMsg,
+        const { data } = await axios.post('http://localhost:3001/client/zainab', {
+          client_id: user.clientId,
+          client_name: user.clientName,
+          message: userMsg,
         });
         const reply = data.reply || 'I am here to help. Could you rephrase your question?';
         setChatMessages(prev => [...prev, { role: 'ai', content: reply }]);
@@ -664,6 +672,217 @@ export default function ClientDashboard({ user, onLogout }) {
       </div>
     );
   };
+
+  // ─── MY REPORTS ──────────────────────────────────────
+  const ClientReports = () => {
+    const [reports, setReports] = useState([]);
+    const [loadingR, setLoadingR] = useState(true);
+    const [expanded, setExpanded] = useState(null);
+
+    useEffect(() => {
+      (async () => {
+        try {
+          const { data } = await supabase.from('reports')
+            .select('*').eq('client_id', user.clientId).order('created_at', { ascending: false });
+          setReports(data || []);
+        } catch (e) {
+          console.error('Load reports error:', e);
+        }
+        setLoadingR(false);
+      })();
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    return (
+      <div>
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Monthly Performance</div>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Reports</div>
+          <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>Your monthly performance reports, written by Zainab</div>
+        </div>
+
+        {loadingR ? (
+          <div style={{ color: '#8896a8', fontSize: '13px', padding: '40px 0', textAlign: 'center' }}>Loading reports...</div>
+        ) : reports.length === 0 ? (
+          <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '48px 24px', textAlign: 'center', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>📄</div>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: '#0a1628', marginBottom: '6px' }}>No reports yet</div>
+            <div style={{ fontSize: '12px', color: '#8896a8' }}>Your first monthly report will appear here once it's ready.</div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {reports.map(r => (
+              <div key={r.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+                <div onClick={() => setExpanded(expanded === r.id ? null : r.id)} style={{ padding: '16px 20px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628' }}>{r.period || 'Report'}</div>
+                    <div style={{ fontSize: '11px', color: '#8896a8', marginTop: '3px' }}>{formatDate(r.created_at)}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '15px', fontWeight: 700, color: '#0a1628' }}>{r.emails_sent || 0}</div>
+                      <div style={{ fontSize: '8px', color: '#8896a8', letterSpacing: '1px', textTransform: 'uppercase' }}>Emails</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '15px', fontWeight: 700, color: '#0a1628' }}>{r.sms_sent || 0}</div>
+                      <div style={{ fontSize: '8px', color: '#8896a8', letterSpacing: '1px', textTransform: 'uppercase' }}>SMS</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '15px', fontWeight: 700, color: '#0a1628' }}>{r.contacts_added || 0}</div>
+                      <div style={{ fontSize: '8px', color: '#8896a8', letterSpacing: '1px', textTransform: 'uppercase' }}>Contacts</div>
+                    </div>
+                    <span style={{ fontSize: '14px', color: '#c9a84c' }}>{expanded === r.id ? '▲' : '▼'}</span>
+                  </div>
+                </div>
+                {expanded === r.id && (
+                  <div style={{ borderTop: '1px solid #e4e9f0', padding: '20px', background: '#f8fafc' }}>
+                    {r.top_sequence && (
+                      <div style={{ marginBottom: '14px' }}>
+                        <span style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase' }}>Top Sequence: </span>
+                        <span style={{ fontSize: '12px', color: '#0a1628', fontWeight: 600 }}>{r.top_sequence}</span>
+                      </div>
+                    )}
+                    <div style={{ fontSize: '13px', color: '#4a5568', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{r.summary || 'No written summary available for this report.'}</div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ─── MY INVOICES ─────────────────────────────────────
+  const ClientInvoices = () => {
+    const [invoices, setInvoices] = useState([]);
+    const [loadingI, setLoadingI] = useState(true);
+    const [unavailable, setUnavailable] = useState(false);
+
+    useEffect(() => {
+      (async () => {
+        try {
+          const { data, error } = await supabase.from('invoices')
+            .select('*').eq('client_id', user.clientId).order('created_at', { ascending: false });
+          if (error) { setUnavailable(true); }
+          else setInvoices(data || []);
+        } catch (e) {
+          setUnavailable(true);
+        }
+        setLoadingI(false);
+      })();
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const statusBadge = (status) => {
+      const map = {
+        paid: { bg: 'rgba(16,185,129,0.1)', color: '#10b981' },
+        pending: { bg: 'rgba(217,119,6,0.1)', color: '#d97706' },
+        overdue: { bg: 'rgba(220,38,38,0.1)', color: '#dc2626' },
+        draft: { bg: '#f4f6fa', color: '#8896a8' },
+      };
+      const s = map[(status || '').toLowerCase()] || map.draft;
+      return <span style={{ fontSize: '9px', padding: '4px 10px', borderRadius: '20px', background: s.bg, color: s.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{status || 'draft'}</span>;
+    };
+
+    const fmtAmount = (v) => {
+      const n = Number(v);
+      return isNaN(n) ? '—' : `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Billing</div>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Invoices</div>
+          <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>Your billing history with Sales Scales</div>
+        </div>
+
+        {loadingI ? (
+          <div style={{ color: '#8896a8', fontSize: '13px', padding: '40px 0', textAlign: 'center' }}>Loading invoices...</div>
+        ) : unavailable ? (
+          <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '48px 24px', textAlign: 'center', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🧾</div>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: '#0a1628', marginBottom: '6px' }}>Invoices not available yet</div>
+            <div style={{ fontSize: '12px', color: '#8896a8' }}>Your invoices will show here once billing is set up. Reach out via Help if you have a billing question.</div>
+          </div>
+        ) : invoices.length === 0 ? (
+          <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '48px 24px', textAlign: 'center', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🧾</div>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: '#0a1628', marginBottom: '6px' }}>No invoices yet</div>
+            <div style={{ fontSize: '12px', color: '#8896a8' }}>You don't have any invoices on file right now.</div>
+          </div>
+        ) : (
+          <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr 0.8fr', padding: '12px 20px', background: '#0a1628', fontSize: '9px', color: 'rgba(255,255,255,0.6)', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase' }}>
+              <div>Invoice</div><div>Amount</div><div>Status</div><div>Due</div><div style={{ textAlign: 'right' }}>Created</div>
+            </div>
+            {invoices.map(inv => (
+              <div key={inv.id} style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr 0.8fr', padding: '14px 20px', borderBottom: '1px solid #f4f6fa', alignItems: 'center', fontSize: '12px', color: '#0a1628' }}>
+                <div style={{ fontWeight: 600 }}>{inv.invoice_number || inv.number || `#${String(inv.id).slice(0, 8)}`}</div>
+                <div style={{ fontWeight: 700 }}>{fmtAmount(inv.amount ?? inv.total ?? inv.amount_due)}</div>
+                <div>{statusBadge(inv.status)}</div>
+                <div style={{ color: '#8896a8' }}>{inv.due_date ? formatDate(inv.due_date) : '—'}</div>
+                <div style={{ textAlign: 'right', color: '#8896a8' }}>{formatDate(inv.created_at)}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ─── HELP & SUPPORT ──────────────────────────────────
+  const ClientHelp = () => (
+    <div>
+      <div style={{ marginBottom: '24px' }}>
+        <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Support</div>
+        <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>Help &amp; Support</div>
+        <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>We're here to help you get the most out of Sales Scales</div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '22px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '16px' }}>Contact Us</div>
+          {[
+            { label: 'Email', value: 'support@salesscales.com', href: 'mailto:support@salesscales.com' },
+            { label: 'Account Partner', value: 'Zainab — available 24/7 in the Zainab AI tab' },
+            { label: 'Response Time', value: 'Within 1 business day' },
+          ].map(item => (
+            <div key={item.label} style={{ padding: '11px 0', borderBottom: '1px solid #f4f6fa' }}>
+              <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>{item.label}</div>
+              {item.href
+                ? <a href={item.href} style={{ fontSize: '13px', color: '#c9a84c', fontWeight: 600, textDecoration: 'none' }}>{item.value}</a>
+                : <div style={{ fontSize: '13px', color: '#0a1628', fontWeight: 500 }}>{item.value}</div>}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '22px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '16px' }}>How to Get Support</div>
+          {[
+            'Ask Zainab AI any question about your results, sequences, or reports — she has your store data and answers instantly.',
+            'Review pending content in My Approvals before it goes live to your customers.',
+            'Check My Reports each month for a full performance breakdown.',
+            'For billing questions, see My Invoices or email our support team.',
+          ].map((step, i) => (
+            <div key={i} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', marginBottom: '12px' }}>
+              <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(201,168,76,0.15)', border: '1px solid rgba(201,168,76,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700, color: '#c9a84c', flexShrink: 0, marginTop: '1px' }}>{i + 1}</div>
+              <div style={{ fontSize: '12px', color: '#4a5568', lineHeight: 1.6 }}>{step}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ background: 'linear-gradient(135deg, #0a1628, #112240)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: '12px', padding: '24px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: 'white', marginBottom: '4px' }}>Need to talk to your AI partner?</div>
+          <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>Zainab is online now and ready to help with anything.</div>
+        </div>
+        <button onClick={() => setCurrentPage('zainab')} style={{ background: '#c9a84c', border: 'none', borderRadius: '10px', padding: '11px 24px', fontSize: '13px', fontWeight: 700, color: '#0a1628', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', flexShrink: 0 }}>
+          Chat with Zainab →
+        </button>
+      </div>
+    </div>
+  );
 
   // ─── SETTINGS ────────────────────────────────────────
   const ClientSettings = () => {
