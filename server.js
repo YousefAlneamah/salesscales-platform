@@ -2088,8 +2088,60 @@ app.post('/approvals/submit', async (req, res) => {
   }
 });
 
+// Mahdi rewrites a rejected approval's content incorporating the owner's feedback,
+// then submits it as a fresh pending approval titled "Revised: ...".
+const MAHDI_REVISE_SYS = `You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world class copywriter. Write like a real human, not a marketing robot. Use short sentences and generous line breaks. Never use exclamation marks or phrases like "we understand", "we know how you feel", "don't miss out", or "limited time". Write the way a thoughtful friend who works at the brand would write. You are Mahdi — never identify as anyone else or mention Claude.`;
+
+const reviseApprovalWithMahdi = async (approval, feedback) => {
+  const meta = approval.metadata || {};
+  const isSequence = ['email_sequence', 'sms_sequence', 'whatsapp_sequence'].includes(approval.type);
+  let ctx = '';
+  try { ctx = await ragSearch(approval.title || 'brand voice', approval.client_id); } catch {}
+
+  const insertRevised = async (content, metadata) => {
+    const { data } = await supabase.from('approvals').insert([{
+      type: approval.type,
+      title: `Revised: ${approval.title}`,
+      content,
+      metadata,
+      from_member: 'mahdi',
+      client_id: approval.client_id,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    }]).select().single();
+    return data;
+  };
+
+  if (isSequence && Array.isArray(meta.steps) && meta.steps.length) {
+    const raw = await aiCall(
+      `${MAHDI_REVISE_SYS} Return ONLY valid JSON, no markdown, no explanation.`,
+      `This ${approval.type.replace('_', ' ')} was rejected with this feedback:\n"${feedback}"\n\nRewrite it to fully incorporate the feedback. Keep the exact same JSON shape and the same number of steps (including any "wait" steps). Existing sequence:\n${JSON.stringify({ trigger_type: meta.trigger_type || 'manual', steps: meta.steps })}\n\nReturn JSON exactly in this shape: {"trigger_type":"...","steps":[{"step_type":"...","subject":"...","content":"...","wait_hours":0}]}`,
+      ctx
+    );
+    let parsed;
+    try {
+      const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+      const m = cleaned.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(m ? m[0] : cleaned);
+    } catch { parsed = { steps: meta.steps, trigger_type: meta.trigger_type }; }
+    const newSteps = Array.isArray(parsed.steps) && parsed.steps.length ? parsed.steps : meta.steps;
+    const msgCount = newSteps.filter(s => s.step_type !== 'wait').length;
+    const newMeta = { ...meta, steps: newSteps, trigger_type: parsed.trigger_type || meta.trigger_type || 'manual', revised_from: approval.id, original_feedback: feedback };
+    const content = `Revised based on rejection feedback: "${feedback}"\n\nMahdi rewrote this ${approval.type.replace('_', ' ')} (${msgCount} message step${msgCount === 1 ? '' : 's'}) to address the feedback.`;
+    return insertRevised(content, newMeta);
+  }
+
+  const rewritten = await aiCall(
+    MAHDI_REVISE_SYS,
+    `The following content was rejected with this feedback:\n"${feedback}"\n\nOriginal content:\n${approval.content || '(no content)'}\n\nRewrite it to fully address the feedback. Return only the revised content — no preamble, no surrounding quotes.`,
+    ctx
+  );
+  const content = `Revised based on rejection feedback: "${feedback}"\n\n${(rewritten || '').trim()}`;
+  return insertRevised(content, { ...meta, revised_from: approval.id, original_feedback: feedback });
+};
+
 app.post('/approvals/action', async (req, res) => {
-  const { approval_id, action, feedback } = req.body;
+  const { approval_id, action, feedback, edited_content } = req.body;
   if (!approval_id || !action) return res.status(400).json({ error: 'approval_id and action required' });
   try {
     const { data: approval, error: fetchErr } = await supabase.from('approvals').select('*').eq('id', approval_id).single();
@@ -2099,12 +2151,20 @@ app.post('/approvals/action', async (req, res) => {
       await supabase.from('approvals').update({
         status: 'rejected', feedback: feedback || null, actioned_at: new Date().toISOString()
       }).eq('id', approval_id);
-      return res.json({ ok: true });
+
+      let revised = null;
+      const REVISABLE = ['email_sequence', 'sms_sequence', 'whatsapp_sequence', 'client_request'];
+      if (feedback && REVISABLE.includes(approval.type)) {
+        try { revised = await reviseApprovalWithMahdi(approval, feedback); }
+        catch (e) { console.error('Mahdi revision failed:', e.message); }
+      }
+      return res.json({ ok: true, revised });
     }
 
     if (action !== 'approve') return res.status(400).json({ error: 'action must be approve or reject' });
 
     const meta = approval.metadata || {};
+    const effectiveContent = (typeof edited_content === 'string' && edited_content.trim()) ? edited_content : approval.content;
 
     if (approval.type === 'email_sequence' || approval.type === 'sms_sequence' || approval.type === 'whatsapp_sequence') {
       const steps = meta.steps || [];
@@ -2131,13 +2191,13 @@ app.post('/approvals/action', async (req, res) => {
     } else if (approval.type === 'outreach_message') {
       if (meta.channel === 'sms' && meta.to_phone) {
         const { tc: twilioClient, from } = await getClientTwilio(approval.client_id);
-        await twilioClient.messages.create({ body: approval.content, from, to: meta.to_phone });
+        await twilioClient.messages.create({ body: effectiveContent, from, to: meta.to_phone });
       } else if (meta.to_email) {
         const sender = await getClientSender(approval.client_id);
         await sgMail.send({
           to: meta.to_email, from: sender,
           subject: meta.subject || 'Message from Sales Scales',
-          html: `<p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#374151;">${approval.content}</p>`
+          html: `<p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#374151;">${effectiveContent}</p>`
         });
       }
     } else if (approval.type === 'client_checkin') {
@@ -2151,7 +2211,7 @@ app.post('/approvals/action', async (req, res) => {
             <div style="color:white;font-size:16px;font-weight:600;">${meta.subject || 'A message for you'}</div>
           </div>
           <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 8px 8px;padding:24px;">
-            <div style="color:#4a5568;font-size:13px;line-height:1.8;white-space:pre-wrap;">${approval.content}</div>
+            <div style="color:#4a5568;font-size:13px;line-height:1.8;white-space:pre-wrap;">${effectiveContent}</div>
             <hr style="border:none;border-top:1px solid #e4e9f0;margin:18px 0;" />
             <p style="color:#8896a8;font-size:11px;margin:0;">Sales Scales — AI Revenue System</p>
           </div>
@@ -2164,18 +2224,18 @@ app.post('/approvals/action', async (req, res) => {
         channel: meta.channel || null,
         pain_point: meta.pain_point || null,
         source: 'hassan_ai',
-        notes: approval.content,
+        notes: effectiveContent,
         stage: 'new',
       }]);
       await storeBriefing('hassan', 'ali',
         `New Prospect to Close: ${meta.prospect_name || approval.title}`,
-        `Hassan has sourced a new prospect that Yousef approved.\n\nProspect: ${meta.prospect_name || approval.title}\nNiche: ${meta.niche || 'unknown'}\nChannel: ${meta.channel || 'unknown'}\nPain Point: ${meta.pain_point || 'unknown'}\n\nOutreach message sent:\n${approval.content}\n\nDraft a NEPQ-based closing script for this prospect and prepare follow-up questions.`,
+        `Hassan has sourced a new prospect that Yousef approved.\n\nProspect: ${meta.prospect_name || approval.title}\nNiche: ${meta.niche || 'unknown'}\nChannel: ${meta.channel || 'unknown'}\nPain Point: ${meta.pain_point || 'unknown'}\n\nOutreach message sent:\n${effectiveContent}\n\nDraft a NEPQ-based closing script for this prospect and prepare follow-up questions.`,
         'high'
       );
     }
 
     await supabase.from('approvals').update({
-      status: 'approved', feedback: feedback || null, actioned_at: new Date().toISOString()
+      status: 'approved', content: effectiveContent, feedback: feedback || null, actioned_at: new Date().toISOString()
     }).eq('id', approval_id);
 
     res.json({ ok: true });

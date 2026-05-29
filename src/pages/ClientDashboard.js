@@ -561,6 +561,8 @@ export default function ClientDashboard({ user, onLogout }) {
     const [selected, setSelected] = useState(null);
     const [feedback, setFeedback] = useState('');
     const [busy, setBusy] = useState(false);
+    const [editing, setEditing] = useState(false);
+    const [editContent, setEditContent] = useState('');
 
     const loadApprovals = async () => {
       setLoadingA(true);
@@ -587,10 +589,13 @@ export default function ClientDashboard({ user, onLogout }) {
       try {
         await axios.post('http://localhost:3001/approvals/action', {
           approval_id: approval.id, action, feedback: action === 'reject' ? feedback.trim() : null,
+          edited_content: action === 'approve' && editing ? editContent : undefined,
         });
         setApprovals(prev => prev.filter(a => a.id !== approval.id));
         setSelected(null);
         setFeedback('');
+        setEditing(false);
+        setEditContent('');
       } catch (e) {
         alert(e.response?.data?.error || 'Something went wrong. Please try again.');
       }
@@ -620,7 +625,7 @@ export default function ClientDashboard({ user, onLogout }) {
             {/* LIST */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {approvals.map(a => (
-                <div key={a.id} onClick={() => { setSelected(a); setFeedback(''); }}
+                <div key={a.id} onClick={() => { setSelected(a); setFeedback(''); setEditing(false); setEditContent(''); }}
                   style={{ background: 'white', border: `1px solid ${selected?.id === a.id ? '#c9a84c' : '#e4e9f0'}`, borderLeft: `3px solid ${selected?.id === a.id ? '#c9a84c' : 'transparent'}`, borderRadius: '10px', padding: '14px 16px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
                   <div style={{ fontSize: '8px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '5px' }}>{(a.type || 'content').replace(/_/g, ' ')}</div>
                   <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628', lineHeight: 1.4 }}>{a.title}</div>
@@ -637,7 +642,11 @@ export default function ClientDashboard({ user, onLogout }) {
                   <div style={{ fontSize: '15px', fontWeight: 700, color: 'white' }}>{selected.title}</div>
                 </div>
                 <div style={{ padding: '22px', maxHeight: '420px', overflowY: 'auto' }}>
-                  {steps.length > 0 ? (
+                  {editing ? (
+                    <textarea value={editContent} onChange={e => setEditContent(e.target.value)}
+                      placeholder="Edit the content before approving..."
+                      style={{ width: '100%', minHeight: '240px', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '12px', fontSize: '13px', color: '#0a1628', fontFamily: 'DM Sans, sans-serif', lineHeight: 1.7, resize: 'vertical', boxSizing: 'border-box' }} />
+                  ) : steps.length > 0 ? (
                     steps.map((s, i) => (
                       <div key={i} style={{ borderBottom: i < steps.length - 1 ? '1px solid #f4f6fa' : 'none', paddingBottom: '14px', marginBottom: '14px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
@@ -658,8 +667,19 @@ export default function ClientDashboard({ user, onLogout }) {
                   <div style={{ display: 'flex', gap: '10px' }}>
                     <button disabled={busy} onClick={() => act(selected, 'approve')}
                       style={{ flex: 1, padding: '11px', background: busy ? '#e4e9f0' : '#10b981', color: busy ? '#8896a8' : 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
-                      {busy ? 'Working...' : 'Approve & Go Live'}
+                      {busy ? 'Working...' : editing ? 'Save & Go Live' : 'Approve & Go Live'}
                     </button>
+                    {editing ? (
+                      <button disabled={busy} onClick={() => { setEditing(false); setEditContent(''); }}
+                        style={{ flex: 1, padding: '11px', background: 'white', color: '#64748b', border: '1px solid #e4e9f0', borderRadius: '8px', fontSize: '12px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                        Cancel Edit
+                      </button>
+                    ) : (
+                      <button disabled={busy} onClick={() => { setEditing(true); setEditContent(selected.content || ''); }}
+                        style={{ flex: 1, padding: '11px', background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', borderRadius: '8px', fontSize: '12px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                        Edit
+                      </button>
+                    )}
                     <button disabled={busy} onClick={() => act(selected, 'reject')}
                       style={{ flex: 1, padding: '11px', background: 'white', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '8px', fontSize: '12px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
                       Request Changes

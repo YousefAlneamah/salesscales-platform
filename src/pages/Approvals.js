@@ -39,6 +39,8 @@ export default function Approvals() {
   const [feedback, setFeedback] = useState('');
   const [showReject, setShowReject] = useState(false);
   const [actioning, setActioning] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState('');
 
   useEffect(() => {
     fetchApprovals();
@@ -64,9 +66,12 @@ export default function Approvals() {
         approval_id: approvalId,
         action: act,
         feedback: feedback || undefined,
+        edited_content: act === 'approve' && editing ? editContent : undefined,
       });
       setFeedback('');
       setShowReject(false);
+      setEditing(false);
+      setEditContent('');
       setSelected(null);
       await fetchApprovals();
     } catch (e) {
@@ -175,7 +180,7 @@ export default function Approvals() {
                 const memberColor = MEMBER_COLORS[approval.from_member] || '#8896a8';
                 return (
                   <div key={approval.id}
-                    onClick={() => { setSelected(selected?.id === approval.id ? null : approval); setShowReject(false); setFeedback(''); }}
+                    onClick={() => { setSelected(selected?.id === approval.id ? null : approval); setShowReject(false); setFeedback(''); setEditing(false); setEditContent(''); }}
                     style={{ background: 'white', border: `1px solid ${selected?.id === approval.id ? '#c9a84c' : '#e4e9f0'}`, borderRadius: '12px', padding: '16px 18px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(10,22,40,0.04)', transition: 'border-color 0.1s' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -230,7 +235,7 @@ export default function Approvals() {
           <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', height: 'fit-content', position: 'sticky', top: 0, boxShadow: '0 4px 12px rgba(10,22,40,0.08)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628' }}>Review</div>
-              <button onClick={() => { setSelected(null); setShowReject(false); setFeedback(''); }}
+              <button onClick={() => { setSelected(null); setShowReject(false); setFeedback(''); setEditing(false); setEditContent(''); }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '20px', lineHeight: 1, padding: 0 }}>×</button>
             </div>
 
@@ -278,12 +283,20 @@ export default function Approvals() {
             )}
 
             {/* Content */}
-            {selected.content && (
+            {(selected.content || editing) && (
               <div style={{ marginBottom: '14px' }}>
-                <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>Content</div>
-                <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '12px', fontSize: '12px', color: '#475569', lineHeight: '1.7', whiteSpace: 'pre-wrap', border: '1px solid #f0f3f8', maxHeight: '200px', overflowY: 'auto' }}>
-                  {selected.content}
+                <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>
+                  Content{editing && <span style={{ color: '#c9a84c', marginLeft: '6px' }}>· editing</span>}
                 </div>
+                {editing ? (
+                  <textarea value={editContent} onChange={e => setEditContent(e.target.value)}
+                    rows={10}
+                    style={{ ...inputStyle, resize: 'vertical', lineHeight: '1.7', minHeight: '160px' }} />
+                ) : (
+                  <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '12px', fontSize: '12px', color: '#475569', lineHeight: '1.7', whiteSpace: 'pre-wrap', border: '1px solid #f0f3f8', maxHeight: '200px', overflowY: 'auto' }}>
+                    {selected.content}
+                  </div>
+                )}
               </div>
             )}
 
@@ -316,10 +329,21 @@ export default function Approvals() {
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button onClick={() => action(selected.id, 'approve')} disabled={actioning}
                   style={{ background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', padding: '10px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', flex: 1, opacity: actioning ? 0.6 : 1 }}>
-                  ✓ Approve & Execute
+                  ✓ {editing ? 'Save & Approve' : 'Approve & Execute'}
                 </button>
+                {editing ? (
+                  <button onClick={() => { setEditing(false); setEditContent(''); }}
+                    style={{ background: 'white', border: '1px solid #e4e9f0', color: '#64748b', borderRadius: '8px', padding: '10px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                    Cancel Edit
+                  </button>
+                ) : (
+                  <button onClick={() => { setEditing(true); setEditContent(selected.content || ''); }}
+                    style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#b45309', borderRadius: '8px', padding: '10px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                    ✎ Edit
+                  </button>
+                )}
                 <button onClick={() => setShowReject(true)}
-                  style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '8px', padding: '10px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', flex: 1 }}>
+                  style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '8px', padding: '10px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
                   ✗ Reject
                 </button>
               </div>
