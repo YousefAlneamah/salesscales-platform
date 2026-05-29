@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabase';
 
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 5;
 
 const REVENUE_RANGES = ['Under $10K/mo', '$10K–$50K/mo', '$50K–$100K/mo', '$100K–$500K/mo', 'Over $500K/mo'];
 const AOV_RANGES = ['Under $30', '$30–$75', '$75–$150', '$150–$300', 'Over $300'];
@@ -18,12 +18,13 @@ const TOOLS = [
   'Yotpo / Reviews.io', 'Gorgias', 'Zendesk',
 ];
 
-const STEP_TITLES = ['Your Store', 'Your Brand', 'Your Stack', 'Your Goals'];
+const STEP_TITLES = ['Your Store', 'Your Brand', 'Your Stack', 'Your Goals', 'Connect Your Store'];
 const STEP_DESCS = [
   'Start with the basics — we use this to personalise your AI system.',
   'Help our AI team write and speak in your exact brand voice.',
   'Tell us what tools you use so we build around your existing stack.',
   'What does a successful 90 days look like for your store?',
+  'Connect Shopify so your AI team can sync orders and recover carts automatically.',
 ];
 
 const fieldStyle = {
@@ -79,6 +80,7 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
+  const [connectClicked, setConnectClicked] = useState(false);
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
 
@@ -97,7 +99,8 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
     4: !!(form.biggest_challenge && form.goals),
   };
 
-  const handleSubmit = async () => {
+  // Save questionnaire answers (without completing) and move to the connect step.
+  const submitQuestionnaire = async () => {
     setSaving(true);
     setError('');
     try {
@@ -113,7 +116,6 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
         main_competitors: form.main_competitors,
         biggest_challenge: form.biggest_challenge,
         goals: form.goals,
-        completed_at: new Date().toISOString(),
       }], { onConflict: 'client_id' });
       if (err) throw err;
       // Fire briefing to owner — non-blocking
@@ -129,6 +131,32 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
           client_id: user.clientId,
         }),
       }).catch(() => {});
+      setSaving(false);
+      setStep(5);
+    } catch (e) {
+      setError('Something went wrong. Please try again.');
+      setSaving(false);
+    }
+  };
+
+  const connectStore = () => {
+    const shop = form.store_url.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (!shop) { setError('Enter your Shopify store URL — e.g. luuxbags.myshopify.com'); return; }
+    setError('');
+    window.open(`http://localhost:3001/shopify/install?shop=${encodeURIComponent(shop)}&clientId=${user.clientId}`, '_blank');
+    setConnectClicked(true);
+  };
+
+  // Mark onboarding complete (after the connect step is shown) and open the dashboard.
+  const finishOnboarding = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      const { error: err } = await supabase.from('client_onboarding').upsert([{
+        client_id: user.clientId,
+        completed_at: new Date().toISOString(),
+      }], { onConflict: 'client_id' });
+      if (err) throw err;
       setDone(true);
       setTimeout(() => onComplete(), 2800);
     } catch (e) {
@@ -192,6 +220,7 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
               {step === 2 && 'Tell us about your brand.'}
               {step === 3 && "What's in your stack?"}
               {step === 4 && 'Define your success.'}
+              {step === 5 && 'Connect your store.'}
             </div>
             <div style={{ fontSize: '12px', color: '#8896a8', lineHeight: '1.65' }}>{STEP_DESCS[step - 1]}</div>
           </div>
@@ -285,6 +314,29 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
             </div>
           )}
 
+          {/* ─── STEP 5 — CONNECT YOUR STORE ─── */}
+          {step === 5 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div>
+                <label style={labelStyle}>Shopify Store URL</label>
+                <input style={fieldStyle} placeholder="luuxbags.myshopify.com" value={form.store_url}
+                  onChange={e => set('store_url', e.target.value)} onKeyDown={e => e.key === 'Enter' && connectStore()} />
+              </div>
+              <button type="button" onClick={connectStore}
+                style={{ width: '100%', background: '#0a1628', color: 'white', border: 'none', borderRadius: '10px', padding: '13px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <i className="ti ti-brand-shopify" aria-hidden="true"></i> Connect Your Store
+              </button>
+              {connectClicked && (
+                <div style={{ fontSize: '12px', color: '#059669', background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '10px 14px', lineHeight: 1.6 }}>
+                  A Shopify authorization window has opened. Approve access there, then click Finish below.
+                </div>
+              )}
+              <div style={{ fontSize: '11px', color: '#8896a8', lineHeight: 1.6 }}>
+                Connecting lets your AI team pull live orders, revenue, and abandoned carts — and build cart recovery sequences automatically. You can also do this later from Settings.
+              </div>
+            </div>
+          )}
+
           {/* Error */}
           {error && (
             <div style={{ marginTop: '14px', fontSize: '12px', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '10px 14px' }}>
@@ -294,22 +346,32 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
 
           {/* Navigation */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '32px' }}>
-            {step > 1 ? (
+            {step > 1 && step < 5 ? (
               <button type="button" onClick={() => setStep(s => s - 1)}
                 style={{ background: 'none', border: '1.5px solid #e4e9f0', borderRadius: '10px', padding: '10px 20px', fontSize: '12px', color: '#8896a8', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
                 ← Back
               </button>
+            ) : step === 5 ? (
+              <button type="button" onClick={finishOnboarding} disabled={saving}
+                style={{ background: 'none', border: 'none', padding: '10px 4px', fontSize: '12px', color: '#8896a8', cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500, textDecoration: 'underline' }}>
+                Skip for now
+              </button>
             ) : <div />}
 
-            {step < TOTAL_STEPS ? (
+            {step < 4 ? (
               <button type="button" onClick={() => setStep(s => s + 1)} disabled={!canNext[step]}
                 style={{ background: canNext[step] ? '#c9a84c' : '#e4e9f0', color: canNext[step] ? '#0a1628' : '#a0aec0', border: 'none', borderRadius: '10px', padding: '11px 26px', fontSize: '13px', fontWeight: 700, cursor: canNext[step] ? 'pointer' : 'not-allowed', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.2px', transition: 'all 0.15s' }}>
                 Continue →
               </button>
-            ) : (
-              <button type="button" onClick={handleSubmit} disabled={!canNext[4] || saving}
+            ) : step === 4 ? (
+              <button type="button" onClick={submitQuestionnaire} disabled={!canNext[4] || saving}
                 style={{ background: canNext[4] && !saving ? '#c9a84c' : '#e4e9f0', color: canNext[4] && !saving ? '#0a1628' : '#a0aec0', border: 'none', borderRadius: '10px', padding: '11px 26px', fontSize: '13px', fontWeight: 700, cursor: canNext[4] && !saving ? 'pointer' : 'not-allowed', fontFamily: 'DM Sans, sans-serif', transition: 'all 0.15s' }}>
-                {saving ? 'Activating...' : 'Activate My AI System →'}
+                {saving ? 'Saving...' : 'Continue →'}
+              </button>
+            ) : (
+              <button type="button" onClick={finishOnboarding} disabled={saving}
+                style={{ background: !saving ? '#c9a84c' : '#e4e9f0', color: !saving ? '#0a1628' : '#a0aec0', border: 'none', borderRadius: '10px', padding: '11px 26px', fontSize: '13px', fontWeight: 700, cursor: !saving ? 'pointer' : 'not-allowed', fontFamily: 'DM Sans, sans-serif', transition: 'all 0.15s' }}>
+                {saving ? 'Activating...' : 'Finish →'}
               </button>
             )}
           </div>
