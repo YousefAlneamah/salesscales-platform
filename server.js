@@ -2186,7 +2186,27 @@ app.post('/client/zainab', async (req, res) => {
     const context = [ragContext, shopifyCtx, profileCtx].filter(Boolean).join('\n\n');
     const store = client_name || 'their store';
     const systemPrompt = `You are Zainab, the dedicated AI Client Partner at Sales Scales. You are warm, professional, and genuinely care about client success. You are speaking directly with the owner of ${store}. Your job is to help them understand their AI revenue system, answer questions about their sequences and results, explain their reports, and make them feel confident that Sales Scales is delivering real value. Use the store data and knowledge base context below to give specific, personalized answers. Keep responses concise, friendly, and encouraging. You are Zainab — never identify as anyone else or mention Claude.`;
-    const result = await aiCall(systemPrompt, message, context);
+    let result = await aiCall(systemPrompt, message, context);
+
+    // Action routing — if the client is requesting a change, flag it for the team via approvals.
+    const actionKeywords = /\b(change|update|edit|fix|remove|add|rewrite)\b/i;
+    if (actionKeywords.test(message)) {
+      try {
+        await supabase.from('approvals').insert([{
+          type: 'client_request',
+          title: `Client request from ${store}`,
+          content: message,
+          from_member: 'zainab',
+          client_id: client_id || null,
+          status: 'pending',
+          created_at: new Date().toISOString()
+        }]);
+        result += `\n\nI've flagged this for the Sales Scales team to action — they'll get it handled and you'll see it move through your approvals.`;
+      } catch (apprErr) {
+        console.error('Zainab approval submit error:', apprErr.message);
+      }
+    }
+
     res.json({ reply: result });
   } catch (e) {
     console.error('/client/zainab error:', e.message);

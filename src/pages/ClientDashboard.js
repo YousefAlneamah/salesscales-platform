@@ -31,6 +31,9 @@ export default function ClientDashboard({ user, onLogout }) {
   const [contacts, setContacts] = useState([]);
   const [enrollmentsByWorkflow, setEnrollmentsByWorkflow] = useState({});
   const [loading, setLoading] = useState(true);
+  const [chatMessages, setChatMessages] = useState([
+    { role: 'ai', content: `Hi ${user.name.split(' ')[0]}! I'm Zainab, your dedicated AI partner at Sales Scales. I'm here to help you understand your results, answer questions about your sequences, and make sure your AI revenue system is delivering maximum value. What can I help you with today?` }
+  ]);
 
   useEffect(() => { fetchData(); }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -151,7 +154,7 @@ export default function ClientDashboard({ user, onLogout }) {
       case 'calls': return <ClientCalls />;
       case 'reports': return <ClientReports />;
       case 'invoices': return <ClientInvoices />;
-      case 'zainab': return <ClientZainab />;
+      case 'zainab': return <ClientZainab chatMessages={chatMessages} setChatMessages={setChatMessages} />;
       case 'help': return <ClientHelp />;
       case 'settings': return <ClientSettings />;
       default: return <ClientHome />;
@@ -479,10 +482,7 @@ export default function ClientDashboard({ user, onLogout }) {
   );
 
   // ─── ZAINAB ───────────────────────────────────────────
-  const ClientZainab = () => {
-    const [chatMessages, setChatMessages] = useState([
-      { role: 'ai', content: `Hi ${user.name.split(' ')[0]}! I'm Zainab, your dedicated AI partner at Sales Scales. I'm here to help you understand your results, answer questions about your sequences, and make sure your AI revenue system is delivering maximum value. What can I help you with today?` }
-    ]);
+  const ClientZainab = ({ chatMessages, setChatMessages }) => {
     const [input, setInput] = useState('');
     const [generating, setGenerating] = useState(false);
 
