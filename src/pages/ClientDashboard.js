@@ -970,6 +970,9 @@ export default function ClientDashboard({ user, onLogout }) {
     const [loadingP, setLoadingP] = useState(true);
     const [savingP, setSavingP] = useState(false);
     const [savedP, setSavedP] = useState(false);
+    const [shopUrl, setShopUrl] = useState('');
+    const [connection, setConnection] = useState(null);
+    const [loadingConn, setLoadingConn] = useState(true);
 
     useEffect(() => {
       (async () => {
@@ -990,6 +993,24 @@ export default function ClientDashboard({ user, onLogout }) {
       })();
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+    useEffect(() => {
+      (async () => {
+        try {
+          const { data } = await axios.get('http://localhost:3001/shopify/connection', { params: { client_id: user.clientId } });
+          setConnection(data);
+        } catch (e) {
+          console.error('Load connection error:', e);
+        }
+        setLoadingConn(false);
+      })();
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const connectStore = () => {
+      const shop = shopUrl.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+      if (!shop) { alert('Enter your Shopify store URL — e.g. luuxbags.myshopify.com'); return; }
+      window.open(`http://localhost:3001/shopify/install?shop=${encodeURIComponent(shop)}&clientId=${user.clientId}`, '_blank');
+    };
+
     const saveProfile = async () => {
       setSavingP(true);
       setSavedP(false);
@@ -1008,6 +1029,42 @@ export default function ClientDashboard({ user, onLogout }) {
       <div style={{ marginBottom: '24px' }}>
         <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Account</div>
         <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>Settings</div>
+      </div>
+
+      {/* SHOPIFY CONNECTION */}
+      <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase' }}>Shopify Connection</div>
+          {connection?.connected && (
+            <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', background: 'rgba(16,185,129,0.1)', color: '#10b981', fontWeight: 600, border: '1px solid rgba(16,185,129,0.3)' }}>● Connected</span>
+          )}
+        </div>
+        <div style={{ fontSize: '12px', color: '#8896a8', marginBottom: '18px', lineHeight: 1.6 }}>
+          Connect your Shopify store so your AI team can pull live orders, revenue, and abandoned carts — and automatically build cart recovery sequences for you.
+        </div>
+
+        {loadingConn ? (
+          <div style={{ fontSize: '12px', color: '#8896a8' }}>Checking connection...</div>
+        ) : connection?.connected ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: '10px', padding: '14px 18px' }}>
+            <div>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628', marginBottom: '2px' }}>{connection.shop}</div>
+              <div style={{ fontSize: '11px', color: '#059669' }}>Your store is connected and syncing.</div>
+            </div>
+            <div style={{ fontSize: '24px' }}>🛍️</div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <input type="text" value={shopUrl} onChange={e => setShopUrl(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && connectStore()}
+              placeholder="yourstore.myshopify.com"
+              style={{ flex: 1, border: '1px solid #e4e9f0', borderRadius: '8px', padding: '11px 14px', fontSize: '12px', color: '#0a1628', outline: 'none', fontFamily: 'DM Sans, sans-serif' }} />
+            <button onClick={connectStore}
+              style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '11px 20px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              Connect Your Store
+            </button>
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>

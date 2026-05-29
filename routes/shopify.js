@@ -154,6 +154,20 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
     res.redirect(installUrl);
   });
 
+  router.get('/connection', async (req, res) => {
+    const { client_id } = req.query;
+    if (!client_id) return res.status(400).json({ error: 'Missing client_id' });
+    try {
+      const { data: conn } = await supabase.from('shopify_connections')
+        .select('shop, created_at').eq('client_id', client_id).maybeSingle();
+      if (!conn) return res.json({ connected: false });
+      res.json({ connected: true, shop: conn.shop, connected_at: conn.created_at });
+    } catch (e) {
+      console.error('Shopify connection lookup error:', e.message);
+      res.status(500).json({ error: 'Failed to check connection', details: e.message });
+    }
+  });
+
   router.get('/callback', async (req, res) => {
     const { shop, code, state } = req.query;
     if (!shop || !code) return res.status(400).send('Missing required parameters');
