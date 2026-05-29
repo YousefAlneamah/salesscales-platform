@@ -37,7 +37,10 @@ export default function Clients() {
     conversational_ai: 'Conversational AI'
   };
 
-  useEffect(() => { fetchClients(); }, []);
+  useEffect(() => {
+    fetchClients();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchClients = async () => {
     setLoading(true);
