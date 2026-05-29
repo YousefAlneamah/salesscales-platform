@@ -2141,7 +2141,7 @@ const reviseApprovalWithMahdi = async (approval, feedback) => {
 };
 
 app.post('/approvals/action', async (req, res) => {
-  const { approval_id, action, feedback, edited_content } = req.body;
+  const { approval_id, action, feedback, edited_content, edited_steps } = req.body;
   if (!approval_id || !action) return res.status(400).json({ error: 'approval_id and action required' });
   try {
     const { data: approval, error: fetchErr } = await supabase.from('approvals').select('*').eq('id', approval_id).single();
@@ -2167,7 +2167,7 @@ app.post('/approvals/action', async (req, res) => {
     const effectiveContent = (typeof edited_content === 'string' && edited_content.trim()) ? edited_content : approval.content;
 
     if (approval.type === 'email_sequence' || approval.type === 'sms_sequence' || approval.type === 'whatsapp_sequence') {
-      const steps = meta.steps || [];
+      const steps = (Array.isArray(edited_steps) && edited_steps.length) ? edited_steps : (meta.steps || []);
       const { data: workflow, error: wfErr } = await supabase.from('workflows').insert([{
         name: approval.title,
         client_id: approval.client_id,

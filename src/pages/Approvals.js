@@ -41,6 +41,9 @@ export default function Approvals() {
   const [actioning, setActioning] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
+  const [editSteps, setEditSteps] = useState([]);
+
+  const isSeq = (a) => ['email_sequence', 'sms_sequence', 'whatsapp_sequence'].includes(a?.type);
 
   useEffect(() => {
     fetchApprovals();
@@ -66,12 +69,14 @@ export default function Approvals() {
         approval_id: approvalId,
         action: act,
         feedback: feedback || undefined,
-        edited_content: act === 'approve' && editing ? editContent : undefined,
+        edited_content: act === 'approve' && editing && !isSeq(selected) ? editContent : undefined,
+        edited_steps: act === 'approve' && editing && isSeq(selected) ? editSteps : undefined,
       });
       setFeedback('');
       setShowReject(false);
       setEditing(false);
       setEditContent('');
+      setEditSteps([]);
       setSelected(null);
       await fetchApprovals();
     } catch (e) {
@@ -180,7 +185,7 @@ export default function Approvals() {
                 const memberColor = MEMBER_COLORS[approval.from_member] || '#8896a8';
                 return (
                   <div key={approval.id}
-                    onClick={() => { setSelected(selected?.id === approval.id ? null : approval); setShowReject(false); setFeedback(''); setEditing(false); setEditContent(''); }}
+                    onClick={() => { setSelected(selected?.id === approval.id ? null : approval); setShowReject(false); setFeedback(''); setEditing(false); setEditContent(''); setEditSteps([]); }}
                     style={{ background: 'white', border: `1px solid ${selected?.id === approval.id ? '#c9a84c' : '#e4e9f0'}`, borderRadius: '12px', padding: '16px 18px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(10,22,40,0.04)', transition: 'border-color 0.1s' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -235,7 +240,7 @@ export default function Approvals() {
           <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', height: 'fit-content', position: 'sticky', top: 0, boxShadow: '0 4px 12px rgba(10,22,40,0.08)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628' }}>Review</div>
-              <button onClick={() => { setSelected(null); setShowReject(false); setFeedback(''); setEditing(false); setEditContent(''); }}
+              <button onClick={() => { setSelected(null); setShowReject(false); setFeedback(''); setEditing(false); setEditContent(''); setEditSteps([]); }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '20px', lineHeight: 1, padding: 0 }}>×</button>
             </div>
 
@@ -262,8 +267,8 @@ export default function Approvals() {
               </div>
             )}
 
-            {/* Steps preview for sequences */}
-            {(selected.type === 'email_sequence' || selected.type === 'sms_sequence') && selected.metadata?.steps?.length > 0 && (
+            {/* Steps preview for sequences (read-only) */}
+            {isSeq(selected) && !editing && selected.metadata?.steps?.length > 0 && (
               <div style={{ marginBottom: '14px' }}>
                 <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>{selected.metadata.steps.filter(s => s.step_type !== 'wait').length} Steps · {selected.metadata.trigger_type || 'manual'} trigger</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -282,8 +287,38 @@ export default function Approvals() {
               </div>
             )}
 
+            {/* Per-step editor for sequences */}
+            {editing && isSeq(selected) && (
+              <div style={{ marginBottom: '14px' }}>
+                <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>
+                  Edit Steps<span style={{ color: '#c9a84c', marginLeft: '6px' }}>· editing</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {editSteps.map((step, i) => (
+                    <div key={i} style={{ background: step.step_type === 'wait' ? '#f8fafc' : '#fff', borderRadius: '8px', padding: '10px 12px', border: '1px solid #e4e9f0' }}>
+                      <div style={{ fontSize: '9px', fontWeight: 700, color: step.step_type === 'wait' ? '#8896a8' : '#0a1628', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: step.step_type !== 'wait' ? '6px' : 0 }}>
+                        {step.step_type === 'wait' ? `⏱ Wait ${step.wait_hours || 0}h` : `Step ${i + 1} — ${step.step_type}`}
+                      </div>
+                      {step.step_type !== 'wait' && (
+                        <>
+                          {(step.step_type === 'email' || step.subject !== undefined) && (
+                            <input value={step.subject || ''} placeholder="Subject"
+                              onChange={e => setEditSteps(prev => prev.map((s, j) => j === i ? { ...s, subject: e.target.value } : s))}
+                              style={{ ...inputStyle, marginBottom: '6px', fontWeight: 600 }} />
+                          )}
+                          <textarea value={step.content || ''}
+                            onChange={e => setEditSteps(prev => prev.map((s, j) => j === i ? { ...s, content: e.target.value } : s))}
+                            rows={4} style={{ ...inputStyle, resize: 'vertical', lineHeight: '1.6', minHeight: '72px' }} />
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Content */}
-            {(selected.content || editing) && (
+            {((selected.content && !editing) || (editing && !isSeq(selected))) && (
               <div style={{ marginBottom: '14px' }}>
                 <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>
                   Content{editing && <span style={{ color: '#c9a84c', marginLeft: '6px' }}>· editing</span>}
@@ -332,12 +367,12 @@ export default function Approvals() {
                   ✓ {editing ? 'Save & Approve' : 'Approve & Execute'}
                 </button>
                 {editing ? (
-                  <button onClick={() => { setEditing(false); setEditContent(''); }}
+                  <button onClick={() => { setEditing(false); setEditContent(''); setEditSteps([]); }}
                     style={{ background: 'white', border: '1px solid #e4e9f0', color: '#64748b', borderRadius: '8px', padding: '10px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
                     Cancel Edit
                   </button>
                 ) : (
-                  <button onClick={() => { setEditing(true); setEditContent(selected.content || ''); }}
+                  <button onClick={() => { setEditing(true); setEditContent(selected.content || ''); setEditSteps(isSeq(selected) ? (selected.metadata?.steps || []).map(s => ({ ...s })) : []); }}
                     style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#b45309', borderRadius: '8px', padding: '10px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
                     ✎ Edit
                   </button>
