@@ -49,6 +49,19 @@ module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToke
     }
   });
 
+  router.get('/case-studies', async (req, res) => {
+    try {
+      const { client_id } = req.query;
+      let query = supabase.from('case_studies').select('*, clients(name)').order('created_at', { ascending: false });
+      if (client_id) query = query.eq('client_id', client_id);
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json({ case_studies: data || [] });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ─── REFERRALS ───────────────────────────────────────────
   router.post('/referrals/create', async (req, res) => {
     try {

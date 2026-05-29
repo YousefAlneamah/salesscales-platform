@@ -290,7 +290,15 @@ export default function ClientDashboard({ user, onLogout }) {
   );
 
   // ─── RESULTS ──────────────────────────────────────────
-  const ClientResults = () => (
+  const ClientResults = () => {
+    const emailMsgs = messages.filter(m => (m.channel === 'Email' || m.channel === 'email') && m.direction === 'outbound');
+    const emailSent = emailMsgs.length;
+    const emailOpened = emailMsgs.filter(m => m.opened_at).length;
+    const emailClicked = emailMsgs.filter(m => m.clicked_at).length;
+    const openRate = emailSent ? Math.round((emailOpened / emailSent) * 100) : 0;
+    const clickRate = emailSent ? Math.round((emailClicked / emailSent) * 100) : 0;
+
+    return (
     <div>
       <div style={{ marginBottom: '24px' }}>
         <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Performance</div>
@@ -310,6 +318,25 @@ export default function ClientDashboard({ user, onLogout }) {
             <div style={{ fontSize: '11px', color: stat.color, fontWeight: 500 }}>{stat.sub}</div>
           </div>
         ))}
+      </div>
+
+      {/* EMAIL PERFORMANCE */}
+      <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)', marginBottom: '20px' }}>
+        <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '16px' }}>Email Performance</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
+          {[
+            { label: 'Emails Sent', value: emailSent, color: '#0a1628' },
+            { label: 'Opened', value: emailOpened, color: '#3b82f6' },
+            { label: 'Open Rate', value: `${openRate}%`, color: '#3b82f6' },
+            { label: 'Clicked', value: emailClicked, color: '#c9a84c' },
+            { label: 'Click Rate', value: `${clickRate}%`, color: '#10b981' },
+          ].map(s => (
+            <div key={s.label} style={{ background: '#f8fafc', borderRadius: '10px', padding: '16px', textAlign: 'center', border: '1px solid #f0f3f8' }}>
+              <div style={{ fontSize: '24px', fontWeight: 700, color: s.color, marginBottom: '4px' }}>{s.value}</div>
+              <div style={{ fontSize: '10px', color: '#8896a8', fontWeight: 600 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
@@ -340,7 +367,8 @@ export default function ClientDashboard({ user, onLogout }) {
         )}
       </div>
     </div>
-  );
+    );
+  };
 
   // ─── SEQUENCES ────────────────────────────────────────
   const ClientSequences = () => (

@@ -6,6 +6,7 @@ export default function Clients() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [selectedClient, setSelectedClient] = useState(null);
+  const [healthScores, setHealthScores] = useState({});
   const [form, setForm] = useState({
     name: "", email: "", niche: "", tier: "starter", status: "onboarding"
   });
@@ -44,8 +45,50 @@ export default function Clients() {
       .from("clients")
       .select("*")
       .order("created_at", { ascending: false });
-    if (!error && data) setClients(data);
+    if (!error && data) {
+      setClients(data);
+      computeHealthScores(data);
+    }
     setLoading(false);
+  };
+
+  // Health score out of 100: enrollments this week (30) + messages this month (30)
+  // + active sequences (20) + recent contact activity within 7 days (20).
+  const computeHealthScores = async (clientList) => {
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 86400000).toISOString();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const [enrollRes, msgRes, wfRes, actRes] = await Promise.all([
+      supabase.from("workflow_enrollments").select("client_id").gte("enrolled_at", weekAgo),
+      supabase.from("messages").select("client_id").eq("direction", "outbound").gte("created_at", monthStart),
+      supabase.from("workflows").select("client_id, status"),
+      supabase.from("contacts").select("client_id, last_activity").gte("last_activity", weekAgo),
+    ]);
+    const tally = (rows) => {
+      const m = {};
+      (rows || []).forEach(r => { if (r.client_id != null) m[r.client_id] = (m[r.client_id] || 0) + 1; });
+      return m;
+    };
+    const enrollWeek = tally(enrollRes.data);
+    const msgMonth = tally(msgRes.data);
+    const activeSeq = tally((wfRes.data || []).filter(w => w.status === "active"));
+    const recentAct = tally(actRes.data);
+    const scores = {};
+    for (const c of clientList) {
+      let score = 0;
+      score += Math.min(30, (enrollWeek[c.id] || 0) * 10);
+      score += Math.min(30, (msgMonth[c.id] || 0) * 3);
+      score += Math.min(20, (activeSeq[c.id] || 0) * 10);
+      score += (recentAct[c.id] || 0) > 0 ? 20 : 0;
+      scores[c.id] = Math.min(100, score);
+    }
+    setHealthScores(scores);
+  };
+
+  const healthColor = (s) => {
+    if (s >= 80) return { bg: "#ecfdf5", color: "#059669", border: "#a7f3d0" };
+    if (s >= 50) return { bg: "#fffbeb", color: "#d97706", border: "#fde68a" };
+    return { bg: "#fef2f2", color: "#dc2626", border: "#fecaca" };
   };
 
   const addClient = async () => {
@@ -233,11 +276,16 @@ export default function Clients() {
                     {client.tier?.charAt(0).toUpperCase() + client.tier?.slice(1)}
                   </span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{ flex: 1, height: '3px', background: '#f0f3f8', borderRadius: '2px', maxWidth: '60px' }}>
-                    <div style={{ height: '100%', borderRadius: '2px', background: '#c9a84c', width: `${client.health_score || 0}%` }}></div>
-                  </div>
-                  <span style={{ fontSize: '10px', color: '#8896a8' }}>{client.health_score}/100</span>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  {(() => {
+                    const s = healthScores[client.id] ?? client.health_score ?? 0;
+                    const hc = healthColor(s);
+                    return (
+                      <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: hc.bg, color: hc.color, border: `1px solid ${hc.border}` }}>
+                        {s}/100
+                      </span>
+                    );
+                  })()}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center' }}>
                   <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: sc.bg, color: sc.color, border: `1px solid ${sc.border}` }}>

@@ -865,6 +865,73 @@ const storeBriefing = async (from_member, to_member, subject, content, priority 
   }
 };
 
+// ─── HELPER: REFUND / RETURN AUTO-HANDLING ───────────────
+const handleRefundRequest = async (channel, contact, fromNumber, body) => {
+  if (!/refund|return|money back/i.test(body || '')) return;
+  const name = `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || 'Customer';
+  await storeBriefing('fatima', 'yousef',
+    `Refund/Return request from ${name}`,
+    `A customer has requested a refund or return and needs a follow-up.\n\nCustomer: ${name}\nPhone: ${fromNumber}\nChannel: ${channel}\n\nMessage:\n${body}\n\nReply via the Inbox — promised follow-up window is 24 hours.`,
+    'urgent', contact.client_id
+  ).catch(e => console.error('Refund briefing failed:', e.message));
+  try {
+    const { tc, from } = await getClientTwilio(contact.client_id);
+    const replyText = `Hi ${contact.first_name || 'there'}, we've received your request and a member of our team will follow up within 24 hours. Thank you for your patience.`;
+    await tc.messages.create({
+      from: channel === 'WhatsApp' ? 'whatsapp:' + from : from,
+      to: channel === 'WhatsApp' ? 'whatsapp:' + fromNumber : fromNumber,
+      body: replyText,
+    });
+    await supabase.from('messages').insert([{
+      client_id: contact.client_id, contact_id: contact.id,
+      channel, direction: 'outbound',
+      sender_name: 'Sales Scales', content: replyText, status: 'sent',
+    }]);
+    console.log(`Refund auto-reply sent to ${name} via ${channel}`);
+  } catch (e) {
+    console.error('Refund auto-reply failed:', e.message);
+  }
+};
+
+// ─── AUTO: CASE STUDY CAPTURE (daily 10am) ───────────────
+const AOV_MAP = { 'Under $30': 25, '$30–$75': 52, '$75–$150': 112, '$150–$300': 225, 'Over $300': 350 };
+cron.schedule('0 10 * * *', async () => {
+  console.log('[AUTO] Case study capture scan starting...');
+  try {
+    const { data: clients } = await supabase.from('clients').select('id, name, niche');
+    if (!clients) return;
+    for (const c of clients) {
+      const { count: existing } = await supabase.from('case_studies')
+        .select('id', { count: 'exact', head: true }).eq('client_id', c.id);
+      if (existing && existing > 0) continue;
+      const { data: enrollments } = await supabase.from('workflow_enrollments')
+        .select('id').eq('client_id', c.id).eq('status', 'completed');
+      const completed = enrollments?.length || 0;
+      if (completed <= 10) continue;
+      const { data: onboarding } = await supabase.from('client_onboarding')
+        .select('average_order_value').eq('client_id', c.id).maybeSingle();
+      const aov = AOV_MAP[onboarding?.average_order_value] || 75;
+      const revenue = completed * aov;
+      if (revenue <= 1000) continue;
+      const results = `${completed} completed automated sequences and an estimated $${revenue.toLocaleString()} in recovered revenue in the ${c.niche || 'ecommerce'} space.`;
+      const context = await ragSearch(`${c.name} results ${results}`, c.id).catch(() => '');
+      const content = await aiCall(
+        `You are Hussain, Intelligence & Strategy AI at Sales Scales. You write compelling, data-driven case studies that showcase client wins. Never break character or mention Claude.`,
+        `Write a concise case study for ${c.name} (${c.niche || 'ecommerce'}).\nResults: ${results}\n\nSections:\n1. Executive Summary (lead with the biggest result)\n2. The Challenge\n3. Our Strategy\n4. The Results\n5. Key Takeaways (3 bullets)`,
+        context
+      );
+      await supabase.from('case_studies').insert([{
+        client_id: c.id,
+        title: `${c.name} — ${completed} Sequences, $${revenue.toLocaleString()} Recovered`,
+        results, timeline: null, content, status: 'draft',
+      }]);
+      console.log(`[AUTO] Case study generated for ${c.name}`);
+    }
+  } catch (e) {
+    console.error('[AUTO] Case study capture error:', e.message);
+  }
+});
+
 // ─── AUTO SCHEDULER: HUSSAIN — WEEKLY INTELLIGENCE ───────
 // Every Monday at 9am
 cron.schedule('0 9 * * 1', async () => {
@@ -1616,6 +1683,7 @@ app.post('/sms/inbound', async (req, res) => {
           'urgent', contact.client_id
         ).catch(e => console.error('Unhandled SMS briefing failed:', e.message));
       }
+      await handleRefundRequest('SMS', contact, From, Body);
     } else {
       await supabase.from('messages').insert([{
         channel: 'SMS', direction: 'inbound',
@@ -1663,6 +1731,7 @@ app.post('/whatsapp/inbound', async (req, res) => {
           'urgent', contact.client_id
         ).catch(e => console.error('Unhandled WhatsApp briefing failed:', e.message));
       }
+      await handleRefundRequest('WhatsApp', contact, phone, Body);
     } else {
       await supabase.from('messages').insert([{
         channel: 'WhatsApp', direction: 'inbound',
@@ -3004,8 +3073,39 @@ app.post('/contacts', async (req, res) => {
   }
 });
 
+// ─── ONBOARDING COMPLETION NOTIFICATION ───────────────────
+app.post('/onboarding/complete', async (req, res) => {
+  const { client_id, client_name, shopify_connected } = req.body;
+  try {
+    const name = client_name || 'A client';
+    await sgMail.send({
+      to: 'yousef@salesscales.com',
+      from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+      subject: `Client Fully Onboarded — ${name}`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;">
+        <div style="background:#0a1628;padding:20px 24px;border-radius:8px 8px 0 0;border-left:4px solid #c9a84c;">
+          <div style="color:#c9a84c;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Onboarding Complete — Sales Scales</div>
+          <div style="color:white;font-size:16px;font-weight:600;">${name} is ready to go live</div>
+        </div>
+        <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 8px 8px;padding:20px 24px;">
+          <p style="color:#4a5568;font-size:13px;margin:0 0 12px;">${name} has completed all onboarding steps and is ready for the AI team to begin work.</p>
+          <div style="background:#f8fafc;border-radius:6px;padding:14px;font-size:12px;color:#0a1628;line-height:1.7;">
+            <strong>Shopify connection:</strong> ${shopify_connected ? '✅ Connected' : '⚠️ Not connected (skipped)'}
+          </div>
+          <p style="color:#8896a8;font-size:11px;margin:14px 0 0;">Log in to Sales Scales to review their profile and activate their sequences.</p>
+        </div>
+      </div>`,
+    });
+    console.log('Onboarding completion email sent for client:', client_id);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('Onboarding notification failed:', e.message);
+    res.status(500).json({ error: 'Failed to send notification' });
+  }
+});
+
 // ─── ROUTE MODULES ────────────────────────────────────────
-app.use('/auth',    require('./routes/auth')({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken }));
+app.use('/auth',    require('./routes/auth')({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }));
 app.use('/',        require('./routes/ai-team')({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, getClientProfile, verifyToken, aiLimiter }));
 app.use('/shopify', require('./routes/shopify')({ supabase, axios, crypto, processWebhookEvent, aiCall }));
 app.use('/',        require('./routes/knowledge')({ supabase, axios, importLimiter, upload, PDF2Json, YoutubeTranscript }));

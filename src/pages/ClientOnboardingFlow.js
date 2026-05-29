@@ -157,6 +157,16 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
         completed_at: new Date().toISOString(),
       }], { onConflict: 'client_id' });
       if (err) throw err;
+      // Notify owner that the client is fully onboarded — non-blocking
+      fetch('http://localhost:3001/onboarding/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: user.clientId,
+          client_name: user.clientName,
+          shopify_connected: connectClicked,
+        }),
+      }).catch(() => {});
       setDone(true);
       setTimeout(() => onComplete(), 2800);
     } catch (e) {
