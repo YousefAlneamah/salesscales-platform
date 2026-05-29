@@ -2273,6 +2273,102 @@ app.post('/voice-agent/outbound-call', async (req, res) => {
   }
 });
 
+// ElevenLabs webhook — fires when a call ends. Fetches transcript, summarizes, logs.
+app.post('/calls/log', async (req, res) => {
+  try {
+    // ElevenLabs may wrap the payload as { type, data: {...} }
+    const body = req.body?.data || req.body || {};
+    const conversationId = body.conversation_id || body.conversationId || req.body?.conversation_id;
+    const direction = (body.direction || body.call_direction || req.body?.direction || 'outbound').toLowerCase();
+    let contactPhone = body.contact_phone || body.to_number || body.from_number || body.phone || req.body?.contact_phone || null;
+    let clientId = body.client_id || req.body?.client_id || null;
+
+    if (!conversationId) {
+      return res.status(400).json({ error: 'Missing conversation_id' });
+    }
+
+    // Fetch the full conversation (transcript turns + metadata) from ElevenLabs
+    let transcript = '';
+    let durationSeconds = body.duration_seconds || null;
+    try {
+      const convo = await axios.get(
+        `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
+        { headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY } }
+      );
+      const data = convo.data || {};
+      durationSeconds = data.metadata?.call_duration_secs ?? durationSeconds;
+      const turns = data.transcript || [];
+      transcript = turns
+        .map(t => {
+          const speaker = t.role === 'agent' ? 'Agent' : 'Caller';
+          const text = t.message || t.text || '';
+          return text ? `${speaker}: ${text}` : '';
+        })
+        .filter(Boolean)
+        .join('\n');
+      if (!contactPhone) {
+        contactPhone = data.metadata?.phone_call?.external_number || data.metadata?.to_number || contactPhone;
+      }
+    } catch (fetchErr) {
+      console.error('ElevenLabs transcript fetch error:', fetchErr.response?.data || fetchErr.message);
+    }
+
+    // Generate a 2-sentence summary
+    let summary = '';
+    if (transcript) {
+      try {
+        summary = await aiCall(
+          'You summarize sales call transcripts. Respond with exactly 2 sentences capturing what was discussed and the outcome. No preamble.',
+          `Summarize this call transcript:\n\n${transcript}`
+        );
+        summary = (summary || '').trim();
+      } catch (sumErr) {
+        console.error('Call summary error:', sumErr.message);
+      }
+    }
+
+    const { data: inserted, error } = await supabase
+      .from('call_logs')
+      .insert({
+        client_id: clientId,
+        contact_phone: contactPhone,
+        direction: direction === 'inbound' ? 'inbound' : 'outbound',
+        duration_seconds: durationSeconds,
+        transcript: transcript || null,
+        summary: summary || null
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('call_logs insert error:', error.message);
+      return res.status(500).json({ error: 'Failed to log call', details: error.message });
+    }
+
+    console.log('Call logged:', inserted.id, direction, contactPhone);
+    res.json({ success: true, call: inserted });
+  } catch (e) {
+    console.error('Call log error:', e.response?.data || e.message);
+    res.status(500).json({ error: 'Failed to log call', details: e.message });
+  }
+});
+
+// List all call logs (main platform). Optional ?client_id= filter.
+app.get('/calls/list', async (req, res) => {
+  try {
+    let query = supabase
+      .from('call_logs')
+      .select('*, clients(name)')
+      .order('created_at', { ascending: false });
+    if (req.query.client_id) query = query.eq('client_id', req.query.client_id);
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ calls: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── SOCIAL MEDIA AUTOMATION ─────────────────────────────
 let socialConfig = {
   verifyToken: process.env.META_VERIFY_TOKEN || 'salesscales_meta_verify',

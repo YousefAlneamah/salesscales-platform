@@ -39,6 +39,7 @@ import Marketplace from "./pages/Marketplace";
 import WhiteLabel from "./pages/WhiteLabel";
 import Settings from "./pages/Settings";
 import Referrals from "./pages/Referrals";
+import Calls from "./pages/Calls";
 import ClientDashboard from "./pages/ClientDashboard";
 import ClientOnboardingFlow from "./pages/ClientOnboardingFlow";
 import ClientSignup from "./pages/ClientSignup";
@@ -83,6 +84,7 @@ const navItems = [
     { id: "higgsfield", label: "Higgsfield", icon: "ti-video" },
     { id: "social", label: "Social Media", icon: "ti-social" },
     { id: "voice", label: "Voice Agents", icon: "ti-microphone" },
+    { id: "calls", label: "Calls", icon: "ti-phone-call" },
     { id: "hubspot", label: "HubSpot", icon: "ti-brand-hubspot" },
     { id: "integrations", label: "All Integrations", icon: "ti-plug" },
   ]},
@@ -138,6 +140,7 @@ const pageTitles = {
   billing: "Billing",
   social: "Social Media",
   voice: "Voice Agents",
+  calls: "Call Logs",
   hubspot: "HubSpot CRM Sync",
   integrations: "All Integrations",
   mypipeline: "My Pipeline",
@@ -236,6 +239,7 @@ function App() {
       case "higgsfield": return <HiggsField />;
       case "social": return <SocialMedia />;
       case "voice": return <VoiceAgents />;
+      case "calls": return <Calls />;
       case "hubspot": return <HubSpot />;
       case "integrations": return <Integrations />;
       case "mypipeline": return <MyPipeline />;

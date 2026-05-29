@@ -117,6 +117,7 @@ export default function ClientDashboard({ user, onLogout }) {
     { id: 'approvals', label: 'My Approvals', icon: '✓' },
     { id: 'messages', label: 'Messages', icon: '💬' },
     { id: 'contacts', label: 'Contacts', icon: '👥' },
+    { id: 'calls', label: 'My Calls', icon: '📞' },
     { id: 'reports', label: 'My Reports', icon: '📄' },
     { id: 'invoices', label: 'My Invoices', icon: '🧾' },
     { id: 'zainab', label: 'Zainab AI', icon: '🤖' },
@@ -131,6 +132,7 @@ export default function ClientDashboard({ user, onLogout }) {
     approvals: 'My Approvals',
     messages: 'Messages',
     contacts: 'My Contacts',
+    calls: 'My Calls',
     reports: 'My Reports',
     invoices: 'My Invoices',
     zainab: 'Zainab — AI Partner',
@@ -146,6 +148,7 @@ export default function ClientDashboard({ user, onLogout }) {
       case 'approvals': return <ClientApprovals />;
       case 'messages': return <ClientMessages />;
       case 'contacts': return <ClientContacts />;
+      case 'calls': return <ClientCalls />;
       case 'reports': return <ClientReports />;
       case 'invoices': return <ClientInvoices />;
       case 'zainab': return <ClientZainab />;
@@ -667,6 +670,77 @@ export default function ClientDashboard({ user, onLogout }) {
             ) : (
               <div style={{ color: '#8896a8', fontSize: '13px', padding: '40px', textAlign: 'center' }}>Select an item to review.</div>
             )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ─── MY CALLS ────────────────────────────────────────
+  const ClientCalls = () => {
+    const [calls, setCalls] = useState([]);
+    const [loadingC, setLoadingC] = useState(true);
+
+    const fmtDur = (s) => {
+      if (!s && s !== 0) return '—';
+      return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    };
+
+    useEffect(() => {
+      (async () => {
+        try {
+          const { data } = await axios.get(`http://localhost:3001/calls/list?client_id=${user.clientId}`);
+          setCalls(data.calls || []);
+        } catch (e) {
+          console.error('Load calls error:', e);
+        }
+        setLoadingC(false);
+      })();
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    return (
+      <div>
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Voice Calls</div>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Calls</div>
+          <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>Recordings and transcripts of your AI-handled calls</div>
+        </div>
+
+        {loadingC ? (
+          <div style={{ color: '#8896a8', fontSize: '13px', padding: '40px 0', textAlign: 'center' }}>Loading calls...</div>
+        ) : calls.length === 0 ? (
+          <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '48px 24px', textAlign: 'center', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>📞</div>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: '#0a1628', marginBottom: '6px' }}>No calls yet</div>
+            <div style={{ fontSize: '12px', color: '#8896a8' }}>Your call recordings and transcripts will appear here.</div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {calls.map(c => (
+              <div key={c.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+                <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f0f3f8' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 700, letterSpacing: '0.5px', background: c.direction === 'inbound' ? '#eff6ff' : '#fef9ec', color: c.direction === 'inbound' ? '#3b82f6' : '#c9a84c', border: `1px solid ${c.direction === 'inbound' ? '#bfdbfe' : '#f0e0b0'}` }}>
+                      {c.direction === 'inbound' ? '↓ INBOUND' : '↑ OUTBOUND'}
+                    </span>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628' }}>{c.contact_phone || 'Unknown'}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                    <div style={{ fontSize: '11px', color: '#8896a8' }}>{fmtDur(c.duration_seconds)}</div>
+                    <div style={{ fontSize: '11px', color: '#8896a8' }}>{formatDate(c.created_at)}</div>
+                  </div>
+                </div>
+                <div style={{ padding: '16px 20px' }}>
+                  {c.summary && (
+                    <div style={{ fontSize: '13px', color: '#0a1628', lineHeight: 1.7, marginBottom: '14px', fontWeight: 500 }}>{c.summary}</div>
+                  )}
+                  <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>Transcript</div>
+                  <div style={{ fontSize: '12px', color: '#4a5568', lineHeight: 1.8, whiteSpace: 'pre-wrap', background: '#f8fafc', borderRadius: '8px', padding: '14px 16px', maxHeight: '320px', overflowY: 'auto' }}>
+                    {c.transcript || 'No transcript available for this call.'}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
