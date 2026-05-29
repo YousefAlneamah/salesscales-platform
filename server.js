@@ -386,6 +386,39 @@ const getClientProfile = async (clientId) => {
   }
 };
 
+// ─── HELPER: KLAVIYO PERFORMANCE CONTEXT ─────────────────
+const getKlaviyoContext = async (clientId) => {
+  if (!clientId) return '';
+  try {
+    const { data: client } = await supabase.from('clients').select('klaviyo_api_key').eq('id', clientId).maybeSingle();
+    const apiKey = client?.klaviyo_api_key;
+    if (!apiKey) return '';
+    const headers = { Authorization: `Klaviyo-API-Key ${apiKey}`, revision: '2024-10-15', 'Content-Type': 'application/json' };
+    const reportRes = await axios.post('https://a.klaviyo.com/api/campaign-values-reports/', {
+      data: {
+        type: 'campaign-values-report',
+        attributes: {
+          timeframe: { key: 'last_30_days' },
+          conversion_metric_id: null,
+          statistics: ['open_rate', 'click_rate', 'revenue', 'unsubscribe_rate'],
+        },
+      },
+    }, { headers });
+    const stats = reportRes.data?.data?.attributes?.results?.[0]?.statistics || {};
+    const pct = (v) => v != null ? `${Math.round(v * 100 * 10) / 10}%` : 'n/a';
+    return [
+      `Live Klaviyo email performance (last 30 days) — reference this real data when writing email content:`,
+      `  Open rate: ${pct(stats.open_rate)}`,
+      `  Click rate: ${pct(stats.click_rate)}`,
+      `  Unsubscribe rate: ${pct(stats.unsubscribe_rate)}`,
+      `  Revenue attributed: ${stats.revenue != null ? '$' + Number(stats.revenue).toFixed(2) : 'n/a'}`,
+    ].join('\n');
+  } catch (e) {
+    console.log('Klaviyo context skipped:', e.message);
+    return '';
+  }
+};
+
 // ─── HELPER: ASSESS INBOUND MESSAGE CONFIDENCE ───────────
 const assessInboundConfidence = async (channel, content, clientName) => {
   try {
@@ -3164,7 +3197,7 @@ app.post('/onboarding/complete', async (req, res) => {
 
 // ─── ROUTE MODULES ────────────────────────────────────────
 app.use('/auth',    require('./routes/auth')({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }));
-app.use('/',        require('./routes/ai-team')({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, getClientProfile, verifyToken, aiLimiter }));
+app.use('/',        require('./routes/ai-team')({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, getClientProfile, getKlaviyoContext, verifyToken, aiLimiter }));
 app.use('/shopify', require('./routes/shopify')({ supabase, axios, crypto, processWebhookEvent, aiCall }));
 app.use('/',        require('./routes/knowledge')({ supabase, axios, importLimiter, upload, PDF2Json, YoutubeTranscript }));
 app.use('/',        require('./routes/analytics')({ supabase }));

@@ -1,6 +1,6 @@
 const express = require('express');
 
-module.exports = ({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, getClientProfile, verifyToken, aiLimiter }) => {
+module.exports = ({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, getClientProfile, getKlaviyoContext, verifyToken, aiLimiter }) => {
   const router = express.Router();
 
   router.post('/hussain', aiLimiter, verifyToken, async (req, res) => {
@@ -64,13 +64,14 @@ module.exports = ({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, g
     const { prompt, clientId } = req.body;
     if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
     try {
-      const [ragContext, briefingsCtx, shopifyCtx, profileCtx] = await Promise.all([
+      const [ragContext, briefingsCtx, shopifyCtx, profileCtx, klaviyoCtx] = await Promise.all([
         ragSearch(prompt, clientId),
         getBriefingsContext('mahdi'),
         getShopifyContext(clientId),
         getClientProfile(clientId),
+        getKlaviyoContext(clientId),
       ]);
-      const context = [ragContext, briefingsCtx, shopifyCtx, profileCtx].filter(Boolean).join('\n\n');
+      const context = [ragContext, briefingsCtx, shopifyCtx, profileCtx, klaviyoCtx].filter(Boolean).join('\n\n');
       const result = await aiCall(`You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world class copywriter and email marketer. You write email sequences, SMS campaigns, and ad copy that converts — all in the exact brand voice of each client. You are Mahdi — never identify as anyone else or mention Claude.`, prompt, context);
       res.json({ result });
     } catch (e) {

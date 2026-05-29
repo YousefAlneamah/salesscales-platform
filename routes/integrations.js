@@ -103,6 +103,55 @@ module.exports = ({ supabase, axios, aiCall, ragSearch, getBriefingsContext, ver
     }
   });
 
+  // GET /klaviyo/performance — 30-day campaign metrics for a client (used as MCP context)
+  router.get('/klaviyo/performance', async (req, res) => {
+    const { client_id } = req.query;
+    if (!client_id) return res.status(400).json({ error: 'client_id required' });
+    try {
+      const { data: client } = await supabase.from('clients').select('klaviyo_api_key').eq('id', client_id).maybeSingle();
+      const apiKey = client?.klaviyo_api_key;
+      if (!apiKey) return res.status(400).json({ error: 'Klaviyo API key not configured for this client' });
+
+      const headers = {
+        Authorization: `Klaviyo-API-Key ${apiKey}`,
+        revision: '2024-10-15',
+        'Content-Type': 'application/json',
+      };
+      const reportRes = await axios.post('https://a.klaviyo.com/api/campaign-values-reports/', {
+        data: {
+          type: 'campaign-values-report',
+          attributes: {
+            timeframe: { key: 'last_30_days' },
+            conversion_metric_id: null,
+            statistics: ['open_rate', 'click_rate', 'revenue', 'unsubscribe_rate'],
+          },
+        },
+      }, { headers }).catch(e => ({ error: e }));
+
+      if (reportRes.error) {
+        const status = reportRes.error.response?.status;
+        if (status === 401 || status === 403) return res.status(401).json({ error: 'Invalid Klaviyo API key' });
+        throw reportRes.error;
+      }
+
+      const stats = reportRes.data?.data?.attributes?.results?.[0]?.statistics || {};
+      const pct = (v) => v != null ? Math.round(v * 100 * 10) / 10 : null;
+      res.json({
+        ok: true,
+        openRate: pct(stats.open_rate),
+        clickRate: pct(stats.click_rate),
+        unsubscribeRate: pct(stats.unsubscribe_rate),
+        revenue: stats.revenue != null ? stats.revenue : null,
+        timeframe: 'last_30_days',
+      });
+    } catch (e) {
+      const status = e.response?.status;
+      if (status === 401 || status === 403) return res.status(401).json({ error: 'Invalid Klaviyo API key' });
+      console.error('Klaviyo performance error:', e.message);
+      res.status(500).json({ error: 'Failed to fetch Klaviyo performance', details: e.message });
+    }
+  });
+
   // ─── META ────────────────────────────────────────────────
   router.post('/meta/ad-stats', async (req, res) => {
     const { client_id } = req.body;
@@ -172,6 +221,135 @@ module.exports = ({ supabase, axios, aiCall, ragSearch, getBriefingsContext, ver
     }
   });
 
+  // GET /meta/performance — 30-day ad performance for a client
+  router.get('/meta/performance', async (req, res) => {
+    const { client_id } = req.query;
+    if (!client_id) return res.status(400).json({ error: 'client_id required' });
+    try {
+      const { data: client } = await supabase.from('clients')
+        .select('meta_access_token, meta_ad_account_id')
+        .eq('id', client_id).maybeSingle();
+      if (!client?.meta_access_token) return res.status(400).json({ error: 'Meta access token not configured for this client' });
+      if (!client?.meta_ad_account_id) return res.status(400).json({ error: 'Meta ad account ID not configured for this client' });
+
+      const token = client.meta_access_token;
+      const accountId = client.meta_ad_account_id.startsWith('act_') ? client.meta_ad_account_id : `act_${client.meta_ad_account_id}`;
+      const base = 'https://graph.facebook.com/v21.0';
+
+      const insightsRes = await axios.get(`${base}/${accountId}/insights`, {
+        params: { access_token: token, fields: 'spend,impressions,clicks,ctr,cpc,cpm,purchase_roas,actions', date_preset: 'last_30_days', level: 'account' },
+      }).catch(e => ({ error: e }));
+
+      if (insightsRes.error) {
+        const status = insightsRes.error.response?.status;
+        const errCode = insightsRes.error.response?.data?.error?.code;
+        if (status === 401 || status === 403 || errCode === 190 || errCode === 102) {
+          return res.status(401).json({ error: 'Invalid Meta access token' });
+        }
+        throw insightsRes.error;
+      }
+
+      const d = insightsRes.data?.data?.[0] || {};
+      const roasArr = d.purchase_roas || [];
+      const actions = d.actions || [];
+      const results = actions
+        .filter(a => /purchase|lead|complete_registration/i.test(a.action_type))
+        .reduce((sum, a) => sum + parseInt(a.value || 0, 10), 0);
+
+      res.json({
+        ok: true,
+        spend: parseFloat(d.spend || 0),
+        impressions: parseInt(d.impressions || 0, 10),
+        clicks: parseInt(d.clicks || 0, 10),
+        ctr: parseFloat(d.ctr || 0),
+        cpc: parseFloat(d.cpc || 0),
+        cpm: parseFloat(d.cpm || 0),
+        roas: roasArr.length > 0 ? parseFloat(roasArr[0]?.value || 0) : null,
+        results,
+        timeframe: 'last_30_days',
+      });
+    } catch (e) {
+      const status = e.response?.status;
+      const errCode = e.response?.data?.error?.code;
+      if (status === 401 || status === 403 || errCode === 190 || errCode === 102) {
+        return res.status(401).json({ error: 'Invalid Meta access token' });
+      }
+      console.error('Meta performance error:', e.message);
+      res.status(500).json({ error: 'Failed to fetch Meta performance', details: e.message });
+    }
+  });
+
+  // GET /meta/posts — last 20 Facebook + Instagram posts for a client page
+  router.get('/meta/posts', async (req, res) => {
+    const { client_id } = req.query;
+    if (!client_id) return res.status(400).json({ error: 'client_id required' });
+    try {
+      const { data: client } = await supabase.from('clients')
+        .select('meta_access_token, meta_page_id, meta_ig_user_id')
+        .eq('id', client_id).maybeSingle();
+      if (!client?.meta_access_token) return res.status(400).json({ error: 'Meta access token not configured for this client' });
+
+      const token = client.meta_access_token;
+      const base = 'https://graph.facebook.com/v21.0';
+
+      const calls = [];
+      if (client.meta_page_id) {
+        calls.push(axios.get(`${base}/${client.meta_page_id}/posts`, {
+          params: { access_token: token, fields: 'message,created_time,permalink_url,shares,reactions.summary(true),comments.summary(true),insights.metric(post_impressions)', limit: 20 },
+        }).then(r => ({ type: 'facebook', data: r.data })).catch(e => ({ type: 'facebook', error: e })));
+      }
+      if (client.meta_ig_user_id) {
+        calls.push(axios.get(`${base}/${client.meta_ig_user_id}/media`, {
+          params: { access_token: token, fields: 'caption,media_type,permalink,timestamp,like_count,comments_count,insights.metric(reach)', limit: 20 },
+        }).then(r => ({ type: 'instagram', data: r.data })).catch(e => ({ type: 'instagram', error: e })));
+      }
+
+      if (calls.length === 0) return res.status(400).json({ error: 'No Facebook page ID or Instagram user ID configured for this client' });
+
+      const settled = await Promise.all(calls);
+      const posts = [];
+      for (const s of settled) {
+        if (s.error) {
+          const errCode = s.error.response?.data?.error?.code;
+          if (errCode === 190 || errCode === 102) return res.status(401).json({ error: 'Invalid Meta access token' });
+          continue;
+        }
+        if (s.type === 'facebook') {
+          (s.data?.data || []).forEach(p => posts.push({
+            platform: 'facebook',
+            content: p.message || '',
+            created_time: p.created_time,
+            permalink: p.permalink_url || '',
+            post_type: 'post',
+            reactions: p.reactions?.summary?.total_count || 0,
+            comments: p.comments?.summary?.total_count || 0,
+            shares: p.shares?.count || 0,
+            reach: p.insights?.data?.find(i => i.name === 'post_impressions')?.values?.[0]?.value || 0,
+          }));
+        } else {
+          (s.data?.data || []).forEach(p => posts.push({
+            platform: 'instagram',
+            content: p.caption || '',
+            created_time: p.timestamp,
+            permalink: p.permalink || '',
+            post_type: (p.media_type || 'IMAGE').toLowerCase(),
+            reactions: p.like_count || 0,
+            comments: p.comments_count || 0,
+            shares: 0,
+            reach: p.insights?.data?.find(i => i.name === 'reach')?.values?.[0]?.value || 0,
+          }));
+        }
+      }
+      posts.sort((a, b) => new Date(b.created_time) - new Date(a.created_time));
+      res.json({ ok: true, posts: posts.slice(0, 20), total: posts.length });
+    } catch (e) {
+      const errCode = e.response?.data?.error?.code;
+      if (errCode === 190 || errCode === 102) return res.status(401).json({ error: 'Invalid Meta access token' });
+      console.error('Meta posts error:', e.message);
+      res.status(500).json({ error: 'Failed to fetch Meta posts', details: e.message });
+    }
+  });
+
   // ─── CANVA ───────────────────────────────────────────────
   router.post('/canva/create-design', async (req, res) => {
     const { client_id, design_type = 'social_post', brand_colors = [], prompt } = req.body;
@@ -208,9 +386,86 @@ module.exports = ({ supabase, axios, aiCall, ragSearch, getBriefingsContext, ver
     }
   });
 
+  // POST /canva/create-brief — campaign design brief using the client's brand colors
+  router.post('/canva/create-brief', async (req, res) => {
+    const { client_id, campaign_type = 'social_post', products } = req.body;
+    if (!client_id) return res.status(400).json({ error: 'client_id required' });
+    const designType = CANVA_URLS[campaign_type] ? campaign_type : 'social_post';
+    try {
+      const { data: client } = await supabase.from('clients')
+        .select('name, canva_brand_kit_id, brand_colors').eq('id', client_id).maybeSingle();
+      const clientName = client?.name || '';
+      const brandColors = Array.isArray(client?.brand_colors) ? client.brand_colors
+        : (client?.brand_colors ? String(client.brand_colors).split(',').map(s => s.trim()).filter(Boolean) : []);
+
+      const [ragContext, briefingsCtx] = await Promise.all([
+        ragSearch(`${campaign_type} campaign design for ${products || clientName}`, client_id),
+        getBriefingsContext('mahdi'),
+      ]);
+      const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+      const colorBlock = brandColors.length > 0 ? `Brand Colors: ${brandColors.join(', ')}` : 'Brand Colors: not specified';
+
+      const brief = await aiCall(
+        `You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world-class creative director and copywriter for ecommerce brands. You produce precise, production-ready Canva design briefs. You are Mahdi — never mention Claude.`,
+        `Create a detailed Canva design brief for a ${CANVA_LABELS[designType]} campaign.\n\nClient: ${clientName || 'Not specified'}\nCampaign Type: ${campaign_type}\nProducts to feature: ${products || 'not specified'}\n${colorBlock}\n\n${context ? `Brand & client context:\n${context}\n` : ''}Your brief must include:\n1. **Concept** — One sentence creative direction\n2. **Visual Layout** — Background, focal elements, placement\n3. **Color Usage** — How to apply each brand color and where\n4. **Typography** — Font style, size hierarchy, what text goes where\n5. **Copy** — Headlines, subheads, CTA — ready to paste into Canva\n6. **Imagery** — Photo or graphic style to use\n7. **Mood** — 3 adjectives\n\nBe specific and production-ready.`,
+        context
+      );
+
+      res.json({
+        ok: true,
+        brief,
+        canva_url: CANVA_URLS[designType],
+        campaign_type: designType,
+        design_label: CANVA_LABELS[designType],
+        brand_colors: brandColors,
+        canva_brand_kit_id: client?.canva_brand_kit_id || null,
+      });
+    } catch (e) {
+      console.error('Canva create-brief error:', e.message);
+      res.status(500).json({ error: 'Failed to create Canva brief', details: e.message });
+    }
+  });
+
   // ─── HIGGSFIELD ──────────────────────────────────────────
+  // Two modes on the same path: video-generation ({ product_name | script }) vs brief ({ video_type, prompt }).
   router.post('/higgsfield/create-video', async (req, res) => {
-    const { client_id, video_type = 'product_showcase', prompt } = req.body;
+    const { client_id, product_name, script, video_type = 'product_showcase', prompt } = req.body;
+
+    // Video-generation mode — requested when product_name or script is supplied.
+    if (product_name || script) {
+      try {
+        let clientName = '';
+        if (client_id) {
+          const { data: client } = await supabase.from('clients').select('name').eq('id', client_id).maybeSingle();
+          clientName = client?.name || '';
+        }
+        const [ragContext, briefingsCtx] = await Promise.all([
+          ragSearch(`video ad for ${product_name || clientName}`, client_id),
+          getBriefingsContext('mahdi'),
+        ]);
+        const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+
+        // No HIGGSFIELD_API_KEY available — generate a production-ready scene script and return the studio URL.
+        const generationScript = await aiCall(
+          `You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world-class AI video director who writes Higgsfield.ai generation prompts. You are Mahdi — never mention Claude.`,
+          `Write a complete Higgsfield.ai video ad generation script.\n\nClient: ${clientName || 'Not specified'}\nProduct: ${product_name || 'Not specified'}\n${script ? `Provided script / direction:\n${script}\n` : ''}\n${context ? `Brand & client context:\n${context}\n` : ''}Output 4–6 numbered scene prompts. Each scene: a single paste-ready Higgsfield generation prompt describing subject, camera motion, lighting, and mood, plus the on-screen text for that scene. End with a CTA frame.`,
+          context
+        );
+
+        return res.json({
+          ok: true,
+          mode: 'video',
+          script: generationScript,
+          video_url: 'https://higgsfield.ai/create',
+          product_name: product_name || null,
+        });
+      } catch (e) {
+        console.error('Higgsfield create-video (video mode) error:', e.message);
+        return res.status(500).json({ error: 'Failed to generate video', details: e.message });
+      }
+    }
+
+    // Brief mode (existing behavior).
     if (!prompt) return res.status(400).json({ error: 'prompt required' });
     if (!HIGGSFIELD_LABELS[video_type]) {
       return res.status(400).json({ error: `Invalid video_type. Use: ${Object.keys(HIGGSFIELD_LABELS).join(', ')}` });
@@ -401,6 +656,187 @@ module.exports = ({ supabase, axios, aiCall, ragSearch, getBriefingsContext, ver
     } catch (e) {
       console.error('Competitor analyze error:', e.message);
       res.status(500).json({ error: 'Analysis failed', details: e.message });
+    }
+  });
+
+  // POST /competitors/analyze — full competitive intelligence: Ad Library lookup, social presence,
+  // Hussain report, stored in competitor_analysis + submitted to approvals as competitor_report.
+  router.post('/competitors/analyze', async (req, res) => {
+    const { competitor_url, client_id } = req.body;
+    if (!competitor_url) return res.status(400).json({ error: 'competitor_url required' });
+    try {
+      // Derive a brand name / handle from the URL.
+      let brand = competitor_url;
+      try {
+        const host = new URL(competitor_url.startsWith('http') ? competitor_url : `https://${competitor_url}`).hostname;
+        brand = host.replace(/^www\./, '').split('.')[0];
+      } catch { brand = competitor_url.replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[/.]/)[0]; }
+      const handle = brand.replace(/[^a-z0-9_.]/gi, '').toLowerCase();
+
+      const adLibraryUrl = `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&q=${encodeURIComponent(brand)}&search_type=keyword_unordered`;
+      const socialPresence = {
+        instagram: `https://www.instagram.com/${handle}/`,
+        tiktok: `https://www.tiktok.com/@${handle}`,
+        twitter: `https://twitter.com/${handle}`,
+        facebook_ad_library: adLibraryUrl,
+      };
+
+      // Attempt live Facebook Ad Library API lookup using any client's Meta token (best effort).
+      let activeAds = [];
+      try {
+        let token = null;
+        if (client_id) {
+          const { data: c } = await supabase.from('clients').select('meta_access_token').eq('id', client_id).maybeSingle();
+          token = c?.meta_access_token || null;
+        }
+        if (!token) {
+          const { data: anyClient } = await supabase.from('clients').select('meta_access_token').not('meta_access_token', 'is', null).limit(1).maybeSingle();
+          token = anyClient?.meta_access_token || null;
+        }
+        if (token) {
+          const adRes = await axios.get('https://graph.facebook.com/v21.0/ads_archive', {
+            params: {
+              access_token: token,
+              search_terms: brand,
+              ad_reached_countries: "['US']",
+              ad_active_status: 'ACTIVE',
+              fields: 'ad_creative_bodies,ad_creative_link_titles,page_name,ad_delivery_start_time',
+              limit: 15,
+            },
+          }).catch(e => ({ error: e }));
+          if (!adRes.error) {
+            activeAds = (adRes.data?.data || []).map(a => ({
+              page_name: a.page_name || '',
+              body: (a.ad_creative_bodies || [])[0] || '',
+              title: (a.ad_creative_link_titles || [])[0] || '',
+              started: a.ad_delivery_start_time || null,
+            }));
+          }
+        }
+      } catch (adErr) { console.log('Ad Library lookup skipped:', adErr.message); }
+
+      const ragContext = await ragSearch('competitor analysis ecommerce positioning ad angles', client_id);
+      const adsBlock = activeAds.length > 0
+        ? `Live active ads found in the Facebook Ad Library (${activeAds.length}):\n` +
+          activeAds.map((a, i) => `${i + 1}. [${a.page_name}] ${a.title ? a.title + ' — ' : ''}${a.body}`.slice(0, 300)).join('\n')
+        : 'No live ads were retrieved from the Facebook Ad Library (no token or none active). Infer their likely ad strategy from the brand and category.';
+
+      const analysis = await aiCall(
+        `You are Hussain, Intelligence & Strategy AI for Sales Scales — a high-ticket ecommerce growth agency. You are a sharp, data-driven analyst with a founder mindset. You never break character or mention Claude.`,
+        `Produce a competitive intelligence report on this competitor.\n\nCompetitor: ${brand}\nURL: ${competitor_url}\nSocial presence to check:\n- Instagram: ${socialPresence.instagram}\n- TikTok: ${socialPresence.tiktok}\n- Twitter/X: ${socialPresence.twitter}\n- Facebook Ad Library: ${adLibraryUrl}\n\n${adsBlock}\n\nYour report must cover:\n1. **What They're Running** — Their active ad strategy, channels, and creative formats\n2. **Angles They Use** — The hooks, offers, and messaging angles in their marketing\n3. **Gaps & Weaknesses** — Where they are exposed or underperforming\n4. **3 Specific Recommendations** — Exact, actionable moves Sales Scales should make to outperform them\n\nBe direct, specific, and tactical. Think like a founder preparing for battle.`,
+        ragContext
+      );
+
+      // Store the analysis.
+      const { data: stored } = await supabase.from('competitor_analysis').insert([{
+        client_id: client_id || null,
+        competitor_url,
+        competitor_name: brand,
+        ad_library_url: adLibraryUrl,
+        social_presence: socialPresence,
+        active_ads: activeAds,
+        report: analysis,
+        created_at: new Date().toISOString(),
+      }]).select().single();
+
+      // Submit to approvals for Hussain to review.
+      await supabase.from('approvals').insert([{
+        type: 'competitor_report',
+        title: `Competitor Report — ${brand}`,
+        content: analysis,
+        metadata: { competitor_url, competitor_name: brand, ad_library_url: adLibraryUrl, active_ads_count: activeAds.length, analysis_id: stored?.id || null },
+        from_member: 'hussain',
+        client_id: client_id || null,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+      }]);
+
+      res.json({ ok: true, analysis: stored, report: analysis, social_presence: socialPresence, active_ads: activeAds });
+    } catch (e) {
+      console.error('Competitors analyze error:', e.message);
+      res.status(500).json({ error: 'Analysis failed', details: e.message });
+    }
+  });
+
+  // POST /social/schedule-post — schedule/publish a post to Facebook and/or Instagram
+  router.post('/social/schedule-post', async (req, res) => {
+    const { client_id, content, platforms = [], scheduled_time, image_url } = req.body;
+    if (!client_id) return res.status(400).json({ error: 'client_id required' });
+    if (!content && !image_url) return res.status(400).json({ error: 'content or image_url required' });
+    if (!Array.isArray(platforms) || platforms.length === 0) return res.status(400).json({ error: 'platforms array required (facebook, instagram)' });
+    try {
+      const { data: client } = await supabase.from('clients')
+        .select('meta_access_token, meta_page_id, meta_ig_user_id')
+        .eq('id', client_id).maybeSingle();
+
+      const base = 'https://graph.facebook.com/v21.0';
+      const token = client?.meta_access_token;
+      const isFuture = scheduled_time && new Date(scheduled_time).getTime() > Date.now();
+      const results = {};
+      let anyPosted = false;
+
+      if (token) {
+        // Facebook page post.
+        if (platforms.includes('facebook') && client.meta_page_id) {
+          try {
+            const params = image_url
+              ? { url: image_url, caption: content || '', access_token: token }
+              : { message: content || '', access_token: token };
+            const endpoint = image_url ? `${base}/${client.meta_page_id}/photos` : `${base}/${client.meta_page_id}/feed`;
+            if (isFuture) {
+              params.published = false;
+              params.scheduled_publish_time = Math.floor(new Date(scheduled_time).getTime() / 1000);
+            }
+            const r = await axios.post(endpoint, null, { params });
+            results.facebook = { ok: true, id: r.data.id || r.data.post_id || null };
+            if (!isFuture) anyPosted = true;
+          } catch (fbErr) {
+            results.facebook = { ok: false, error: fbErr.response?.data?.error?.message || fbErr.message };
+          }
+        }
+        // Instagram post (requires image_url — IG content publishing needs a media container).
+        if (platforms.includes('instagram') && client.meta_ig_user_id && image_url) {
+          try {
+            const containerRes = await axios.post(`${base}/${client.meta_ig_user_id}/media`, null, {
+              params: { image_url, caption: content || '', access_token: token },
+            });
+            const creationId = containerRes.data.id;
+            if (!isFuture && creationId) {
+              const pub = await axios.post(`${base}/${client.meta_ig_user_id}/media_publish`, null, {
+                params: { creation_id: creationId, access_token: token },
+              });
+              results.instagram = { ok: true, id: pub.data.id || null };
+              anyPosted = true;
+            } else {
+              results.instagram = { ok: true, creation_id: creationId, note: 'container created — will publish at scheduled time' };
+            }
+          } catch (igErr) {
+            results.instagram = { ok: false, error: igErr.response?.data?.error?.message || igErr.message };
+          }
+        } else if (platforms.includes('instagram') && !image_url) {
+          results.instagram = { ok: false, error: 'Instagram posts require image_url' };
+        }
+      } else {
+        results.note = 'No Meta access token configured for this client — post stored as scheduled only.';
+      }
+
+      const status = anyPosted ? 'posted' : 'scheduled';
+      const { data: stored } = await supabase.from('social_posts').insert([{
+        client_id,
+        content: content || '',
+        platforms,
+        image_url: image_url || null,
+        scheduled_time: scheduled_time || null,
+        status,
+        result: results,
+        created_at: new Date().toISOString(),
+        posted_at: anyPosted ? new Date().toISOString() : null,
+      }]).select().single();
+
+      res.json({ ok: true, status, post: stored, results });
+    } catch (e) {
+      console.error('Social schedule-post error:', e.message);
+      res.status(500).json({ error: 'Failed to schedule post', details: e.message });
     }
   });
 

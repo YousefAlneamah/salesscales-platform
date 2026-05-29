@@ -34,6 +34,7 @@ import SocialAutomation from "./pages/SocialAutomation";
 import Reports from "./pages/Reports";
 import RevenueDashboard from "./pages/RevenueDashboard";
 import CaseStudies from "./pages/CaseStudies";
+import CompetitiveIntelligence from "./pages/CompetitiveIntelligence";
 import Onboarding from "./pages/Onboarding";
 import Marketplace from "./pages/Marketplace";
 import WhiteLabel from "./pages/WhiteLabel";
@@ -95,6 +96,7 @@ const navItems = [
     { id: "casestudies", label: "Case Studies", icon: "ti-trophy" },
     { id: "revenue-dashboard", label: "Revenue Dashboard", icon: "ti-currency-dollar" },
     { id: "store-audit", label: "Store Audit", icon: "ti-search" },
+    { id: "competitive-intelligence", label: "Competitive Intel", icon: "ti-radar" },
   ]},
   { group: "PLATFORM", items: [
     { id: "transcribe", label: "Transcribe", icon: "ti-microphone-2" },
@@ -149,6 +151,7 @@ const pageTitles = {
   casestudies: "Case Studies",
   "revenue-dashboard": "Revenue Dashboard",
   "store-audit": "Store Audit Tool",
+  "competitive-intelligence": "Competitive Intelligence",
   transcribe: "Call Transcription",
   onboarding: "Onboarding",
   marketplace: "Marketplace",
@@ -248,6 +251,7 @@ function App() {
       case "casestudies": return <CaseStudies />;
       case "revenue-dashboard": return <RevenueDashboard />;
       case "store-audit": return <AuditTool />;
+      case "competitive-intelligence": return <CompetitiveIntelligence />;
       case "transcribe": return <Transcribe />;
       case "onboarding": return <Onboarding />;
       case "marketplace": return <Marketplace />;
