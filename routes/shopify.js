@@ -35,6 +35,8 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
     const ctx = `Store: ${storeName}\nCurrency: ${shopInfo.currency || 'USD'}\nTop products: ${productList}\nAverage order value: $${aov}`;
     const mahdiSystem = `You are Mahdi, the Marketing and Content AI at Sales Scales. You write high-converting cart recovery copy. Return ONLY valid JSON, no markdown, no explanation.`;
 
+    const humanRules = `\n\nHOW TO WRITE:\nWrite like a real human being, not a marketing robot. Use short sentences. Use line breaks generously. Never use words like "we understand" or "we know how you feel" or "don't miss out" or "limited time". Never use exclamation marks. Write the way a thoughtful friend who works at the brand would write. Each email must have one clear emotional hook in the first two sentences that makes the reader feel something. Reference the specific product they left behind naturally, not aggressively.`;
+
     // ── EMAIL SEQUENCE (7 emails) ──────────────────────────
     // Split across two calls to stay within max_tokens: 1000.
     // Waits between emails: 1h → E1 → 23h → E2 → 48h → E3 → 48h → E4 → 48h → E5 → 72h → E6 → 96h → E7
@@ -42,10 +44,10 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
 
     const [emails1to3Raw, emails4to7Raw] = await Promise.all([
       aiCall(mahdiSystem,
-        `Write 3 cart recovery emails (subjects + body copy) for this store.\n\n${ctx}\n\nAngles:\nEmail 1 (sent 1h after abandonment): urgency — cart items waiting, personalised opener\nEmail 2 (24h): social proof — customer reviews, bestseller status\nEmail 3 (72h): product benefits — key features and why it matters\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."}]}\nUse {{first_name}}. Keep each email body under 120 words. Reference real product names and prices.`,
+        `Write 3 cart recovery emails (subjects + body copy) for this store.\n\n${ctx}\n\nAngles:\nEmail 1 (sent 1h after abandonment): urgency — cart items waiting, personalised opener\nEmail 2 (24h): social proof — customer reviews, bestseller status\nEmail 3 (72h): product benefits — key features and why it matters\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."}]}\nUse {{first_name}}. Keep each email body under 120 words. Reference real product names and prices.${humanRules}`,
         ''),
       aiCall(mahdiSystem,
-        `Write 4 cart recovery emails (subjects + body copy) for this store.\n\n${ctx}\n\nAngles:\nEmail 4 (5 days after abandonment): objection handling — price, quality, shipping concerns\nEmail 5 (7 days): scarcity — stock running low, don't miss out\nEmail 6 (10 days): value + guarantee — risk-free, easy returns, quality promise\nEmail 7 (14 days): final offer — last chance, make it count\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."}]}\nUse {{first_name}}. Keep each email body under 120 words. Reference real product names and prices.`,
+        `Write 4 cart recovery emails (subjects + body copy) for this store.\n\n${ctx}\n\nAngles:\nEmail 4 (5 days after abandonment): objection handling — price, quality, shipping concerns\nEmail 5 (7 days): scarcity — stock running low\nEmail 6 (10 days): value + guarantee — risk-free, easy returns, quality promise\nEmail 7 (14 days): final offer — last chance, make it count\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."}]}\nUse {{first_name}}. Keep each email body under 120 words. Reference real product names and prices.${humanRules}`,
         ''),
     ]);
 
