@@ -239,31 +239,73 @@ const renderTemplate = (text, contact, cartLink) => {
     .replace(/\{\{\s*cart_link\s*\}\}/gi, cartLink || '');
 };
 
-// ─── HELPER: BRANDED HTML EMAIL TEMPLATE ─────────────────
-const buildEmailHtml = (content, clientName, subject) => {
+// ─── HELPER: CLIENT EMAIL BRANDING ───────────────────────
+// Returns the store name (logo text) and header brand color for white-label emails.
+const getClientBranding = async (clientId) => {
+  const fallback = { brandColor: '#0a1628', storeName: '' };
+  if (!clientId) return fallback;
+  try {
+    const [{ data: client }, { data: profile }] = await Promise.all([
+      supabase.from('clients').select('name, from_name').eq('id', clientId).maybeSingle(),
+      supabase.from('client_profiles').select('brand_color').eq('client_id', clientId).maybeSingle(),
+    ]);
+    return {
+      brandColor: profile?.brand_color || '#0a1628',
+      storeName: client?.name || client?.from_name || '',
+    };
+  } catch {
+    return fallback;
+  }
+};
+
+// ─── HELPER: WHITE-LABEL HTML EMAIL TEMPLATE ─────────────
+// Renders the client's own branded email — no Sales Scales branding is shown to the end customer.
+const buildEmailHtml = ({ content, subject, clientName, cartLink, contactName, brandColor = '#0a1628', logoText }) => {
+  const store = logoText || clientName || 'Your Store';
+  const year = new Date().getFullYear();
   const safe = (content || '').trim();
+
+  const greeting = contactName
+    ? `<p style="margin:0 0 18px;color:#1f2937;font-size:16px;line-height:1.8;">Hi ${contactName},</p>`
+    : '';
+
   const bodyHtml = safe
     .split(/\n{2,}/)
-    .map(p => `<p style="margin:0 0 16px;color:#374151;font-size:14px;line-height:1.7;">${p.replace(/\n/g, '<br/>')}</p>`)
+    .filter(Boolean)
+    .map(p => `<p style="margin:0 0 18px;color:#1f2937;font-size:16px;line-height:1.8;">${p.replace(/\n/g, '<br/>')}</p>`)
     .join('');
-  const brand = clientName || 'Sales Scales';
-  const year = new Date().getFullYear();
+
+  const ctaHtml = cartLink ? `
+        <tr><td style="padding:8px 32px 32px;">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td style="border-radius:8px;background:#c9a84c;">
+              <a href="${cartLink}" target="_blank" style="display:inline-block;padding:14px 34px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#0a1628;text-decoration:none;border-radius:8px;">Complete Your Order →</a>
+            </td>
+          </tr></table>
+        </td></tr>` : '';
+
   return `<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/></head>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <meta name="color-scheme" content="light"/>
+</head>
 <body style="margin:0;padding:0;background:#f0f3f8;font-family:Arial,Helvetica,sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f3f8;padding:32px 16px;">
     <tr><td align="center">
       <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 8px 24px rgba(10,22,40,0.08);">
-        <tr><td style="background:#0a1628;padding:28px 32px;">
-          <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;">${brand}</div>
-          <div style="width:32px;height:2px;background:#c9a84c;border-radius:1px;margin-top:10px;"></div>
+        <tr><td style="background:${brandColor};padding:30px 32px;text-align:center;">
+          <div style="color:#ffffff;font-size:22px;font-weight:700;letter-spacing:1px;">${store}</div>
+          <div style="width:40px;height:3px;background:#c9a84c;border-radius:2px;margin:12px auto 0;"></div>
         </td></tr>
-        ${subject ? `<tr><td style="padding:28px 32px 0;"><div style="color:#0a1628;font-size:19px;font-weight:700;line-height:1.3;">${subject}</div></td></tr>` : ''}
-        <tr><td style="padding:24px 32px 32px;">${bodyHtml}</td></tr>
-        <tr><td style="background:#f8fafc;border-top:1px solid #e4e9f0;padding:20px 32px;">
-          <div style="color:#8896a8;font-size:11px;line-height:1.6;">Sent by ${brand} via Sales Scales — AI Revenue System.</div>
-          <div style="color:#c4ccd6;font-size:10px;margin-top:6px;">© ${year} ${brand}. All rights reserved.</div>
+        ${subject ? `<tr><td style="padding:30px 32px 0;"><div style="color:#0a1628;font-size:21px;font-weight:700;line-height:1.35;">${subject}</div></td></tr>` : ''}
+        <tr><td style="padding:24px 32px 8px;">${greeting}${bodyHtml}</td></tr>
+        ${ctaHtml}
+        <tr><td style="background:#f8fafc;border-top:1px solid #e4e9f0;padding:22px 32px;text-align:center;">
+          <div style="color:#8896a8;font-size:12px;line-height:1.7;">You're receiving this email because you shopped with ${store}.</div>
+          <div style="color:#aab4c0;font-size:11px;margin-top:8px;">© ${year} ${store}. All rights reserved.</div>
+          <div style="color:#aab4c0;font-size:11px;margin-top:10px;"><a href="<%asm_group_unsubscribe_raw_url%>" style="color:#8896a8;text-decoration:underline;">Unsubscribe</a> from these emails.</div>
         </td></tr>
       </table>
     </td></tr>
@@ -667,12 +709,21 @@ cron.schedule('*/15 * * * *', async () => {
         let stepFailed = false, failureMsg = '';
         try {
           const sender = await getClientSender(enrollment.client_id);
+          const branding = await getClientBranding(enrollment.client_id);
           const emailSubject = renderTemplate(currentStep.subject || 'Message for you', contact, cartLink);
           await sgMail.send({
             to: contact.email,
             from: sender,
             subject: emailSubject,
-            html: buildEmailHtml(renderTemplate(currentStep.content, contact, cartLink), sender.name, emailSubject)
+            html: buildEmailHtml({
+              content: renderTemplate(currentStep.content, contact, cartLink),
+              subject: emailSubject,
+              clientName: branding.storeName || sender.name,
+              cartLink,
+              contactName: contact.first_name,
+              brandColor: branding.brandColor,
+              logoText: branding.storeName
+            })
           });
           console.log(`Email sent to ${contact.first_name} — step ${enrollment.current_step}`);
         } catch (e) {
