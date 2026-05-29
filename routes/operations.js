@@ -9,7 +9,7 @@ const TIER_SERVICE_MAP = {
   enterprise: 'Fully custom engagement — all platform features, white-label options, custom AI agent training, dedicated infrastructure, and a tailored SLA',
 };
 
-module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken }) => {
+module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken, storeKnowledge }) => {
   const router = express.Router();
 
   // ─── CASE STUDIES ────────────────────────────────────────
@@ -321,6 +321,20 @@ module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToke
       }).select().single();
 
       if (insertErr) throw insertErr;
+
+      // Feedback loop: store the month's insights & recommendations so the AI
+      // team can reference what worked when planning the next month.
+      if (storeKnowledge && summary && summary.trim()) {
+        storeKnowledge({
+          title: `Monthly Insights — ${client.name} (${period})`,
+          content: `Monthly performance insights for ${client.name} (${client.niche || 'ecommerce'}), ${period}.\n\n${summary}`,
+          source: 'monthly_insight',
+          clientId: client_id,
+          type: 'monthly_insight',
+          notes: `monthly_insight | ${period}`,
+        });
+      }
+
       res.json({ report });
     } catch (e) {
       console.error('reports/generate error:', e.message);

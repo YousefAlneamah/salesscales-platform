@@ -330,6 +330,27 @@ module.exports = ({ supabase, axios, importLimiter, upload, PDF2Json, YoutubeTra
     }
   });
 
+  // Client-specific knowledge (incl. full content) for the AI team to reference
+  // winning sequences, call transcripts, and monthly insights for one client.
+  router.get('/knowledge/client', async (req, res) => {
+    try {
+      const { client_id, source } = req.query;
+      if (!client_id) return res.status(400).json({ error: 'client_id required' });
+      let query = supabase.from('knowledge_base')
+        .select('id, title, content, type, source, client_id, status, notes, created_at')
+        .eq('client_id', client_id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (source) query = query.eq('source', source);
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json({ documents: data || [] });
+    } catch (e) {
+      console.error('Knowledge client error:', e.message);
+      res.status(500).json({ error: 'Failed to fetch client knowledge', details: e.message });
+    }
+  });
+
   // Requires this function in Supabase SQL editor:
   // CREATE OR REPLACE FUNCTION knowledge_base_approx_count()
   // RETURNS bigint LANGUAGE sql STABLE AS $$

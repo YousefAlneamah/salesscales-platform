@@ -152,14 +152,70 @@ const ragSearch = async (query, clientId = null) => {
     });
     combined.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
     const top5 = combined.slice(0, 5);
+    const vectorText = top5.length > 0
+      ? top5.map(r => `${r.title}:\n${r.content?.substring(0, 800)}`).join('\n\n')
+      : '';
 
-    if (top5.length > 0) {
-      return top5.map(r => `${r.title}:\n${r.content?.substring(0, 800)}`).join('\n\n');
+    // Always surface this client's recent winning content & insights directly,
+    // so the AI team references proven templates even before vectors match.
+    let winningText = '';
+    if (clientId) {
+      try {
+        const { data: winning } = await supabase
+          .from('knowledge_base')
+          .select('title, content, source')
+          .eq('client_id', clientId)
+          .in('source', ['winning_sequence', 'monthly_insight', 'call_transcript'])
+          .order('created_at', { ascending: false })
+          .limit(5);
+        if (winning && winning.length) {
+          winningText = 'Client winning content & insights:\n' +
+            winning.map(w => `[${w.source}] ${w.title}:\n${(w.content || '').substring(0, 800)}`).join('\n\n');
+        }
+      } catch (wErr) {
+        console.log('Winning-content fetch skipped:', wErr.message);
+      }
     }
+
+    return [winningText, vectorText].filter(Boolean).join('\n\n');
   } catch (e) {
     console.log('RAG search skipped:', e.message);
   }
   return '';
+};
+
+// ─── HELPER: STORE KNOWLEDGE (feedback loop) ─────────────
+// Inserts a knowledge_base row and embeds it in the background so it becomes
+// searchable via ragSearch. Fire-and-forget safe — never throws to the caller.
+const storeKnowledge = async ({ title, content, source, clientId = null, type = 'reference', notes = null }) => {
+  if (!content || !content.trim()) return null;
+  try {
+    const { data: row, error } = await supabase.from('knowledge_base').insert([{
+      title: (title || 'Untitled').substring(0, 200),
+      content,
+      type,
+      source,
+      client_id: clientId,
+      status: 'trained',
+      notes,
+      created_at: new Date().toISOString(),
+    }]).select('id').single();
+    if (error) throw error;
+    try {
+      const emb = await axios.post(
+        'https://api.openai.com/v1/embeddings',
+        { input: content.substring(0, 2000), model: 'text-embedding-3-small' },
+        { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' } }
+      );
+      await supabase.from('knowledge_base').update({ embedding: emb.data.data[0].embedding }).eq('id', row.id);
+    } catch (embErr) {
+      console.error('storeKnowledge embed error:', embErr.message);
+    }
+    return row.id;
+  } catch (e) {
+    console.error('storeKnowledge error:', e.message);
+    return null;
+  }
 };
 
 // ─── HELPER: TEAM BRIEFINGS CONTEXT ──────────────────────
@@ -2188,6 +2244,30 @@ app.post('/approvals/action', async (req, res) => {
           }))
         );
       }
+
+      // Feedback loop: store the approved (winning) sequence so the AI team can
+      // reference proven templates when writing new content.
+      try {
+        const { data: seqClient } = await supabase.from('clients').select('name, niche').eq('id', approval.client_id).maybeSingle();
+        const niche = seqClient?.niche || 'ecommerce';
+        const typeLabel = approval.type.replace('_', ' ');
+        const templateText = steps
+          .filter(s => s.step_type !== 'wait')
+          .map((s, i) => `Step ${i + 1} (${s.step_type || 'message'}):${s.subject ? `\nSubject: ${s.subject}` : ''}\n${s.content || ''}`)
+          .join('\n\n');
+        if (templateText.trim()) {
+          storeKnowledge({
+            title: `Winning ${typeLabel} — ${seqClient?.name || 'Client'} (${niche})`,
+            content: `Approved ${typeLabel} for the ${niche} niche.\n\n${templateText}`,
+            source: 'winning_sequence',
+            clientId: approval.client_id,
+            type: approval.type,
+            notes: `winning_sequence | ${approval.type} | niche:${niche}`,
+          });
+        }
+      } catch (kErr) {
+        console.error('Winning-sequence knowledge store skipped:', kErr.message);
+      }
     } else if (approval.type === 'outreach_message') {
       if (meta.channel === 'sms' && meta.to_phone) {
         const { tc: twilioClient, from } = await getClientTwilio(approval.client_id);
@@ -2473,6 +2553,20 @@ app.post('/calls/log', async (req, res) => {
     }
 
     console.log('Call logged:', inserted.id, direction, contactPhone);
+
+    // Feedback loop: store the transcript in the knowledge base so the AI team
+    // can learn from real call conversations.
+    if (transcript && transcript.trim()) {
+      storeKnowledge({
+        title: `Call Transcript — ${contactPhone || 'Unknown'} (${direction === 'inbound' ? 'inbound' : 'outbound'})`,
+        content: summary ? `Summary: ${summary}\n\n${transcript}` : transcript,
+        source: 'call_transcript',
+        clientId: clientId,
+        type: 'call_transcript',
+        notes: 'call_transcript',
+      });
+    }
+
     res.json({ success: true, call: inserted });
   } catch (e) {
     console.error('Call log error:', e.response?.data || e.message);
@@ -2917,7 +3011,7 @@ app.use('/shopify', require('./routes/shopify')({ supabase, axios, crypto, proce
 app.use('/',        require('./routes/knowledge')({ supabase, axios, importLimiter, upload, PDF2Json, YoutubeTranscript }));
 app.use('/',        require('./routes/analytics')({ supabase }));
 app.use('/',        require('./routes/integrations')({ supabase, axios, aiCall, ragSearch, getBriefingsContext, verifyToken }));
-app.use('/',        require('./routes/operations')({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken }));
+app.use('/',        require('./routes/operations')({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken, storeKnowledge }));
 
 // ─── GLOBAL ERROR HANDLER ─────────────────────────────────
 app.use((err, req, res, next) => {
