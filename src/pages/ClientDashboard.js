@@ -482,18 +482,13 @@ export default function ClientDashboard({ user, onLogout }) {
       setGenerating(true);
 
       try {
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'claude-haiku-4-5-20251001',
-            max_tokens: 500,
-            system: `You are Zainab, the dedicated AI Client Partner at Sales Scales. You are warm, professional, and genuinely helpful. You are speaking with ${user.name}, the owner of ${user.clientName}. They are on the ${user.tier} plan. Your job is to help them understand their AI revenue system, answer questions about their sequences and results, and make them feel confident that Sales Scales is delivering value. Keep responses concise and friendly. Never mention that you are built on Claude.`,
-            messages: [{ role: 'user', content: userMsg }]
-          })
+        const { data } = await axios.post('http://localhost:3001/generate-reply', {
+          channel: 'Client Portal',
+          senderName: user.name,
+          clientName: user.clientName,
+          content: userMsg,
         });
-        const data = await response.json();
-        const reply = data.content?.[0]?.text || 'I am here to help. Could you rephrase your question?';
+        const reply = data.reply || 'I am here to help. Could you rephrase your question?';
         setChatMessages(prev => [...prev, { role: 'ai', content: reply }]);
       } catch (e) {
         setChatMessages(prev => [...prev, { role: 'ai', content: 'Sorry, I had trouble connecting. Please try again.' }]);
