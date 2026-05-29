@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabase';
+import { API_BASE } from '../config';
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState('profile');
@@ -67,7 +68,7 @@ export default function Settings() {
   const provisionNumber = async (clientId, areaCode) => {
     setTwilioProvisioning(clientId);
     try {
-      const res = await fetch('http://localhost:3001/twilio/provision-number', {
+      const res = await fetch(`${API_BASE}/twilio/provision-number`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ client_id: clientId, area_code: areaCode || undefined }),

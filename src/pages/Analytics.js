@@ -90,6 +90,7 @@ export default function Analytics() {
   const inbound  = fm.filter(m => m.direction === 'inbound');
   const pipelineValue = fd.reduce((s, d) => s + (d.value || 0), 0);
   const convertedDeals = fd.filter(d => d.stage === 'Converted');
+  const revenueRecovered = convertedDeals.reduce((s, d) => s + (d.value || 0), 0);
   const approvedCount  = fa.filter(a => a.status === 'approved').length;
 
   const byKey = (arr, key) => arr.reduce((acc, r) => {
@@ -167,14 +168,14 @@ export default function Analytics() {
           <div className="stat-sub-blue">{inbound.length} received</div>
         </div>
         <div className="stat-card green-top">
-          <div className="stat-label">Pipeline Value</div>
-          <div className="stat-value">${pipelineValue.toLocaleString()}</div>
-          <div className="stat-sub-green">{fd.length} deals</div>
+          <div className="stat-label">Revenue Recovered</div>
+          <div className="stat-value">${revenueRecovered.toLocaleString()}</div>
+          <div className="stat-sub-green">{convertedDeals.length} deals converted</div>
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
         {[
-          { label: 'Deals Converted', value: convertedDeals.length, sub: `$${convertedDeals.reduce((s, d) => s + (d.value || 0), 0).toLocaleString()} closed`, color: '#10b981' },
+          { label: 'Pipeline Value', value: `$${pipelineValue.toLocaleString()}`, sub: `${fd.length} open deals`, color: '#10b981' },
           { label: 'Approval Rate', value: fa.length > 0 ? Math.round((approvedCount / fa.length) * 100) + '%' : '—', sub: `${approvedCount} of ${fa.length} approved`, color: '#c9a84c' },
           { label: 'Inbound Messages', value: inbound.length, sub: `${monthStats?.inboundThisMonth ?? 0} this month`, color: '#3b82f6' },
         ].map(s => (

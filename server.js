@@ -255,6 +255,24 @@ const getClientSender = async (clientId) => {
   }
 };
 
+// ─── HELPER: NOTIFY CLIENT PORTAL USERS BY EMAIL ─────────
+// Looks up the client_users for a client and emails them a platform notification.
+const notifyClientUser = async (clientId, subject, bodyHtml) => {
+  if (!clientId) return;
+  try {
+    const { data: users } = await supabase.from('client_users').select('email, name').eq('client_id', clientId);
+    const recipients = (users || []).map(u => u.email).filter(Boolean);
+    if (recipients.length === 0) return;
+    const from = { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' };
+    await Promise.all(recipients.map(to => sgMail.send({
+      to, from, subject,
+      html: `<div style="font-family:Arial,sans-serif;font-size:14px;color:#0a1628;line-height:1.6">${bodyHtml}<p style="margin-top:20px;color:#8896a8;font-size:12px">— Sales Scales</p></div>`,
+    }).catch(e => console.error(`notifyClientUser send to ${to} failed:`, e.message))));
+  } catch (e) {
+    console.error('notifyClientUser error:', e.message);
+  }
+};
+
 // ─── HELPER: PER-CLIENT TWILIO CREDENTIALS ───────────────
 const getClientTwilio = async (clientId) => {
   if (clientId) {
@@ -858,6 +876,12 @@ cron.schedule('*/15 * * * *', async () => {
           .eq('id', enrollment.id);
         console.log(`Enrollment completed for ${contact.first_name}`);
         await advancePipelineStage(contact.id);
+        const contactLabel = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || contact.email || 'a contact';
+        await notifyClientUser(
+          enrollment.client_id,
+          'A sequence just completed',
+          `<p>Good news — an automated sequence has finished running for <strong>${contactLabel}</strong>.</p><p>Log in to your Sales Scales portal to see the results.</p>`
+        );
       }
     }
   } catch (e) {
@@ -1023,6 +1047,26 @@ cron.schedule('0 14 * * *', async () => {
   }
 })();
 
+// ─── ONE-TIME: LINKEDIN DAY 7 "CALL TO ACTION" POST ──────
+(async () => {
+  try {
+    const subject = 'LinkedIn Day 7 — Call to Action';
+    const { data: existing } = await supabase.from('team_briefings')
+      .select('id').eq('subject', subject).limit(1).maybeSingle();
+    if (existing) return;
+    const post = await aiCall(
+      `You are Mahdi, Marketing & Content AI at Sales Scales. You write scroll-stopping LinkedIn content in a founder's authentic voice. Never break character or mention Claude.`,
+      `Write Day 7 — the FINAL post — of a "Behind the Build" LinkedIn series documenting the journey of building Sales Scales, an AI-powered revenue system for ecommerce agencies.\n\nDay 7 theme: wrap up the series and make a strong, direct call to action. Sales Scales is now live and ready for ecommerce agencies. Invite readers to book a call or reach out to learn how Sales Scales can run their revenue operations with an AI team.\n\nFormat:\n- A strong hook line that signals this is the finale of the 7-day series\n- Short punchy paragraphs with line breaks between them (LinkedIn style)\n- A clear, confident CTA inviting people to book a call or DM/reach out about Sales Scales\n- A closing line that drives action\n- 3-5 relevant hashtags`,
+      ''
+    );
+    await storeBriefing('mahdi', 'yousef', subject, post, 'high', null)
+      .catch(e => console.error('LinkedIn Day 7 briefing failed:', e.message));
+    console.log('[INIT] LinkedIn Day 7 post generated and stored');
+  } catch (e) {
+    console.error('[INIT] LinkedIn Day 7 generation error:', e.message);
+  }
+})();
+
 // ─── AUTO SCHEDULER: HUSSAIN — WEEKLY INTELLIGENCE ───────
 // Every Monday at 9am
 cron.schedule('0 9 * * 1', async () => {
@@ -1125,6 +1169,11 @@ Return JSON exactly: {"trigger_type":"cart_abandoned","steps":[{"step_type":"sms
           created_at: new Date().toISOString()
         }]);
         console.log(`[AUTO] Hussain→Mahdi sequences queued for ${client.name}`);
+        await notifyClientUser(
+          client.id,
+          'New content is ready for your review',
+          `<p>Hi ${client.name},</p><p>Your AI team has drafted new email and SMS sequences for your approval.</p><p>Log in to your Sales Scales portal to review and approve them.</p>`
+        );
       } catch (clientErr) {
         console.error(`[AUTO] Hussain→Mahdi sequences failed for ${client.name}:`, clientErr.message);
       }
@@ -1605,6 +1654,11 @@ cron.schedule('0 6 * * *', async () => {
 
         changed++;
         console.log(`[AUTO] Shopify sync — sequences regenerated for ${shop} (hash changed)`);
+        await notifyClientUser(
+          client_id,
+          'New content is ready for your review',
+          `<p>Your product catalog changed, so your AI team regenerated the cart recovery sequences for <strong>${storeName}</strong>.</p><p>Log in to your Sales Scales portal to review and approve the updated content.</p>`
+        );
       } catch (connErr) {
         console.error(`[AUTO] Shopify sync failed for ${conn.shop}:`, connErr.message);
       }
@@ -2297,6 +2351,13 @@ app.post('/approvals/submit', async (req, res) => {
       created_at: new Date().toISOString()
     }]).select().single();
     if (error) throw error;
+    if (data?.client_id) {
+      await notifyClientUser(
+        data.client_id,
+        'New content is ready for your review',
+        `<p>Your AI team has prepared new content — <strong>${title}</strong> — that is ready for your review.</p><p>Log in to your Sales Scales portal to review and approve it.</p>`
+      );
+    }
     res.json({ approval: data });
   } catch (e) {
     console.error('/approvals/submit error:', e.message);
@@ -3202,7 +3263,7 @@ app.use('/shopify', require('./routes/shopify')({ supabase, axios, crypto, proce
 app.use('/',        require('./routes/knowledge')({ supabase, axios, importLimiter, upload, PDF2Json, YoutubeTranscript }));
 app.use('/',        require('./routes/analytics')({ supabase }));
 app.use('/',        require('./routes/integrations')({ supabase, axios, aiCall, ragSearch, getBriefingsContext, verifyToken }));
-app.use('/',        require('./routes/operations')({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken, storeKnowledge }));
+app.use('/',        require('./routes/operations')({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken, storeKnowledge, notifyClientUser }));
 
 // ─── GLOBAL ERROR HANDLER ─────────────────────────────────
 app.use((err, req, res, next) => {

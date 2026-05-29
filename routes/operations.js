@@ -9,7 +9,7 @@ const TIER_SERVICE_MAP = {
   enterprise: 'Fully custom engagement — all platform features, white-label options, custom AI agent training, dedicated infrastructure, and a tailored SLA',
 };
 
-module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken, storeKnowledge }) => {
+module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken, storeKnowledge, notifyClientUser }) => {
   const router = express.Router();
 
   // ─── CASE STUDIES ────────────────────────────────────────
@@ -334,6 +334,15 @@ module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToke
       }).select().single();
 
       if (insertErr) throw insertErr;
+
+      // Notify the client that their monthly report is ready.
+      if (notifyClientUser) {
+        await notifyClientUser(
+          client_id,
+          `Your ${period} performance report is ready`,
+          `<p>Hi ${client.name || 'there'},</p><p>Your ${period} performance report from Zainab is ready to view.</p><p>Log in to your Sales Scales portal to read the full report and recommendations for next month.</p>`
+        );
+      }
 
       // Feedback loop: store the month's insights & recommendations so the AI
       // team can reference what worked when planning the next month.

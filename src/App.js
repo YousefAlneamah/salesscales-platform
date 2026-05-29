@@ -163,6 +163,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [currentPage, setCurrentPage] = useState("dashboard");
   const [clientOnboarded, setClientOnboarded] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("user");
@@ -267,7 +268,8 @@ function App() {
 
   return (
     <div className="app">
-      <div className="sidebar">
+      {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
+      <div className={"sidebar" + (sidebarOpen ? " open" : "")}>
         <div className="logo-area">
           <div className="logo">SALES SCALES</div>
           <div className="logo-sub">AI REVENUE SYSTEM</div>
@@ -281,7 +283,7 @@ function App() {
               <div
                 key={item.id}
                 className={"nav-item " + (currentPage === item.id ? "active" : "")}
-                onClick={() => setCurrentPage(item.id)}
+                onClick={() => { setCurrentPage(item.id); setSidebarOpen(false); }}
               >
                 <i className={"ti " + item.icon} style={{fontSize:"15px"}} aria-hidden="true"></i>
                 <span>{item.label}</span>
@@ -300,6 +302,9 @@ function App() {
 
       <div className="main">
         <div className="topbar">
+          <button className="hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
+            <i className="ti ti-menu-2" aria-hidden="true"></i>
+          </button>
           <div className="page-title">{pageTitles[currentPage]}</div>
           <div className="topbar-right">
             <div className="top-badge">4 approvals waiting</div>

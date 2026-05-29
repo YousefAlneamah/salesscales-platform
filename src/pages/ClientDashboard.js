@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { supabase } from '../supabase';
+import { API_BASE } from '../config';
 
 const parseAov = (text) => {
   if (!text) return 75;
@@ -39,7 +40,7 @@ export default function ClientDashboard({ user, onLogout }) {
   useEffect(() => { fetchData(); }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    axios.get(`http://localhost:3001/shopify/products?client_id=${user.clientId}`)
+    axios.get(`${API_BASE}/shopify/products?client_id=${user.clientId}`)
       .then(r => setProducts(r.data.products || []))
       .catch(() => setProducts([]));
   }, [user.clientId]);
@@ -553,7 +554,7 @@ export default function ClientDashboard({ user, onLogout }) {
       setGenerating(true);
 
       try {
-        const { data } = await axios.post('http://localhost:3001/client/zainab', {
+        const { data } = await axios.post(`${API_BASE}/client/zainab`, {
           client_id: user.clientId,
           client_name: user.clientName,
           message: userMsg,
@@ -646,7 +647,7 @@ export default function ClientDashboard({ user, onLogout }) {
       }
       setBusy(true);
       try {
-        await axios.post('http://localhost:3001/approvals/action', {
+        await axios.post(`${API_BASE}/approvals/action`, {
           approval_id: approval.id, action, feedback: action === 'reject' ? feedback.trim() : null,
           edited_content: action === 'approve' && editing ? editContent : undefined,
         });
@@ -768,7 +769,7 @@ export default function ClientDashboard({ user, onLogout }) {
     useEffect(() => {
       (async () => {
         try {
-          const { data } = await axios.get(`http://localhost:3001/calls/list?client_id=${user.clientId}`);
+          const { data } = await axios.get(`${API_BASE}/calls/list?client_id=${user.clientId}`);
           setCalls(data.calls || []);
         } catch (e) {
           console.error('Load calls error:', e);
@@ -1054,7 +1055,7 @@ export default function ClientDashboard({ user, onLogout }) {
     useEffect(() => {
       (async () => {
         try {
-          const { data } = await axios.get('http://localhost:3001/client-profile', { params: { client_id: user.clientId } });
+          const { data } = await axios.get(`${API_BASE}/client-profile`, { params: { client_id: user.clientId } });
           if (data.profile) {
             setProfile({
               brand_voice: data.profile.brand_voice || '',
@@ -1074,7 +1075,7 @@ export default function ClientDashboard({ user, onLogout }) {
       setSavingP(true);
       setSavedP(false);
       try {
-        await axios.post('http://localhost:3001/client-profile', { client_id: user.clientId, ...profile });
+        await axios.post(`${API_BASE}/client-profile`, { client_id: user.clientId, ...profile });
         setSavedP(true);
         setTimeout(() => setSavedP(false), 2500);
       } catch (e) {

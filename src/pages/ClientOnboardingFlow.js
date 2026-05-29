@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabase';
+import { API_BASE } from '../config';
 
 const TOTAL_STEPS = 5;
 
@@ -119,7 +120,7 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
       }], { onConflict: 'client_id' });
       if (err) throw err;
       // Fire briefing to owner — non-blocking
-      fetch('http://localhost:3001/team/brief', {
+      fetch(`${API_BASE}/team/brief`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -143,7 +144,7 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
     const shop = form.store_url.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
     if (!shop) { setError('Enter your Shopify store URL — e.g. luuxbags.myshopify.com'); return; }
     setError('');
-    window.open(`http://localhost:3001/shopify/install?shop=${encodeURIComponent(shop)}&clientId=${user.clientId}`, '_blank');
+    window.open(`${API_BASE}/shopify/install?shop=${encodeURIComponent(shop)}&clientId=${user.clientId}`, '_blank');
     setConnectClicked(true);
   };
 
@@ -158,7 +159,7 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
       }], { onConflict: 'client_id' });
       if (err) throw err;
       // Notify owner that the client is fully onboarded — non-blocking
-      fetch('http://localhost:3001/onboarding/complete', {
+      fetch(`${API_BASE}/onboarding/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

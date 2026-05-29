@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { supabase } from '../supabase';
+import { API_BASE } from '../config';
 
 const TYPE_LABELS = {
   email_sequence: 'Email Sequence',
@@ -65,7 +66,7 @@ export default function Approvals() {
   const action = async (approvalId, act) => {
     setActioning(true);
     try {
-      await axios.post('http://localhost:3001/approvals/action', {
+      await axios.post(`${API_BASE}/approvals/action`, {
         approval_id: approvalId,
         action: act,
         feedback: feedback || undefined,

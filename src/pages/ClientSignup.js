@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import { API_BASE } from '../config';
 
 const TIERS = [
   { id: 'starter', label: 'Starter', price: '$997/mo', desc: 'Email & SMS automation, AI team, 3 sequences, monthly reports' },
@@ -38,7 +39,7 @@ export default function ClientSignup() {
     setSubmitting(true);
     setError('');
     try {
-      await axios.post('http://localhost:3001/clients/onboard', {
+      await axios.post(`${API_BASE}/clients/onboard`, {
         name: form.name.trim(),
         email: form.email.trim().toLowerCase(),
         password: form.password,
