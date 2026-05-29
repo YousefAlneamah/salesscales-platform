@@ -265,10 +265,6 @@ const buildEmailHtml = ({ content, subject, clientName, cartLink, contactName, b
   const year = new Date().getFullYear();
   const safe = (content || '').trim();
 
-  const greeting = contactName
-    ? `<p style="margin:0 0 18px;color:#1f2937;font-size:16px;line-height:1.8;">Hi ${contactName},</p>`
-    : '';
-
   const bodyHtml = safe
     .split(/\n{2,}/)
     .filter(Boolean)
@@ -300,7 +296,7 @@ const buildEmailHtml = ({ content, subject, clientName, cartLink, contactName, b
           <div style="width:40px;height:3px;background:#c9a84c;border-radius:2px;margin:12px auto 0;"></div>
         </td></tr>
         ${subject ? `<tr><td style="padding:30px 32px 0;"><div style="color:#0a1628;font-size:21px;font-weight:700;line-height:1.35;">${subject}</div></td></tr>` : ''}
-        <tr><td style="padding:24px 32px 8px;">${greeting}${bodyHtml}</td></tr>
+        <tr><td style="padding:24px 32px 8px;">${bodyHtml}</td></tr>
         ${ctaHtml}
         <tr><td style="background:#f8fafc;border-top:1px solid #e4e9f0;padding:22px 32px;text-align:center;">
           <div style="color:#8896a8;font-size:12px;line-height:1.7;">You're receiving this email because you shopped with ${store}.</div>
