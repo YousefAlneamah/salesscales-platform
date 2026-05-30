@@ -172,6 +172,151 @@ module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToke
     }
   });
 
+  // ─── CLIENT REFERRAL SYSTEM ─────────────────────────────
+
+  // GET /referrals/client-stats?client_id= — referral code, link, and stats for the client portal
+  router.get('/referrals/client-stats', async (req, res) => {
+    const { client_id } = req.query;
+    if (!client_id) return res.status(400).json({ error: 'client_id required' });
+    try {
+      const { data: client } = await supabase
+        .from('clients').select('id, name, referral_code').eq('id', client_id).maybeSingle();
+      if (!client) return res.status(404).json({ error: 'Client not found' });
+
+      let code = client.referral_code;
+      if (!code) {
+        const slug = (client.name || 'REF').replace(/[^a-zA-Z0-9]/g, '').substring(0, 3).toUpperCase();
+        code = `${slug}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+        await supabase.from('clients').update({ referral_code: code }).eq('id', client_id);
+      }
+
+      const { data: referrals } = await supabase
+        .from('client_referrals').select('*')
+        .eq('referrer_client_id', client_id)
+        .order('created_at', { ascending: false });
+
+      const all = referrals || [];
+      const converted = all.filter(r => r.status === 'paid' || r.status === 'reward_issued').length;
+      const rewardsEarned = all.filter(r => r.reward_issued).length;
+      const BASE_URL = process.env.APP_URL || 'https://salesscales.com';
+
+      res.json({
+        referral_code: code,
+        referral_link: `${BASE_URL}/refer?code=${code}`,
+        referrals: all,
+        total: all.length,
+        converted,
+        rewards_earned: rewardsEarned,
+      });
+    } catch (e) {
+      console.error('referrals/client-stats error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /referrals/track — record a new signup that used a referral code
+  router.post('/referrals/track', async (req, res) => {
+    const { referral_code, referred_name, referred_email, referred_business } = req.body;
+    if (!referral_code) return res.status(400).json({ error: 'referral_code required' });
+    try {
+      const { data: referrer } = await supabase
+        .from('clients').select('id, name').eq('referral_code', referral_code).maybeSingle();
+      if (!referrer) return res.status(404).json({ error: 'Invalid referral code' });
+
+      // Deduplicate by email
+      if (referred_email) {
+        const { data: dup } = await supabase.from('client_referrals').select('id')
+          .eq('referrer_code', referral_code).eq('referred_email', referred_email).maybeSingle();
+        if (dup) return res.json({ ok: true, already_tracked: true, referrer_name: referrer.name });
+      }
+
+      await supabase.from('client_referrals').insert([{
+        referrer_client_id: referrer.id,
+        referrer_code: referral_code,
+        referred_name: referred_name || null,
+        referred_email: referred_email || null,
+        referred_business: referred_business || null,
+        status: 'signed_up',
+      }]);
+
+      console.log(`Referral tracked: ${referred_business || referred_email} → ${referrer.name}`);
+      res.json({ ok: true, referrer_name: referrer.name });
+    } catch (e) {
+      console.error('referrals/track error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /referrals/convert — mark a referral as paid, issue reward, notify Yousef + referring client
+  router.post('/referrals/convert', async (req, res) => {
+    const { client_referral_id, referred_email, referral_code } = req.body;
+    if (!client_referral_id && !(referred_email && referral_code))
+      return res.status(400).json({ error: 'client_referral_id or (referred_email + referral_code) required' });
+    try {
+      let referral;
+      if (client_referral_id) {
+        const { data } = await supabase.from('client_referrals').select('*').eq('id', client_referral_id).maybeSingle();
+        referral = data;
+      } else {
+        const { data } = await supabase.from('client_referrals').select('*')
+          .eq('referred_email', referred_email).eq('referrer_code', referral_code)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+        referral = data;
+      }
+      if (!referral) return res.status(404).json({ error: 'Referral not found' });
+      if (referral.reward_issued) return res.json({ ok: true, already_issued: true });
+
+      const now = new Date().toISOString();
+      await supabase.from('client_referrals')
+        .update({ status: 'reward_issued', reward_issued: true, reward_issued_at: now })
+        .eq('id', referral.id);
+
+      const { data: referrerClient } = await supabase
+        .from('clients').select('id, name').eq('id', referral.referrer_client_id).maybeSingle();
+
+      // Notify Yousef
+      if (sgMail) {
+        sgMail.send({
+          to: 'yousef@aisalesscales.com',
+          from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+          subject: `🎉 Referral Converted — ${referral.referred_business || referral.referred_email || 'New Client'}`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px">
+            <div style="background:#0a1628;padding:20px 24px;border-radius:8px 8px 0 0">
+              <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase">Sales Scales</div>
+              <div style="color:white;font-size:16px;font-weight:600;margin-top:6px">Referral Converted</div>
+            </div>
+            <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 8px 8px;padding:24px">
+              <table style="width:100%;border-collapse:collapse">
+                <tr><td style="padding:8px 0;color:#8896a8;font-size:12px;width:140px">Referring Client</td><td style="padding:8px 0;font-size:13px;font-weight:600;color:#0a1628">${referrerClient?.name || 'Unknown'}</td></tr>
+                <tr><td style="padding:8px 0;color:#8896a8;font-size:12px">Referred Business</td><td style="padding:8px 0;font-size:13px;color:#0a1628">${referral.referred_business || '—'}</td></tr>
+                <tr><td style="padding:8px 0;color:#8896a8;font-size:12px">Referred Email</td><td style="padding:8px 0;font-size:13px;color:#0a1628">${referral.referred_email || '—'}</td></tr>
+                <tr><td style="padding:8px 0;color:#8896a8;font-size:12px">Converted</td><td style="padding:8px 0;font-size:13px;color:#0a1628">${new Date(now).toLocaleDateString('en-US', { dateStyle: 'medium' })}</td></tr>
+              </table>
+              <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:12px 14px;margin-top:16px;font-size:12px;color:#166534;font-weight:500">
+                ✓ Action required: Apply 1 month free credit to <strong>${referrerClient?.name || 'the referring client'}</strong>'s next invoice.
+              </div>
+            </div>
+          </div>`,
+        }).catch(e => console.error('Referral convert email failed:', e.message));
+      }
+
+      // Notify referring client
+      if (notifyClientUser && referral.referrer_client_id) {
+        notifyClientUser(
+          referral.referrer_client_id,
+          '🎉 Your referral paid off — 1 month free earned!',
+          `<p>Great news! The business you referred — <strong>${referral.referred_business || referral.referred_email || 'your referral'}</strong> — has signed up and paid their first month.</p><p>You've earned <strong>1 month free</strong> on your Sales Scales subscription. We'll apply the credit to your next billing cycle automatically.</p><p>Thank you for spreading the word!</p>`
+        ).catch(e => console.error('Referral client notify failed:', e.message));
+      }
+
+      console.log(`Referral converted: ${referral.referred_business || referral.referred_email} → reward issued to ${referrerClient?.name}`);
+      res.json({ ok: true, referrer_name: referrerClient?.name });
+    } catch (e) {
+      console.error('referrals/convert error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ─── SEQUENCES FEEDBACK ──────────────────────────────────
   router.post('/sequences/feedback', async (req, res) => {
     try {

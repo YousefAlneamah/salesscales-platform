@@ -38,8 +38,15 @@ export default function ClientDashboard({ user, onLogout }) {
   ]);
   const [showWalkthrough, setShowWalkthrough] = useState(false);
   const [walkthroughStep, setWalkthroughStep] = useState(0);
+  const [referralData, setReferralData] = useState({ referral_code: null, referral_link: null, referrals: [], total: 0, converted: 0, rewards_earned: 0 });
 
   useEffect(() => { fetchData(); }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    axios.get(`${API_BASE}/referrals/client-stats?client_id=${user.clientId}`)
+      .then(r => setReferralData(r.data))
+      .catch(() => {});
+  }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     axios.get(`${API_BASE}/shopify/products?client_id=${user.clientId}`)
@@ -162,6 +169,7 @@ export default function ClientDashboard({ user, onLogout }) {
     { id: 'reports', label: 'My Reports', icon: '📄' },
     { id: 'invoices', label: 'My Invoices', icon: '🧾' },
     { id: 'zainab', label: 'Zainab AI', icon: '🤖' },
+    { id: 'referrals', label: 'Refer & Earn', icon: '🎁' },
     { id: 'help', label: 'Help', icon: '❔' },
     { id: 'settings', label: 'Settings', icon: '⚙' },
   ];
@@ -177,6 +185,7 @@ export default function ClientDashboard({ user, onLogout }) {
     reports: 'My Reports',
     invoices: 'My Invoices',
     zainab: 'Zainab — AI Partner',
+    referrals: 'Refer & Earn',
     help: 'Help & Support',
     settings: 'Settings',
   };
@@ -193,6 +202,7 @@ export default function ClientDashboard({ user, onLogout }) {
       case 'reports': return <ClientReports />;
       case 'invoices': return <ClientInvoices />;
       case 'zainab': return <ClientZainab chatMessages={chatMessages} setChatMessages={setChatMessages} />;
+      case 'referrals': return <ClientReferrals />;
       case 'help': return <ClientHelp />;
       case 'settings': return <ClientSettings />;
       default: return <ClientHome />;
@@ -348,8 +358,156 @@ export default function ClientDashboard({ user, onLogout }) {
           </div>
         </div>
       )}
+
+      {/* REFERRAL BANNER */}
+      <div style={{ marginTop: '24px', background: 'linear-gradient(135deg, #112240, #0a1628)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: '14px', padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ fontSize: '28px', flexShrink: 0 }}>🎁</div>
+          <div>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: 'white', marginBottom: '3px' }}>
+              Refer a friend — earn 1 month free
+            </div>
+            <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', lineHeight: 1.5 }}>
+              {referralData.total > 0
+                ? `${referralData.total} referral${referralData.total !== 1 ? 's' : ''} made · ${referralData.rewards_earned} month${referralData.rewards_earned !== 1 ? 's' : ''} earned`
+                : 'Share your referral link — every paying signup earns you one free month.'}
+            </div>
+          </div>
+        </div>
+        <button onClick={() => setCurrentPage('referrals')}
+          style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '10px', padding: '10px 20px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
+          {referralData.rewards_earned > 0 ? `🏆 ${referralData.rewards_earned} Month${referralData.rewards_earned !== 1 ? 's' : ''} Earned` : 'View Referral Link →'}
+        </button>
+      </div>
     </div>
   );
+
+  // ─── REFER & EARN ─────────────────────────────────────
+  const ClientReferrals = () => {
+    const [copied, setCopied] = useState(false);
+
+    const copyLink = () => {
+      const link = referralData.referral_link;
+      if (!link) return;
+      try {
+        navigator.clipboard.writeText(link).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }).catch(fallback);
+      } catch { fallback(); }
+      function fallback() {
+        const el = document.createElement('textarea');
+        el.value = link;
+        el.style.cssText = 'position:fixed;top:-9999px;left:-9999px';
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    };
+
+    const statusBadge = (status) => {
+      const map = {
+        pending:      { bg: '#f8fafc', color: '#8896a8', label: 'Pending' },
+        signed_up:    { bg: '#eff6ff', color: '#3b82f6', label: 'Signed Up' },
+        paid:         { bg: '#ecfdf5', color: '#059669', label: 'Paid' },
+        reward_issued:{ bg: '#fffbeb', color: '#c9a84c', label: '🏆 Reward Issued' },
+      };
+      const s = map[status] || map.pending;
+      return <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', background: s.bg, color: s.color, fontWeight: 600, border: `1px solid ${s.color}33` }}>{s.label}</span>;
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Referral Program</div>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>Refer & Earn</div>
+          <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>Refer a business to Sales Scales — earn 1 month free for every paying signup</div>
+        </div>
+
+        {/* REFERRAL LINK HERO */}
+        <div style={{ background: 'linear-gradient(135deg, #0a1628, #112240)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: '14px', padding: '24px 28px', marginBottom: '20px' }}>
+          <div style={{ fontSize: '9px', color: '#c9a84c', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>Your Referral Link</div>
+          {referralData.referral_link ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '11px 14px', fontSize: '13px', color: 'rgba(255,255,255,0.85)', fontFamily: 'DM Mono, monospace', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {referralData.referral_link}
+              </div>
+              <button onClick={copyLink}
+                style={{ background: copied ? '#10b981' : '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '8px', padding: '11px 20px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', flexShrink: 0, transition: 'background 0.2s' }}>
+                {copied ? '✓ Copied!' : 'Copy Link'}
+              </button>
+            </div>
+          ) : (
+            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)' }}>Generating your link...</div>
+          )}
+          {referralData.referral_code && (
+            <div style={{ marginTop: '10px', fontSize: '10px', color: 'rgba(255,255,255,0.35)' }}>
+              Code: <span style={{ fontFamily: 'DM Mono, monospace', color: 'rgba(255,255,255,0.55)', fontWeight: 600 }}>{referralData.referral_code}</span>
+            </div>
+          )}
+        </div>
+
+        {/* STATS */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px', marginBottom: '24px' }}>
+          {[
+            { label: 'Total Referrals', value: referralData.total, sub: 'businesses referred', color: '#3b82f6' },
+            { label: 'Converted & Paid', value: referralData.converted, sub: 'paid their first month', color: '#10b981' },
+            { label: 'Months Earned', value: referralData.rewards_earned, sub: 'free months credited', color: '#c9a84c' },
+          ].map(s => (
+            <div key={s.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', borderTop: `2px solid ${s.color}`, boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+              <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '10px' }}>{s.label}</div>
+              <div style={{ fontSize: '30px', fontWeight: 700, color: '#0a1628', letterSpacing: '-0.5px', marginBottom: '4px' }}>{s.value}</div>
+              <div style={{ fontSize: '11px', color: s.color, fontWeight: 500 }}>{s.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* REFERRALS TABLE */}
+        {referralData.referrals.length > 0 ? (
+          <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)', marginBottom: '20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 1fr', padding: '12px 18px', background: '#0a1628' }}>
+              {['Business', 'Email', 'Status', 'Date'].map(h => (
+                <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px', fontWeight: 700 }}>{h}</div>
+              ))}
+            </div>
+            {referralData.referrals.map(r => (
+              <div key={r.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 1fr', padding: '12px 18px', borderBottom: '1px solid #f4f6fa', alignItems: 'center' }}>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628' }}>{r.referred_business || '—'}</div>
+                <div style={{ fontSize: '11px', color: '#8896a8' }}>{r.referred_email || '—'}</div>
+                <div>{statusBadge(r.status)}</div>
+                <div style={{ fontSize: '10px', color: '#8896a8' }}>{formatDate(r.created_at)}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '48px 24px', textAlign: 'center', boxShadow: '0 1px 3px rgba(10,22,40,0.06)', marginBottom: '20px' }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🎁</div>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: '#0a1628', marginBottom: '6px' }}>No referrals yet</div>
+            <div style={{ fontSize: '12px', color: '#8896a8' }}>Share your link — every business that signs up and pays earns you 1 free month.</div>
+          </div>
+        )}
+
+        {/* HOW IT WORKS */}
+        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '22px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '16px' }}>How It Works</div>
+          {[
+            { n: '1', title: 'Share your link', body: 'Send your referral link to any ecommerce business that could benefit from AI-powered revenue automation.' },
+            { n: '2', title: 'They sign up', body: 'When they use your link to sign up, we track the referral automatically — no extra steps needed.' },
+            { n: '3', title: 'They pay their first month', body: 'Once the referred business completes their first payment, you earn 1 month free.' },
+            { n: '4', title: 'Credit applied automatically', body: 'Your free month is applied to your next billing cycle. No action needed on your part.' },
+          ].map(step => (
+            <div key={step.n} style={{ display: 'flex', gap: '14px', alignItems: 'flex-start', marginBottom: '14px' }}>
+              <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 700, color: '#c9a84c', flexShrink: 0 }}>{step.n}</div>
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', marginBottom: '2px' }}>{step.title}</div>
+                <div style={{ fontSize: '11px', color: '#8896a8', lineHeight: 1.6 }}>{step.body}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   // ─── RESULTS ──────────────────────────────────────────
   const ClientResults = () => {
