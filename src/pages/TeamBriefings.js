@@ -50,6 +50,8 @@ export default function TeamBriefings() {
   const [submitting, setSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [expandedId, setExpandedId] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
 
   const fetchBriefings = async () => {
     setLoading(true);
@@ -88,6 +90,23 @@ export default function TeamBriefings() {
   };
 
   const getMemberName = (id) => MEMBERS.find(m => m.id === id)?.name || id;
+
+  const copyBriefing = (b) => {
+    const text = `From: ${getMemberName(b.from_member)}\nTo: ${getMemberName(b.to_member)}\nSubject: ${b.subject}\nPriority: ${b.priority}\nDate: ${formatDate(b.created_at)}\n\n${b.content}`;
+    navigator.clipboard.writeText(text)
+      .then(() => { setCopiedId(b.id); setTimeout(() => setCopiedId(null), 2000); })
+      .catch(() => {
+        const el = document.createElement('textarea');
+        el.value = text;
+        el.style.cssText = 'position:fixed;top:-9999px;left:-9999px';
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+        setCopiedId(b.id);
+        setTimeout(() => setCopiedId(null), 2000);
+      });
+  };
 
   const formatDate = (d) => {
     const date = new Date(d);
@@ -221,33 +240,79 @@ export default function TeamBriefings() {
               <div className="th" style={{ flex: '0 0 72px' }}>Status</div>
               <div className="th" style={{ flex: '0 0 130px' }}>Date</div>
             </div>
-            {briefings.map(b => (
-              <div
-                key={b.id}
-                className="table-row"
-                style={{ background: !b.is_read ? 'rgba(201,168,76,0.04)' : undefined }}
-              >
-                <div className="td" style={{ flex: '0 0 110px' }}>
-                  <div style={{ fontWeight: 600, fontSize: '13px' }}>{getMemberName(b.from_member)}</div>
-                  <div style={{ fontSize: '10px', color: 'var(--muted)' }}>{MEMBERS.find(m => m.id === b.from_member)?.role}</div>
+            {briefings.map(b => {
+              const isExpanded = expandedId === b.id;
+              const isCopied = copiedId === b.id;
+              return (
+                <div
+                  key={b.id}
+                  className="table-row"
+                  style={{ background: !b.is_read ? 'rgba(201,168,76,0.04)' : undefined, alignItems: 'flex-start' }}
+                >
+                  <div className="td" style={{ flex: '0 0 110px' }}>
+                    <div style={{ fontWeight: 600, fontSize: '13px' }}>{getMemberName(b.from_member)}</div>
+                    <div style={{ fontSize: '10px', color: 'var(--muted)' }}>{MEMBERS.find(m => m.id === b.from_member)?.role}</div>
+                  </div>
+                  <div className="td" style={{ flex: '0 0 110px' }}>
+                    <div style={{ fontWeight: 500, fontSize: '13px' }}>{getMemberName(b.to_member)}</div>
+                    <div style={{ fontSize: '10px', color: 'var(--muted)' }}>{MEMBERS.find(m => m.id === b.to_member)?.role}</div>
+                  </div>
+                  <div className="td" style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}>{b.subject}</div>
+                    {isExpanded ? (
+                      <>
+                        <div style={{
+                          fontSize: '12px', color: 'var(--slate)', lineHeight: '1.75',
+                          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                          background: 'var(--bg)', border: '1px solid var(--border)',
+                          borderRadius: '8px', padding: '12px 14px', marginBottom: '10px',
+                        }}>
+                          {b.content}
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <button
+                            onClick={() => setExpandedId(null)}
+                            style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: '11px', fontWeight: 600, cursor: 'pointer', padding: 0, fontFamily: 'DM Sans, sans-serif' }}>
+                            ↑ Collapse
+                          </button>
+                          <button
+                            onClick={() => copyBriefing(b)}
+                            style={{
+                              background: isCopied ? 'var(--green)' : 'var(--navy)',
+                              color: isCopied ? 'white' : 'var(--gold)',
+                              border: 'none', borderRadius: '6px', padding: '4px 12px',
+                              fontSize: '11px', fontWeight: 700, cursor: 'pointer',
+                              fontFamily: 'DM Sans, sans-serif', transition: 'background 0.2s',
+                            }}>
+                            {isCopied ? '✓ Copied' : '⎘ Copy'}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: '11px', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '4px' }}>
+                          {b.content}
+                        </div>
+                        <button
+                          onClick={() => setExpandedId(b.id)}
+                          style={{ background: 'none', border: 'none', color: 'var(--gold)', fontSize: '11px', fontWeight: 600, cursor: 'pointer', padding: 0, fontFamily: 'DM Sans, sans-serif' }}>
+                          View full →
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  <div className="td" style={{ flex: '0 0 80px' }}>
+                    <span className={PRIORITY_BADGE[b.priority] || 'badge-blue'}>{b.priority}</span>
+                  </div>
+                  <div className="td" style={{ flex: '0 0 72px' }}>
+                    <span className={b.is_read ? 'badge-green' : 'badge-gold'}>{b.is_read ? 'read' : 'unread'}</span>
+                  </div>
+                  <div className="td" style={{ flex: '0 0 130px', fontSize: '11px', color: 'var(--muted)' }}>
+                    {formatDate(b.created_at)}
+                  </div>
                 </div>
-                <div className="td" style={{ flex: '0 0 110px' }}>
-                  <div style={{ fontWeight: 500, fontSize: '13px' }}>{getMemberName(b.to_member)}</div>
-                  <div style={{ fontSize: '10px', color: 'var(--muted)' }}>{MEMBERS.find(m => m.id === b.to_member)?.role}</div>
-                </div>
-                <div className="td" style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '2px' }}>{b.subject}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.content}</div>
-                </div>
-                <div className="td" style={{ flex: '0 0 80px' }}>
-                  <span className={PRIORITY_BADGE[b.priority] || 'badge-blue'}>{b.priority}</span>
-                </div>
-                <div className="td" style={{ flex: '0 0 72px' }}>
-                  <span className={b.is_read ? 'badge-green' : 'badge-gold'}>{b.is_read ? 'read' : 'unread'}</span>
-                </div>
-                <div className="td" style={{ flex: '0 0 130px', fontSize: '11px', color: 'var(--muted)' }}>{formatDate(b.created_at)}</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
