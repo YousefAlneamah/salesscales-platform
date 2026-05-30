@@ -47,6 +47,7 @@ export default function Analytics() {
   const [deals, setDeals] = useState([]);
   const [approvals, setApprovals] = useState([]);
   const [clients, setClients] = useState([]);
+  const [seqPerformance, setSeqPerformance] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterClient, setFilterClient] = useState('All');
 
@@ -55,7 +56,7 @@ export default function Analytics() {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [serverRes, contactsRes, workflowsRes, messagesRes, dealsRes, approvalsRes, clientsRes] = await Promise.all([
+      const [serverRes, contactsRes, workflowsRes, messagesRes, dealsRes, approvalsRes, clientsRes, activeWfRes, enrollmentsRes] = await Promise.all([
         axios.get(`${API_BASE}/analytics/stats`),
         supabase.from('contacts').select('source, pipeline_stage, client_id'),
         supabase.from('workflows').select('*'),
@@ -63,6 +64,8 @@ export default function Analytics() {
         supabase.from('pipeline_deals').select('value, stage, client_id'),
         supabase.from('approvals').select('status, client_id'),
         supabase.from('clients').select('id, name'),
+        supabase.from('workflows').select('id, name, client_id, status, trigger_type, enrolled_count, clients(name)').eq('status', 'active'),
+        supabase.from('workflow_enrollments').select('workflow_id, status'),
       ]);
 
       setMonthStats(serverRes.data);
@@ -72,6 +75,30 @@ export default function Analytics() {
       setDeals(dealsRes.data || []);
       setApprovals(approvalsRes.data || []);
       setClients(clientsRes.data || []);
+
+      const enrollmentsByWorkflow = (enrollmentsRes.data || []).reduce((acc, e) => {
+        if (!acc[e.workflow_id]) acc[e.workflow_id] = { total: 0, completed: 0 };
+        acc[e.workflow_id].total += 1;
+        if (e.status === 'completed') acc[e.workflow_id].completed += 1;
+        return acc;
+      }, {});
+      const perf = (activeWfRes.data || []).map(w => {
+        const counts = enrollmentsByWorkflow[w.id] || { total: 0, completed: 0 };
+        const enrolled = counts.total;
+        const completed = counts.completed;
+        const rate = enrolled > 0 ? Math.round((completed / enrolled) * 100) : 0;
+        return {
+          id: w.id,
+          name: w.name,
+          client_name: w.clients?.name || '—',
+          trigger_type: w.trigger_type,
+          enrolled,
+          completed,
+          completion_rate: rate,
+          est_revenue: completed * 47,
+        };
+      }).sort((a, b) => b.completion_rate - a.completion_rate);
+      setSeqPerformance(perf);
     } catch (e) {
       console.error('Analytics error:', e);
     }
@@ -225,6 +252,54 @@ export default function Analytics() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* SEQUENCE PERFORMANCE */}
+      <div className="section-label" style={{ margin: '24px 0 10px' }}>Sequence Performance</div>
+      <div style={{ fontSize: '11px', color: '#8896a8', marginBottom: '12px' }}>
+        Active sequences across all clients — sorted by completion rate. Est. revenue @ $47/completion.
+      </div>
+      {seqPerformance.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: '40px', color: '#8896a8', fontSize: '12px' }}>
+          No active sequences with enrollment data yet
+        </div>
+      ) : (
+        <div className="table-wrap" style={{ marginBottom: '8px' }}>
+          <div className="table-header">
+            <div className="th" style={{ flex: 2 }}>Sequence</div>
+            <div className="th" style={{ flex: 1 }}>Client</div>
+            <div className="th" style={{ flex: 1 }}>Trigger</div>
+            <div className="th" style={{ flex: '0 0 80px', textAlign: 'right' }}>Enrolled</div>
+            <div className="th" style={{ flex: '0 0 80px', textAlign: 'right' }}>Completed</div>
+            <div className="th" style={{ flex: '0 0 110px', textAlign: 'right' }}>Completion %</div>
+            <div className="th" style={{ flex: '0 0 110px', textAlign: 'right' }}>Est. Revenue</div>
+          </div>
+          {seqPerformance.map(s => {
+            const rateColor = s.completion_rate >= 40 ? '#10b981' : s.completion_rate >= 20 ? '#c9a84c' : '#dc2626';
+            return (
+              <div key={s.id} className="table-row">
+                <div className="td" style={{ flex: 2, fontWeight: 600, color: '#0a1628', fontSize: '12px' }}>{s.name}</div>
+                <div className="td" style={{ flex: 1, fontSize: '11px', color: '#4a5568' }}>{s.client_name}</div>
+                <div className="td" style={{ flex: 1, fontSize: '11px', color: '#4a5568', textTransform: 'capitalize' }}>
+                  {(s.trigger_type || '').replace(/_/g, ' ') || '—'}
+                </div>
+                <div className="td" style={{ flex: '0 0 80px', textAlign: 'right', fontSize: '12px', color: '#0a1628' }}>{s.enrolled}</div>
+                <div className="td" style={{ flex: '0 0 80px', textAlign: 'right', fontSize: '12px', color: '#0a1628' }}>{s.completed}</div>
+                <div className="td" style={{ flex: '0 0 110px', textAlign: 'right' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
+                    <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: '#e4e9f0', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${s.completion_rate}%`, background: rateColor, borderRadius: '2px' }} />
+                    </div>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: rateColor }}>{s.completion_rate}%</span>
+                  </div>
+                </div>
+                <div className="td" style={{ flex: '0 0 110px', textAlign: 'right', fontSize: '12px', fontWeight: 600, color: '#10b981' }}>
+                  {s.est_revenue > 0 ? `$${s.est_revenue.toLocaleString()}` : '—'}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

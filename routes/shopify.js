@@ -42,18 +42,25 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
     // Waits between emails: 1h → E1 → 23h → E2 → 48h → E3 → 48h → E4 → 48h → E5 → 72h → E6 → 96h → E7
     // Cumulative: 1h, 24h, 72h, 5d, 7d, 10d, 14d
 
-    const [emails1to3Raw, emails4to7Raw] = await Promise.all([
+    // SQL migration for ab_test_group column:
+    // alter table workflow_steps add column if not exists ab_test_group text;
+
+    const [emails1to3Raw, emails4to7Raw, email1SocialProofRaw] = await Promise.all([
       aiCall(mahdiSystem,
         `Write 3 cart recovery emails (subjects + body copy) for this store.\n\n${ctx}\n\nAngles:\nEmail 1 (sent 1h after abandonment): urgency — cart items waiting, personalised opener\nEmail 2 (24h): social proof — customer reviews, bestseller status\nEmail 3 (72h): product benefits — key features and why it matters\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."}]}\nUse {{first_name}}. Keep each email body under 120 words. Reference real product names and prices.${humanRules}`,
         ''),
       aiCall(mahdiSystem,
         `Write 4 cart recovery emails (subjects + body copy) for this store.\n\n${ctx}\n\nAngles:\nEmail 4 (5 days after abandonment): objection handling — price, quality, shipping concerns\nEmail 5 (7 days): scarcity — stock running low\nEmail 6 (10 days): value + guarantee — risk-free, easy returns, quality promise\nEmail 7 (14 days): final offer — last chance, make it count\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."}]}\nUse {{first_name}}. Keep each email body under 120 words. Reference real product names and prices.${humanRules}`,
         ''),
+      aiCall(mahdiSystem,
+        `Write 1 cart recovery email for this store.\n\n${ctx}\n\nAngle: Social Proof (sent 1h after abandonment)\nLead with strong social proof — customer reviews, ratings, bestseller status, or how many people bought this product recently. Make the reader feel they'd be missing out on something others love. Reference the specific product they left.\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."}]}\nUse {{first_name}}. Under 120 words. Reference real product names and prices.${humanRules}`,
+        ''),
     ]);
 
-    let emails1to3 = { emails: [] }, emails4to7 = { emails: [] };
+    let emails1to3 = { emails: [] }, emails4to7 = { emails: [] }, email1SP = { emails: [] };
     try { emails1to3 = parseJson(emails1to3Raw); } catch { /* use default */ }
     try { emails4to7 = parseJson(emails4to7Raw); } catch { /* use default */ }
+    try { email1SP = parseJson(email1SocialProofRaw); } catch { /* use default */ }
 
     const allEmails = [...(emails1to3.emails || []), ...(emails4to7.emails || [])];
     // wait_hours before each email (index-matched)
@@ -64,18 +71,57 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
       emailSteps.push({ step_type: 'email', subject: email.subject || '', content: email.content || '', wait_hours: 0 });
     });
 
-    await supabase.from('approvals').insert([{
-      type: 'email_sequence',
-      title: `Cart Recovery Emails (7) — ${storeName}`,
-      content: `Mahdi built a 7-email cart recovery sequence for ${storeName} using live store data. Angles: urgency → social proof → benefits → objection handling → scarcity → guarantee → final offer. AOV: $${aov}. Products: ${productList.slice(0, 100)}. Approve to activate.`,
-      metadata: { steps: emailSteps, trigger_type: 'cart_abandoned', shop, aov },
-      from_member: 'mahdi',
-      client_id: clientId,
-      priority: 'normal',
-      status: 'pending',
-      created_at: new Date().toISOString()
-    }]);
-    console.log(`[AUTO] Shopify connect — 7-email sequence queued for ${shop}`);
+    const email1A = allEmails[0] || { subject: '', content: '' };
+    const email1B = (email1SP.emails || [])[0] || { subject: '', content: '' };
+
+    await Promise.all([
+      supabase.from('approvals').insert([{
+        type: 'email_sequence',
+        title: `Cart Recovery Emails (7) — ${storeName}`,
+        content: `Mahdi built a 7-email cart recovery sequence for ${storeName} using live store data. Angles: urgency → social proof → benefits → objection handling → scarcity → guarantee → final offer. AOV: $${aov}. Products: ${productList.slice(0, 100)}. Approve to activate.`,
+        metadata: { steps: emailSteps, trigger_type: 'cart_abandoned', shop, aov },
+        from_member: 'mahdi',
+        client_id: clientId,
+        priority: 'normal',
+        status: 'pending',
+        created_at: new Date().toISOString()
+      }]),
+      supabase.from('approvals').insert([{
+        type: 'email_sequence',
+        title: `A/B Test — Email 1 Version A (Urgency) — ${storeName}`,
+        content: `Subject: ${email1A.subject}\n\n${email1A.content}\n\nVersion A tests the urgency angle for the first cart recovery email. Approve this version to use it as the opening email in your sequence.`,
+        metadata: {
+          steps: [
+            { step_type: 'wait', content: '', wait_hours: 1 },
+            { step_type: 'email', subject: email1A.subject || '', content: email1A.content || '', wait_hours: 0, ab_test_group: 'A' },
+          ],
+          trigger_type: 'cart_abandoned', shop, aov, ab_test_group: 'A', ab_test_angle: 'urgency',
+        },
+        from_member: 'mahdi',
+        client_id: clientId,
+        priority: 'normal',
+        status: 'pending',
+        created_at: new Date().toISOString()
+      }]),
+      supabase.from('approvals').insert([{
+        type: 'email_sequence',
+        title: `A/B Test — Email 1 Version B (Social Proof) — ${storeName}`,
+        content: `Subject: ${email1B.subject}\n\n${email1B.content}\n\nVersion B tests the social proof angle for the first cart recovery email. Approve this version to replace Email 1 in your sequence with the social proof approach.`,
+        metadata: {
+          steps: [
+            { step_type: 'wait', content: '', wait_hours: 1 },
+            { step_type: 'email', subject: email1B.subject || '', content: email1B.content || '', wait_hours: 0, ab_test_group: 'B' },
+          ],
+          trigger_type: 'cart_abandoned', shop, aov, ab_test_group: 'B', ab_test_angle: 'social_proof',
+        },
+        from_member: 'mahdi',
+        client_id: clientId,
+        priority: 'normal',
+        status: 'pending',
+        created_at: new Date().toISOString()
+      }]),
+    ]);
+    console.log(`[AUTO] Shopify connect — 7-email sequence + A/B test emails queued for ${shop}`);
 
     // ── SMS SEQUENCE (4 messages) ──────────────────────────
     // Timing: 0h, 24h, 72h, 7 days
