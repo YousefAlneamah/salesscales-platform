@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { API_BASE } from '../config';
 import axios from "axios";
-import { supabase } from "../supabase";
 
 export default function Login({ onLogin }) {
   const [email, setEmail] = useState("");
@@ -40,42 +39,25 @@ export default function Login({ onLogin }) {
       }
     }
 
-    // Client login — two queries to avoid join dependency on FK constraints
+    // Client login — server-side bcrypt comparison (supports both hashed and legacy plain-text)
     try {
-      const { data: clientUser } = await supabase
-        .from("client_users")
-        .select("id, name, email, client_id")
-        .eq("email", email)
-        .eq("password", password)
-        .maybeSingle();
-
-      if (!clientUser) {
-        setError("Invalid email or password. Please try again.");
-        setLoading(false);
-        return;
-      }
-
-      const { data: client } = await supabase
-        .from("clients")
-        .select("name, tier")
-        .eq("id", clientUser.client_id)
-        .maybeSingle();
-
-      await supabase.from("client_users").update({ last_login: new Date().toISOString() }).eq("id", clientUser.id);
-
+      const { data: clientData } = await axios.post(`${API_BASE}/auth/client-login`, { email, password });
       const user = {
-        name: clientUser.name,
-        email: clientUser.email,
+        name: clientData.name,
+        email: clientData.email,
         role: "client",
-        clientId: clientUser.client_id,
-        clientName: client?.name || "Your Store",
-        tier: client?.tier || "starter"
+        clientId: clientData.client_id,
+        clientName: clientData.client_name,
+        tier: clientData.tier,
       };
-
       localStorage.setItem("user", JSON.stringify(user));
       onLogin(user);
     } catch (e) {
-      setError("Something went wrong. Please try again.");
+      if (e.response?.status === 401) {
+        setError("Invalid email or password. Please try again.");
+      } else {
+        setError("Something went wrong. Please try again.");
+      }
     }
 
     setLoading(false);

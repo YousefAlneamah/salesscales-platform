@@ -36,9 +36,8 @@ module.exports = ({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }) =>
     try {
       const { data: user } = await supabase.from('users').select('*').eq('email', email.toLowerCase()).maybeSingle();
       if (!user) return res.status(401).json({ error: 'Invalid email or password' });
-      const valid = user.password_hash
-        ? await bcrypt.compare(password, user.password_hash)
-        : password === user.password;
+      if (!user.password_hash) return res.status(401).json({ error: 'Invalid email or password' });
+      const valid = await bcrypt.compare(password, user.password_hash);
       if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
       const token = jwt.sign(
         { id: user.id, email: user.email, name: user.name, role: user.role },
@@ -124,13 +123,57 @@ module.exports = ({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }) =>
         await supabase.from('password_resets').delete().eq('id', reset.id);
         return res.status(400).json({ error: 'Reset code has expired — request a new one' });
       }
-      await supabase.from('client_users').update({ password: new_password }).eq('email', email);
+      const password_hash = await bcrypt.hash(new_password, 10);
+      await supabase.from('client_users').update({ password: password_hash }).eq('email', email);
       await supabase.from('password_resets').delete().eq('email', email);
       console.log('Password reset completed for:', email);
       res.json({ ok: true });
     } catch (e) {
       console.error('Confirm reset error:', e.message);
       res.status(500).json({ error: 'Failed to reset password' });
+    }
+  });
+
+  // ─── CLIENT LOGIN ────────────────────────────────────────
+  router.post('/client-login', async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+    try {
+      const { data: clientUser } = await supabase
+        .from('client_users')
+        .select('id, name, email, client_id, password')
+        .eq('email', email.toLowerCase())
+        .maybeSingle();
+
+      if (!clientUser) return res.status(401).json({ error: 'Invalid email or password' });
+
+      // Support bcrypt hashes (new/reset accounts) and plain text (legacy accounts)
+      const storedPw = clientUser.password || '';
+      const valid = storedPw.startsWith('$2')
+        ? await bcrypt.compare(password, storedPw)
+        : storedPw === password;
+
+      if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
+
+      await supabase.from('client_users')
+        .update({ last_login: new Date().toISOString() })
+        .eq('id', clientUser.id);
+
+      const { data: client } = await supabase
+        .from('clients').select('name, tier').eq('id', clientUser.client_id).maybeSingle();
+
+      console.log('Client login:', clientUser.email);
+      res.json({
+        id: clientUser.id,
+        name: clientUser.name,
+        email: clientUser.email,
+        client_id: clientUser.client_id,
+        client_name: client?.name || 'Your Store',
+        tier: client?.tier || 'starter',
+      });
+    } catch (e) {
+      console.error('Client login error:', e.message);
+      res.status(500).json({ error: 'Login failed' });
     }
   });
 
