@@ -3354,6 +3354,33 @@ app.post('/clients/onboard', async (req, res) => {
       console.error('Welcome email failed (non-fatal):', mailErr.message);
     }
 
+    // Issue email verification code
+    try {
+      const verifyCode = String(Math.floor(100000 + Math.random() * 900000));
+      const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      await supabase.from('email_verifications').insert([{
+        email: email.toLowerCase(), code: verifyCode, expires_at: verifyExpires,
+      }]);
+      await sgMail.send({
+        to: email,
+        from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+        subject: 'Verify your Sales Scales account',
+        html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px">
+          <div style="background:#0a1628;padding:20px 24px;border-radius:8px 8px 0 0">
+            <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase">Sales Scales</div>
+            <div style="color:white;font-size:16px;font-weight:600;margin-top:6px">Email Verification</div>
+          </div>
+          <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 8px 8px;padding:28px 24px">
+            <p style="color:#4a5568;font-size:13px;margin:0 0 20px;line-height:1.6">Hi ${name}, enter this code to verify your Sales Scales account.</p>
+            <div style="background:#f0f3f8;border:1px solid #e4e9f0;border-radius:10px;padding:20px;text-align:center;font-size:36px;font-weight:800;letter-spacing:12px;color:#0a1628;font-family:monospace">${verifyCode}</div>
+            <p style="color:#8896a8;font-size:11px;margin:18px 0 0;line-height:1.6">This code expires in 24 hours. If you didn't create a Sales Scales account, you can safely ignore this email.</p>
+          </div>
+        </div>`,
+      });
+    } catch (verifyErr) {
+      console.error('Verification email failed (non-fatal):', verifyErr.message);
+    }
+
     console.log(`Client onboarded: ${name} (${email}) — client_id ${client.id}`);
     res.json({ ok: true, client, client_user: clientUser });
   } catch (e) {

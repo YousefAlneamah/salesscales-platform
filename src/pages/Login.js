@@ -14,6 +14,14 @@ export default function Login({ onLogin }) {
   const [resetMsg, setResetMsg] = useState("");
   const [resetDone, setResetDone] = useState(false);
 
+  // Email verification state
+  const [pendingVerification, setPendingVerification] = useState(false);
+  const [pendingUser, setPendingUser] = useState(null);
+  const [verifyCode, setVerifyCode] = useState("");
+  const [verifyError, setVerifyError] = useState("");
+  const [verifyMsg, setVerifyMsg] = useState("");
+  const [verifyLoading, setVerifyLoading] = useState(false);
+
   const handleLogin = async () => {
     setLoading(true);
     setError("");
@@ -50,6 +58,12 @@ export default function Login({ onLogin }) {
         clientName: clientData.client_name,
         tier: clientData.tier,
       };
+      if (clientData.verified === false) {
+        setPendingUser(user);
+        setPendingVerification(true);
+        setLoading(false);
+        return;
+      }
       localStorage.setItem("user", JSON.stringify(user));
       onLogin(user);
     } catch (e) {
@@ -96,6 +110,43 @@ export default function Login({ onLogin }) {
     setResetCode(""); setNewPassword(""); setResetMsg(""); setError("");
   };
 
+  const handleVerify = async () => {
+    if (!verifyCode || verifyCode.trim().length !== 6) {
+      setVerifyError("Enter the 6-digit code from your email.");
+      return;
+    }
+    setVerifyLoading(true);
+    setVerifyError("");
+    setVerifyMsg("");
+    try {
+      await axios.post(`${API_BASE}/auth/verify-email`, {
+        email: pendingUser.email,
+        code: verifyCode.trim(),
+      });
+      setVerifyMsg("Email verified! Signing you in...");
+      setTimeout(() => {
+        localStorage.setItem("user", JSON.stringify(pendingUser));
+        onLogin(pendingUser);
+      }, 800);
+    } catch (e) {
+      setVerifyError(e.response?.data?.error || "Invalid or expired code. Please try again.");
+    }
+    setVerifyLoading(false);
+  };
+
+  const handleResend = async () => {
+    setVerifyLoading(true);
+    setVerifyError("");
+    setVerifyMsg("");
+    try {
+      await axios.post(`${API_BASE}/auth/resend-verification`, { email: pendingUser.email });
+      setVerifyMsg("New code sent — check your inbox.");
+    } catch (e) {
+      setVerifyError("Could not resend code. Please try again.");
+    }
+    setVerifyLoading(false);
+  };
+
   return (
     <div style={{
       minHeight: "100vh",
@@ -120,6 +171,62 @@ export default function Login({ onLogin }) {
           <div style={{ width: "32px", height: "1.5px", background: "linear-gradient(90deg, #c9a84c, #3b82f6)", margin: "12px auto 0", borderRadius: "1px" }}></div>
         </div>
 
+        {/* ── EMAIL VERIFICATION SCREEN ── */}
+        {pendingVerification && pendingUser ? (
+          <>
+            <div style={{ textAlign: "center", marginBottom: "24px" }}>
+              <div style={{ fontSize: "36px", marginBottom: "12px" }}>✉️</div>
+              <div style={{ fontSize: "16px", fontWeight: 700, color: "#0a1628", marginBottom: "6px" }}>Check your email</div>
+              <div style={{ fontSize: "12px", color: "#8896a8", lineHeight: "1.6" }}>
+                We sent a 6-digit code to <strong style={{ color: "#0a1628" }}>{pendingUser.email}</strong>.<br />
+                Enter it below to verify your account.
+              </div>
+            </div>
+
+            <div style={{ marginBottom: "20px" }}>
+              <div style={{ fontSize: "10px", color: "#8896a8", marginBottom: "6px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Verification Code</div>
+              <input
+                type="text"
+                value={verifyCode}
+                onChange={e => setVerifyCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onKeyDown={e => e.key === "Enter" && handleVerify()}
+                placeholder="000000"
+                maxLength={6}
+                style={{ width: "100%", border: "1px solid #e4e9f0", borderRadius: "8px", padding: "12px 14px", fontSize: "22px", fontWeight: 700, letterSpacing: "10px", color: "#0a1628", outline: "none", background: "white", boxSizing: "border-box", fontFamily: "DM Mono, monospace", textAlign: "center" }}
+              />
+            </div>
+
+            {verifyError && (
+              <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", padding: "10px 14px", fontSize: "12px", color: "#dc2626", marginBottom: "16px" }}>
+                {verifyError}
+              </div>
+            )}
+            {verifyMsg && (
+              <div style={{ background: "#f0fdf4", border: "1px solid #a7f3d0", borderRadius: "8px", padding: "10px 14px", fontSize: "12px", color: "#059669", marginBottom: "16px" }}>
+                {verifyMsg}
+              </div>
+            )}
+
+            <button
+              onClick={handleVerify}
+              disabled={verifyLoading}
+              style={{ width: "100%", padding: "12px", fontSize: "13px", borderRadius: "8px", background: "#0a1628", color: "white", border: "none", cursor: "pointer", fontWeight: 600, fontFamily: "DM Sans, sans-serif", marginBottom: "12px" }}>
+              {verifyLoading ? "Verifying..." : "Verify Account"}
+            </button>
+
+            <div style={{ textAlign: "center", display: "flex", justifyContent: "center", gap: "16px" }}>
+              <button onClick={handleResend} disabled={verifyLoading}
+                style={{ background: "none", border: "none", color: "#c9a84c", fontSize: "12px", cursor: "pointer", fontFamily: "DM Sans, sans-serif", fontWeight: 600 }}>
+                Resend code
+              </button>
+              <button onClick={() => { setPendingVerification(false); setPendingUser(null); setVerifyCode(""); setVerifyError(""); setVerifyMsg(""); }}
+                style={{ background: "none", border: "none", color: "#8896a8", fontSize: "11px", cursor: "pointer", fontFamily: "DM Sans, sans-serif", textDecoration: "underline" }}>
+                ← Back to sign in
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
         <div style={{ fontSize: "16px", fontWeight: 700, color: "#0a1628", marginBottom: "6px", textAlign: "center" }}>Welcome back</div>
         <div style={{ fontSize: "12px", color: "#8896a8", marginBottom: "28px", textAlign: "center" }}>Sign in to your account</div>
 
@@ -224,6 +331,8 @@ export default function Login({ onLogin }) {
         <div style={{ textAlign: "center", marginTop: "16px", fontSize: "11px", color: "#8896a8" }}>
           Sales Scales · Powered by AI
         </div>
+          </>
+        )}
       </div>
     </div>
   );

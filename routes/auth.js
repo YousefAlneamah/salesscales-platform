@@ -27,6 +27,25 @@ const oauthErrorPage = (platform, msg) => `<!DOCTYPE html>
   </div>
 </body></html>`;
 
+const sendVerificationEmail = async (sgMail, email, name, code) => {
+  await sgMail.send({
+    to: email,
+    from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+    subject: 'Verify your Sales Scales account',
+    html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px">
+      <div style="background:#0a1628;padding:20px 24px;border-radius:8px 8px 0 0">
+        <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase">Sales Scales</div>
+        <div style="color:white;font-size:16px;font-weight:600;margin-top:6px">Email Verification</div>
+      </div>
+      <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 8px 8px;padding:28px 24px">
+        <p style="color:#4a5568;font-size:13px;margin:0 0 20px;line-height:1.6">Hi ${name || 'there'}, enter this code to verify your Sales Scales account.</p>
+        <div style="background:#f0f3f8;border:1px solid #e4e9f0;border-radius:10px;padding:20px;text-align:center;font-size:36px;font-weight:800;letter-spacing:12px;color:#0a1628;font-family:monospace">${code}</div>
+        <p style="color:#8896a8;font-size:11px;margin:18px 0 0;line-height:1.6">This code expires in 24 hours. If you didn't create a Sales Scales account, you can safely ignore this email.</p>
+      </div>
+    </div>`,
+  });
+};
+
 module.exports = ({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }) => {
   const router = express.Router();
 
@@ -141,7 +160,7 @@ module.exports = ({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }) =>
     try {
       const { data: clientUser } = await supabase
         .from('client_users')
-        .select('id, name, email, client_id, password')
+        .select('id, name, email, client_id, password, verified')
         .eq('email', email.toLowerCase())
         .maybeSingle();
 
@@ -170,10 +189,72 @@ module.exports = ({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }) =>
         client_id: clientUser.client_id,
         client_name: client?.name || 'Your Store',
         tier: client?.tier || 'starter',
+        verified: clientUser.verified === true,
       });
     } catch (e) {
       console.error('Client login error:', e.message);
       res.status(500).json({ error: 'Login failed' });
+    }
+  });
+
+  // ─── EMAIL VERIFICATION ──────────────────────────────────
+  router.post('/verify-email', async (req, res) => {
+    const { email, code } = req.body;
+    if (!email || !code) return res.status(400).json({ error: 'email and code required' });
+    try {
+      const { data: record } = await supabase
+        .from('email_verifications')
+        .select('*')
+        .eq('email', email.toLowerCase())
+        .eq('code', String(code).trim())
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!record) return res.status(400).json({ error: 'Invalid verification code' });
+
+      if (new Date(record.expires_at) < new Date()) {
+        await supabase.from('email_verifications').delete().eq('id', record.id);
+        return res.status(400).json({ error: 'Verification code has expired — request a new one' });
+      }
+
+      await supabase.from('client_users').update({ verified: true }).eq('email', email.toLowerCase());
+      await supabase.from('email_verifications').delete().eq('email', email.toLowerCase());
+      console.log('Email verified:', email);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('verify-email error:', e.message);
+      res.status(500).json({ error: 'Verification failed' });
+    }
+  });
+
+  router.post('/resend-verification', async (req, res) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'email required' });
+    try {
+      const { data: clientUser } = await supabase
+        .from('client_users')
+        .select('id, name, email, verified')
+        .eq('email', email.toLowerCase())
+        .maybeSingle();
+
+      if (!clientUser) return res.status(404).json({ error: 'Account not found' });
+      if (clientUser.verified) return res.json({ ok: true, already_verified: true });
+
+      await supabase.from('email_verifications').delete().eq('email', email.toLowerCase());
+
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      const expires_at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      await supabase.from('email_verifications').insert([{
+        email: email.toLowerCase(), code, expires_at,
+      }]);
+
+      await sendVerificationEmail(sgMail, email, clientUser.name, code);
+      console.log('Verification resent to:', email);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('resend-verification error:', e.message);
+      res.status(500).json({ error: 'Failed to resend verification' });
     }
   });
 
