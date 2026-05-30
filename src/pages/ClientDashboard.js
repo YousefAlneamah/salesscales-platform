@@ -36,6 +36,8 @@ export default function ClientDashboard({ user, onLogout }) {
   const [chatMessages, setChatMessages] = useState([
     { role: 'ai', content: `Hi ${user.name.split(' ')[0]}! I'm Zainab, your dedicated AI partner at Sales Scales. I'm here to help you understand your results, answer questions about your sequences, and make sure your AI revenue system is delivering maximum value. What can I help you with today?` }
   ]);
+  const [showWalkthrough, setShowWalkthrough] = useState(false);
+  const [walkthroughStep, setWalkthroughStep] = useState(0);
 
   useEffect(() => { fetchData(); }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -44,6 +46,34 @@ export default function ClientDashboard({ user, onLogout }) {
       .then(r => setProducts(r.data.products || []))
       .catch(() => setProducts([]));
   }, [user.clientId]);
+
+  useEffect(() => {
+    (async () => {
+      const lsKey = `wt_done_${user.email}`;
+      try {
+        const { data } = await supabase
+          .from('client_users')
+          .select('first_login_completed')
+          .eq('email', user.email)
+          .maybeSingle();
+        if (!data?.first_login_completed && localStorage.getItem(lsKey) !== 'true') {
+          setShowWalkthrough(true);
+        }
+      } catch {
+        if (localStorage.getItem(lsKey) !== 'true') setShowWalkthrough(true);
+      }
+    })();
+  }, [user.email]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openWalkthrough = () => { setWalkthroughStep(0); setShowWalkthrough(true); };
+
+  const completeWalkthrough = async () => {
+    localStorage.setItem(`wt_done_${user.email}`, 'true');
+    try {
+      await supabase.from('client_users').update({ first_login_completed: true }).eq('email', user.email);
+    } catch { /* column may not exist yet — localStorage fallback is set */ }
+    setWalkthroughStep(4);
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -1247,6 +1277,12 @@ export default function ClientDashboard({ user, onLogout }) {
         <div style={{ background: 'white', borderBottom: '1px solid #e4e9f0', padding: '0 28px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 1px 3px rgba(10,22,40,0.04)', flexShrink: 0 }}>
           <div style={{ fontSize: '14px', fontWeight: 600, color: '#0a1628' }}>{pageTitles[currentPage]}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button onClick={openWalkthrough}
+              style={{ background: 'transparent', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '6px 13px', fontSize: '11px', fontWeight: 600, color: '#8896a8', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', transition: 'all 0.15s' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = '#c9a84c'; e.currentTarget.style.color = '#c9a84c'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = '#e4e9f0'; e.currentTarget.style.color = '#8896a8'; }}>
+              <i className="ti ti-help-circle" style={{ fontSize: '14px' }} /> Setup Guide
+            </button>
             <span style={{ fontSize: '9px', padding: '4px 12px', borderRadius: '20px', background: 'rgba(201,168,76,0.1)', color: '#c9a84c', border: '1px solid rgba(201,168,76,0.2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px' }}>
               {user.tier} Plan
             </span>
@@ -1263,6 +1299,148 @@ export default function ClientDashboard({ user, onLogout }) {
           ) : renderPage()}
         </div>
       </div>
+
+      {/* ── ONBOARDING WALKTHROUGH MODAL ───────────────────── */}
+      {showWalkthrough && (() => {
+        const STEPS = [
+          {
+            icon: '🎉',
+            title: `Welcome to Sales Scales, ${user.name.split(' ')[0]}`,
+            body: "Your AI revenue system is live. This quick tour takes 2 minutes and shows you exactly where everything is — so you can get results from day one.",
+            detail: null,
+            cta: 'Start Tour →',
+          },
+          {
+            icon: '🛍️',
+            title: 'Connect Your Shopify Store',
+            body: 'Connecting Shopify unlocks cart recovery sequences, automatic customer sync, and live product data. Your AI team uses this to recover abandoned carts while you sleep.',
+            detail: products.length > 0
+              ? { ok: true, text: `✓ Shopify connected — ${products.length} product${products.length !== 1 ? 's' : ''} loaded` }
+              : { ok: false, text: 'Not connected yet — ask your Sales Scales team to set this up, or connect via the Integrations page.' },
+            cta: 'Continue →',
+          },
+          {
+            icon: '⚡',
+            title: 'Review Your Sequences',
+            body: "Your AI team has already built automated email, SMS, and WhatsApp sequences for you. Head to My Approvals to review them and send them live with one click.",
+            detail: (() => {
+              const active = workflows.filter(w => w.status === 'active').length;
+              const total = workflows.length;
+              return { ok: total > 0, text: total > 0 ? `${active} sequence${active !== 1 ? 's' : ''} active · ${total} total built for you` : 'No sequences yet — your AI team is building them now.' };
+            })(),
+            cta: 'Got It →',
+          },
+          {
+            icon: '🚀',
+            title: "You're All Set",
+            body: "Zainab, Hassan, Ali, Mahdi, Fatima, and Hussain are working 24/7 on your store. Check your Dashboard to watch results come in — and use the Setup Guide button any time to reopen this tour.",
+            detail: null,
+            cta: 'Launch My Dashboard',
+          },
+        ];
+
+        const TOTAL = STEPS.length;
+        const isCongrats = walkthroughStep >= TOTAL;
+        const step = isCongrats ? null : STEPS[walkthroughStep];
+
+        const advance = () => {
+          if (walkthroughStep < TOTAL - 1) {
+            setWalkthroughStep(s => s + 1);
+          } else {
+            completeWalkthrough();
+          }
+        };
+
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,22,40,0.72)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+            <div style={{ background: 'white', borderRadius: '16px', width: '100%', maxWidth: '500px', overflow: 'hidden', boxShadow: '0 24px 64px rgba(10,22,40,0.32)' }}>
+
+              {/* Header */}
+              <div style={{ background: '#0a1628', padding: '18px 22px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(201,168,76,0.15)', border: '1px solid rgba(201,168,76,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#c9a84c', fontWeight: 700, fontSize: '14px', flexShrink: 0 }}>Z</div>
+                <div>
+                  <div style={{ color: 'white', fontSize: '13px', fontWeight: 600 }}>Zainab · Client Partner</div>
+                  <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '10px', marginTop: '1px' }}>{isCongrats ? 'Onboarding complete' : `Step ${walkthroughStep + 1} of ${TOTAL}`}</div>
+                </div>
+                {isCongrats && (
+                  <button onClick={() => setShowWalkthrough(false)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', fontSize: '18px', cursor: 'pointer', lineHeight: 1 }}>×</button>
+                )}
+              </div>
+
+              {/* Progress bar */}
+              {!isCongrats && (
+                <div style={{ display: 'flex', gap: '4px', padding: '14px 22px 0' }}>
+                  {STEPS.map((_, i) => (
+                    <div key={i} style={{ flex: 1, height: '3px', borderRadius: '2px', background: i <= walkthroughStep ? '#c9a84c' : '#e4e9f0', transition: 'background 0.3s' }} />
+                  ))}
+                </div>
+              )}
+
+              <div style={{ padding: '22px 24px 24px' }}>
+                {isCongrats ? (
+                  /* Congrats state */
+                  <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                    <div style={{ fontSize: '44px', marginBottom: '14px' }}>🚀</div>
+                    <div style={{ fontSize: '18px', fontWeight: 700, color: '#0a1628', marginBottom: '8px' }}>You're live!</div>
+                    <div style={{ fontSize: '13px', color: '#8896a8', lineHeight: 1.7, marginBottom: '24px' }}>
+                      Your AI revenue system is fully active. The team is working around the clock — check back tomorrow to see your first results.
+                    </div>
+                    <div style={{ background: '#f8fafc', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '14px 16px', marginBottom: '22px', textAlign: 'left' }}>
+                      <div style={{ fontSize: '10px', color: '#8896a8', fontWeight: 700, letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '10px' }}>Your next steps</div>
+                      {[
+                        'Check My Approvals to review and activate your sequences',
+                        'Ask Zainab anything about your results via the Zainab AI tab',
+                        'Use the Setup Guide button in the header to reopen this tour',
+                      ].map((t, i) => (
+                        <div key={i} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', marginBottom: i < 2 ? '8px' : 0 }}>
+                          <div style={{ width: '18px', height: '18px', borderRadius: '50%', background: 'rgba(201,168,76,0.15)', border: '1px solid rgba(201,168,76,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700, color: '#c9a84c', flexShrink: 0 }}>{i + 1}</div>
+                          <div style={{ fontSize: '12px', color: '#4a5568', lineHeight: 1.5 }}>{t}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <button onClick={() => { setShowWalkthrough(false); setCurrentPage('dashboard'); }}
+                      style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '10px', padding: '12px 32px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', width: '100%', fontFamily: 'DM Sans, sans-serif' }}>
+                      Go to Dashboard →
+                    </button>
+                  </div>
+                ) : (
+                  /* Step content */
+                  <>
+                    <div style={{ fontSize: '32px', marginBottom: '14px' }}>{step.icon}</div>
+                    <div style={{ fontSize: '17px', fontWeight: 700, color: '#0a1628', marginBottom: '10px', lineHeight: 1.3 }}>{step.title}</div>
+                    <div style={{ fontSize: '13px', color: '#4a5568', lineHeight: 1.7, marginBottom: step.detail ? '14px' : '22px' }}>{step.body}</div>
+
+                    {step.detail && (
+                      <div style={{ background: step.detail.ok ? '#f0fdf4' : '#fffbeb', border: `1px solid ${step.detail.ok ? '#bbf7d0' : '#fde68a'}`, borderRadius: '8px', padding: '10px 14px', marginBottom: '22px', fontSize: '12px', color: step.detail.ok ? '#166534' : '#92400e', fontWeight: 500 }}>
+                        {step.detail.text}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      {walkthroughStep > 0 && (
+                        <button onClick={() => setWalkthroughStep(s => s - 1)}
+                          style={{ padding: '11px 18px', background: 'transparent', border: '1px solid #e4e9f0', borderRadius: '10px', fontSize: '12px', fontWeight: 600, color: '#8896a8', cursor: 'pointer' }}>
+                          ← Back
+                        </button>
+                      )}
+                      <button onClick={advance}
+                        style={{ flex: 1, padding: '12px', background: '#0a1628', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+                        {step.cta}
+                      </button>
+                    </div>
+                    <div style={{ textAlign: 'center', marginTop: '12px' }}>
+                      <button onClick={() => setShowWalkthrough(false)}
+                        style={{ background: 'none', border: 'none', fontSize: '11px', color: '#8896a8', cursor: 'pointer', textDecoration: 'underline' }}>
+                        Skip for now
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
