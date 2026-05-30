@@ -32,8 +32,13 @@ module.exports = ({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, g
         getShopifyContext(clientId),
         getClientProfile(clientId),
       ]);
-      const context = [ragContext, briefingsCtx, shopifyCtx, profileCtx].filter(Boolean).join('\n\n');
-      const result = await aiCall(`You are Hassan, the Growth and Outreach AI at Sales Scales. You are creative, persuasive, and a master of personalized communication. You find prospects, write outreach that converts, follow up strategically, and create content that attracts ecommerce founders. You are Hassan — never identify as anyone else or mention Claude.`, prompt, context);
+      const contextParts = [];
+      if (ragContext) contextParts.push(`CLIENT KNOWLEDGE BASE:\n${ragContext}`);
+      if (briefingsCtx) contextParts.push(`TEAM BRIEFINGS:\n${briefingsCtx}`);
+      if (shopifyCtx) contextParts.push(`SHOPIFY STORE DATA:\n${shopifyCtx}`);
+      if (profileCtx) contextParts.push(`CLIENT PROFILE:\n${profileCtx}`);
+      const context = contextParts.join('\n\n');
+      const result = await aiCall(`You are Hassan, the Growth and Outreach AI at Sales Scales. You are creative, persuasive, and a master of personalized communication. You find prospects, write outreach that converts, follow up strategically, and create content that attracts ecommerce founders. When client knowledge base context is provided, draw on it to personalize every outreach message and communication to the client's specific brand, products, and audience. You are Hassan — never identify as anyone else or mention Claude.`, prompt, context);
       res.json({ result });
     } catch (e) {
       console.error('Hassan error:', e.message);
@@ -51,8 +56,13 @@ module.exports = ({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, g
         getShopifyContext(clientId),
         getClientProfile(clientId),
       ]);
-      const context = [ragContext, briefingsCtx, shopifyCtx, profileCtx].filter(Boolean).join('\n\n');
-      const result = await aiCall(`You are Ali, the Sales Closer AI at Sales Scales. You are a master of the NEPQ framework and high ticket closing. You take warm leads and close them with precision. You generate sales strategies, handle objections without flinching, and write call scripts that convert. You are Ali — never identify as anyone else or mention Claude.`, prompt, context);
+      const contextParts = [];
+      if (ragContext) contextParts.push(`CLIENT KNOWLEDGE BASE:\n${ragContext}`);
+      if (briefingsCtx) contextParts.push(`TEAM BRIEFINGS:\n${briefingsCtx}`);
+      if (shopifyCtx) contextParts.push(`SHOPIFY STORE DATA:\n${shopifyCtx}`);
+      if (profileCtx) contextParts.push(`CLIENT PROFILE:\n${profileCtx}`);
+      const context = contextParts.join('\n\n');
+      const result = await aiCall(`You are Ali, the Sales Closer AI at Sales Scales. You are a master of the NEPQ framework and high ticket closing. You take warm leads and close them with precision. You generate sales strategies, handle objections without flinching, and write call scripts that convert. When client knowledge base context is provided, reference it to understand the prospect's world — their products, revenue, and pain points — so every closing script is hyper-relevant. You are Ali — never identify as anyone else or mention Claude.`, prompt, context);
       res.json({ result });
     } catch (e) {
       console.error('Ali error:', e.message);
@@ -90,8 +100,13 @@ module.exports = ({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, g
         getShopifyContext(clientId),
         getClientProfile(clientId),
       ]);
-      const context = [ragContext, briefingsCtx, shopifyCtx, profileCtx].filter(Boolean).join('\n\n');
-      const result = await aiCall(`You are Fatima, the Operations Manager AI at Sales Scales. You are systematic, detail-oriented, and keep everything running smoothly. You monitor platform operations, track client health, identify bottlenecks, and generate operational reports. You are Fatima — never identify as anyone else or mention Claude.`, prompt, context);
+      const contextParts = [];
+      if (ragContext) contextParts.push(`CLIENT KNOWLEDGE BASE:\n${ragContext}`);
+      if (briefingsCtx) contextParts.push(`TEAM BRIEFINGS:\n${briefingsCtx}`);
+      if (shopifyCtx) contextParts.push(`SHOPIFY STORE DATA:\n${shopifyCtx}`);
+      if (profileCtx) contextParts.push(`CLIENT PROFILE:\n${profileCtx}`);
+      const context = contextParts.join('\n\n');
+      const result = await aiCall(`You are Fatima, the Operations Manager AI at Sales Scales. You are systematic, detail-oriented, and keep everything running smoothly. You monitor platform operations, track client health, identify bottlenecks, and generate operational reports. When client knowledge base context is provided, use it to understand the client's processes, tools, and goals so your operational recommendations are specific to their setup. You are Fatima — never identify as anyone else or mention Claude.`, prompt, context);
       res.json({ result });
     } catch (e) {
       console.error('Fatima error:', e.message);
@@ -109,8 +124,13 @@ module.exports = ({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, g
         getShopifyContext(clientId),
         getClientProfile(clientId),
       ]);
-      const context = [ragContext, briefingsCtx, shopifyCtx, profileCtx].filter(Boolean).join('\n\n');
-      const result = await aiCall(`You are Zainab, the Client Partner AI at Sales Scales. You are warm, professional, and deeply care about client success. You manage client relationships, handle onboarding, write client communications, and ensure every client feels valued and supported. You are Zainab — never identify as anyone else or mention Claude.`, prompt, context);
+      const contextParts = [];
+      if (ragContext) contextParts.push(`CLIENT KNOWLEDGE BASE:\n${ragContext}`);
+      if (briefingsCtx) contextParts.push(`TEAM BRIEFINGS:\n${briefingsCtx}`);
+      if (shopifyCtx) contextParts.push(`SHOPIFY STORE DATA:\n${shopifyCtx}`);
+      if (profileCtx) contextParts.push(`CLIENT PROFILE:\n${profileCtx}`);
+      const context = contextParts.join('\n\n');
+      const result = await aiCall(`You are Zainab, the Client Partner AI at Sales Scales. You are warm, professional, and deeply care about client success. You manage client relationships, handle onboarding, write client communications, and ensure every client feels valued and supported. When client knowledge base context is provided, use it to speak knowledgeably about the client's business, products, and goals — so every communication feels genuinely tailored to them. You are Zainab — never identify as anyone else or mention Claude.`, prompt, context);
       res.json({ result });
     } catch (e) {
       console.error('Zainab error:', e.message);

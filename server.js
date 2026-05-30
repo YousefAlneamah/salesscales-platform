@@ -1540,7 +1540,8 @@ Return JSON: {"prospects":[{"name":"...","niche":"...","channel":"Email","pain_p
       const pc = prospectsJson.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
       const pm = pc.match(/\{[\s\S]*\}/);
       const parsed = JSON.parse(pm ? pm[0] : pc);
-      for (const p of (parsed.prospects || [])) {
+      const prospects = parsed.prospects || [];
+      for (const p of prospects) {
         await supabase.from('approvals').insert([{
           type: 'prospect',
           title: `Prospect: ${p.name || (p.niche + ' store owner')}`,
@@ -1553,7 +1554,35 @@ Return JSON: {"prospects":[{"name":"...","niche":"...","channel":"Email","pain_p
           created_at: new Date().toISOString()
         }]);
       }
-      console.log(`[AUTO] Hassan — ${(parsed.prospects || []).length} prospect(s) submitted for approval`);
+      console.log(`[AUTO] Hassan — ${prospects.length} prospect(s) submitted for approval`);
+
+      // Generate LinkedIn connection request messages for each prospect (max 300 chars)
+      if (prospects.length > 0) {
+        const prospectList = prospects.map((p, i) =>
+          `${i + 1}. Name: ${p.name || p.niche + ' store owner'} | Niche: ${p.niche || 'ecommerce'} | Pain point: ${p.pain_point || 'scaling revenue'}`
+        ).join('\n');
+        const linkedinRaw = await aiCall(
+          `You are Hassan, the Growth and Outreach AI at Sales Scales. Return ONLY valid JSON, no markdown, no explanation.`,
+          `Write a LinkedIn connection request message for each of these prospects. Each message must be under 300 characters, professional, direct, and personalized to their niche and pain point. Do NOT pitch — just make a genuine connection.\n\nProspects:\n${prospectList}\n\nReturn JSON: {"linkedin":[{"prospect":"name or niche label","message":"under 300 char message"}]}`
+        );
+        try {
+          const lc = linkedinRaw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+          const lm = lc.match(/\{[\s\S]*\}/);
+          const linkedinParsed = JSON.parse(lm ? lm[0] : lc);
+          for (const item of (linkedinParsed.linkedin || [])) {
+            const msg = (item.message || '').slice(0, 300);
+            if (!msg) continue;
+            await storeBriefing('hassan', 'yousef',
+              `LinkedIn Outreach — ${item.prospect || 'Prospect'}`,
+              msg,
+              'normal'
+            );
+          }
+          console.log(`[AUTO] Hassan — ${(linkedinParsed.linkedin || []).length} LinkedIn message(s) stored`);
+        } catch (liErr) {
+          console.error('[AUTO] Hassan LinkedIn parse error:', liErr.message);
+        }
+      }
     } catch (parseErr) {
       console.error('[AUTO] Hassan prospects parse error:', parseErr.message);
     }

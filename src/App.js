@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import "./styles/global.css";
 import { supabase } from "./supabase";
@@ -175,6 +175,12 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState(0);
   const [showLogin, setShowLogin] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState({ contacts: [], clients: [], approvals: [] });
+  const [searching, setSearching] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchHighlight, setSearchHighlight] = useState(null);
+  const searchRef = useRef(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("user");
@@ -221,6 +227,55 @@ function App() {
     delete axios.defaults.headers.common["Authorization"];
     setUser(null);
   };
+
+  const runSearch = useCallback(async (q) => {
+    if (!q.trim()) { setSearchResults({ contacts: [], clients: [], approvals: [] }); return; }
+    setSearching(true);
+    try {
+      const [contactsRes, clientsRes, approvalsRes] = await Promise.all([
+        supabase.from('contacts')
+          .select('id, first_name, last_name, email, phone')
+          .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`)
+          .limit(5),
+        supabase.from('clients')
+          .select('id, name, niche')
+          .or(`name.ilike.%${q}%,niche.ilike.%${q}%`)
+          .limit(5),
+        supabase.from('approvals')
+          .select('id, title, content, status')
+          .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
+          .limit(5),
+      ]);
+      setSearchResults({
+        contacts: contactsRes.data || [],
+        clients: clientsRes.data || [],
+        approvals: approvalsRes.data || [],
+      });
+    } catch {}
+    setSearching(false);
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => { if (searchQuery) runSearch(searchQuery); else setSearchResults({ contacts: [], clients: [], approvals: [] }); }, 300);
+    return () => clearTimeout(t);
+  }, [searchQuery, runSearch]);
+
+  useEffect(() => {
+    const handler = (e) => { if (searchRef.current && !searchRef.current.contains(e.target)) setSearchOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleSearchNavigate = (page, id, name) => {
+    setCurrentPage(page);
+    setSearchHighlight({ id, name, page });
+    setSearchOpen(false);
+    setSearchQuery('');
+    setSearchResults({ contacts: [], clients: [], approvals: [] });
+    setTimeout(() => setSearchHighlight(null), 4000);
+  };
+
+  const totalSearchResults = searchResults.contacts.length + searchResults.clients.length + searchResults.approvals.length;
 
   if (window.location.pathname === '/terms') return <Terms />;
   if (window.location.pathname === '/privacy') return <Privacy />;
@@ -339,7 +394,106 @@ function App() {
           <button className="hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
             <i className="ti ti-menu-2" aria-hidden="true"></i>
           </button>
-          <div className="page-title">{pageTitles[currentPage]}</div>
+          <div className="page-title" style={{ flex: '0 0 auto' }}>{pageTitles[currentPage]}</div>
+
+          {/* Global search */}
+          <div ref={searchRef} style={{ flex: '1 1 auto', maxWidth: '400px', margin: '0 16px', position: 'relative' }}>
+            <div style={{ position: 'relative' }}>
+              <i className="ti ti-search" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '14px', color: 'var(--muted)', pointerEvents: 'none' }} />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true); }}
+                onFocus={() => setSearchOpen(true)}
+                placeholder="Search contacts, clients, approvals..."
+                style={{ width: '100%', padding: '7px 12px 7px 32px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '12px', color: 'var(--text)', background: 'var(--bg)', outline: 'none', boxSizing: 'border-box' }}
+              />
+              {searching && (
+                <i className="ti ti-loader-2" style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '13px', color: 'var(--muted)' }} />
+              )}
+            </div>
+
+            {searchOpen && searchQuery.trim() && (
+              <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', boxShadow: '0 8px 24px rgba(10,22,40,0.12)', zIndex: 1000, overflow: 'hidden', maxHeight: '420px', overflowY: 'auto' }}>
+                {totalSearchResults === 0 && !searching && (
+                  <div style={{ padding: '16px', fontSize: '12px', color: 'var(--muted)', textAlign: 'center' }}>No results for "{searchQuery}"</div>
+                )}
+
+                {searchResults.contacts.length > 0 && (
+                  <div>
+                    <div style={{ padding: '8px 14px 4px', fontSize: '9px', fontWeight: 700, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', borderBottom: '1px solid var(--border)' }}>Contacts</div>
+                    {searchResults.contacts.map(c => (
+                      <div
+                        key={c.id}
+                        onClick={() => handleSearchNavigate('contacts', c.id, `${c.first_name || ''} ${c.last_name || ''}`.trim())}
+                        style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid var(--border)' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+                          {(c.first_name || '?')[0].toUpperCase()}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{`${c.first_name || ''} ${c.last_name || ''}`.trim() || '—'}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.email || c.phone || ''}</div>
+                        </div>
+                        <i className="ti ti-arrow-right" style={{ marginLeft: 'auto', fontSize: '13px', color: 'var(--muted)', flexShrink: 0 }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {searchResults.clients.length > 0 && (
+                  <div>
+                    <div style={{ padding: '8px 14px 4px', fontSize: '9px', fontWeight: 700, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', borderBottom: '1px solid var(--border)' }}>Clients</div>
+                    {searchResults.clients.map(c => (
+                      <div
+                        key={c.id}
+                        onClick={() => handleSearchNavigate('clients', c.id, c.name)}
+                        style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid var(--border)' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: 'var(--gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+                          {(c.name || '?')[0].toUpperCase()}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{c.niche || 'Ecommerce'}</div>
+                        </div>
+                        <i className="ti ti-arrow-right" style={{ marginLeft: 'auto', fontSize: '13px', color: 'var(--muted)', flexShrink: 0 }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {searchResults.approvals.length > 0 && (
+                  <div>
+                    <div style={{ padding: '8px 14px 4px', fontSize: '9px', fontWeight: 700, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--muted)', fontFamily: 'DM Mono, monospace', borderBottom: '1px solid var(--border)' }}>Approvals</div>
+                    {searchResults.approvals.map(a => (
+                      <div
+                        key={a.id}
+                        onClick={() => handleSearchNavigate('approvals', a.id, a.title)}
+                        style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid var(--border)' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: a.status === 'pending' ? 'var(--yellow)' : a.status === 'approved' ? 'var(--green)' : 'var(--muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <i className="ti ti-bell" style={{ fontSize: '13px', color: '#fff' }} />
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--muted)', textTransform: 'capitalize' }}>{a.status}</div>
+                        </div>
+                        <i className="ti ti-arrow-right" style={{ marginLeft: 'auto', fontSize: '13px', color: 'var(--muted)', flexShrink: 0 }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="topbar-right">
             {pendingApprovals > 0 && (
               <div className="top-badge">{pendingApprovals} approval{pendingApprovals !== 1 ? 's' : ''} waiting</div>
@@ -347,6 +501,15 @@ function App() {
             <div className="avatar">{user.name ? user.name[0].toUpperCase() : "Y"}</div>
           </div>
         </div>
+
+        {searchHighlight && (
+          <div style={{ background: 'var(--gold)', color: '#fff', fontSize: '12px', fontWeight: 600, padding: '6px 24px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <i className="ti ti-search" style={{ fontSize: '13px' }} />
+            Jumped to: {searchHighlight.name}
+            <button onClick={() => setSearchHighlight(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '14px', lineHeight: 1, padding: 0 }}>×</button>
+          </div>
+        )}
+
         <div className="content">{renderPage()}</div>
       </div>
     </div>
