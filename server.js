@@ -1562,6 +1562,75 @@ Return JSON: {"prospects":[{"name":"...","niche":"...","channel":"Email","pain_p
   }
 });
 
+// ─── AUTO SCHEDULER: MAHDI — SEQUENCE IMPROVEMENT ANALYSIS ──
+// Every day at 11:30am — checks active sequences running 14+ days with <15% completion
+cron.schedule('30 11 * * *', async () => {
+  console.log('[AUTO] Mahdi — sequence improvement analysis starting...');
+  try {
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: staleWorkflows } = await supabase
+      .from('workflows')
+      .select('id, name, client_id, trigger_type, created_at')
+      .eq('status', 'active')
+      .lt('created_at', fourteenDaysAgo);
+
+    if (!staleWorkflows || staleWorkflows.length === 0) {
+      console.log('[AUTO] Mahdi — no qualifying sequences found');
+      return;
+    }
+
+    let improved = 0;
+    for (const wf of staleWorkflows) {
+      try {
+        const [totalRes, completedRes, stepsRes] = await Promise.all([
+          supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('workflow_id', wf.id),
+          supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('workflow_id', wf.id).eq('status', 'completed'),
+          supabase.from('workflow_steps').select('step_order, step_type, subject, wait_hours').eq('workflow_id', wf.id).order('step_order'),
+        ]);
+
+        const total = totalRes.count || 0;
+        const completed = completedRes.count || 0;
+        if (total < 5) continue; // need minimum sample size
+
+        const completionRate = Math.round((completed / total) * 100);
+        if (completionRate >= 15) continue;
+
+        const daysRunning = Math.floor((Date.now() - new Date(wf.created_at)) / 86400000);
+        const stepsList = (stepsRes.data || []).map(s =>
+          `Step ${s.step_order + 1}: ${s.step_type.toUpperCase()}` +
+          (s.step_type === 'wait' ? ` — ${s.wait_hours}h wait` : '') +
+          (s.subject ? ` — "${s.subject}"` : '')
+        ).join('\n');
+
+        const suggestion = await aiCall(
+          `You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world-class email copywriter and sequence strategist. You identify why sequences underperform and give specific, actionable rewrites. You are Mahdi — never mention Claude.`,
+          `Analyze this underperforming sequence and give specific improvement suggestions.\n\nSequence: ${wf.name}\nTrigger: ${wf.trigger_type}\nRunning: ${daysRunning} days\nEnrolled: ${total} contacts · Completed: ${completed} (${completionRate}%)\n\nCurrent Steps:\n${stepsList || 'No steps configured'}\n\nProvide:\n1. Root cause of the low completion rate\n2. Specific subject line rewrites for email steps (if applicable)\n3. Timing adjustments — which waits are too long or short\n4. Content angle recommendations — what hook or offer change would increase completions\n5. One quick win to implement immediately that could move the needle`,
+          ''
+        );
+
+        const { data: client } = await supabase.from('clients').select('name').eq('id', wf.client_id).maybeSingle();
+
+        await storeBriefing(
+          'mahdi',
+          'yousef',
+          `⚠ Sequence Improvement: "${wf.name}" — ${completionRate}% completion`,
+          `Mahdi has flagged an underperforming sequence that needs attention.\n\nClient: ${client?.name || 'Unknown'}\nSequence: ${wf.name}\nTrigger: ${wf.trigger_type}\nRunning: ${daysRunning} days\nEnrolled: ${total} · Completed: ${completed} (${completionRate}%) — below 15% threshold\n\n${suggestion}`,
+          'high',
+          wf.client_id
+        );
+        improved++;
+        console.log(`[AUTO] Mahdi — improvement brief stored for "${wf.name}" (${completionRate}%)`);
+      } catch (wfErr) {
+        console.error(`[AUTO] Mahdi — failed for "${wf.name}":`, wfErr.message);
+      }
+    }
+    if (improved > 0) console.log(`[AUTO] Mahdi sequence analysis complete — ${improved} briefing(s) created`);
+    else console.log('[AUTO] Mahdi — all qualifying sequences are performing well');
+  } catch (e) {
+    console.error('[AUTO] Mahdi sequence analysis error:', e.message);
+  }
+});
+
 // ─── AUTO SCHEDULER: SHOPIFY PRODUCT SYNC — 6AM DAILY ────
 cron.schedule('0 6 * * *', async () => {
   console.log('[AUTO] Shopify sync — checking product changes...');

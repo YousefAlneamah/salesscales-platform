@@ -33,9 +33,17 @@ export default function ClientDashboard({ user, onLogout }) {
   const [products, setProducts] = useState([]);
   const [enrollmentsByWorkflow, setEnrollmentsByWorkflow] = useState({});
   const [loading, setLoading] = useState(true);
-  const [chatMessages, setChatMessages] = useState([
-    { role: 'ai', content: `Hi ${user.name.split(' ')[0]}! I'm Zainab, your dedicated AI partner at Sales Scales. I'm here to help you understand your results, answer questions about your sequences, and make sure your AI revenue system is delivering maximum value. What can I help you with today?` }
-  ]);
+  const ZAINAB_WELCOME = `Hi ${user.name.split(' ')[0]}! I'm Zainab, your dedicated AI partner at Sales Scales. I'm here to help you understand your results, answer questions about your sequences, and make sure your AI revenue system is delivering maximum value. What can I help you with today?`;
+  const [chatMessages, setChatMessages] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`zainab_chat_${user.clientId}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return [{ role: 'ai', content: ZAINAB_WELCOME }];
+  });
   const [showWalkthrough, setShowWalkthrough] = useState(false);
   const [walkthroughStep, setWalkthroughStep] = useState(0);
   const [referralData, setReferralData] = useState({ referral_code: null, referral_link: null, referrals: [], total: 0, converted: 0, rewards_earned: 0 });
@@ -82,6 +90,13 @@ export default function ClientDashboard({ user, onLogout }) {
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     } catch { /* non-critical */ }
   };
+
+  useEffect(() => {
+    try {
+      const toSave = chatMessages.slice(-50);
+      localStorage.setItem(`zainab_chat_${user.clientId}`, JSON.stringify(toSave));
+    } catch { /* storage quota — ignore */ }
+  }, [chatMessages, user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     axios.get(`${API_BASE}/shopify/products?client_id=${user.clientId}`)
@@ -1443,6 +1458,7 @@ export default function ClientDashboard({ user, onLogout }) {
     const [billing, setBilling] = useState(null);
     const [billingLoading, setBillingLoading] = useState(true);
     const [subscribing, setSubscribing] = useState(null);
+    const [upgradeMsg, setUpgradeMsg] = useState('');
 
     useEffect(() => {
       (async () => {
@@ -1472,9 +1488,8 @@ export default function ClientDashboard({ user, onLogout }) {
 
     const handleSubscribe = async (plan) => {
       setSubscribing(plan);
+      setUpgradeMsg('');
       try {
-        // eslint-disable-next-line no-unused-vars
-        const { data: clientUserData } = await axios.get(`${API_BASE}/client-profile`, { params: { client_id: user.clientId } });
         const email = user.email;
         const res = await axios.post(`${API_BASE}/billing/create-subscription`, {
           client_id: user.clientId,
@@ -1483,8 +1498,11 @@ export default function ClientDashboard({ user, onLogout }) {
         });
         if (res.data.approval_url) {
           window.open(res.data.approval_url, '_blank');
+          const planLabel = plan.charAt(0).toUpperCase() + plan.slice(1);
+          setUpgradeMsg(`✓ ${planLabel} subscription page opened — complete authorization in the PayPal window to activate.`);
         }
       } catch (e) {
+        setUpgradeMsg('');
         alert(e.response?.data?.error || 'Could not start subscription. Please try again.');
       } finally {
         setSubscribing(null);
@@ -1570,19 +1588,73 @@ export default function ClientDashboard({ user, onLogout }) {
           ))}
         </div>
 
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
-          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '16px' }}>Your Plan</div>
-          <div style={{ background: 'linear-gradient(135deg, #0a1628, #112240)', borderRadius: '10px', padding: '20px', marginBottom: '14px', border: '1px solid rgba(201,168,76,0.2)' }}>
-            <div style={{ fontSize: '9px', color: '#c9a84c', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '6px' }}>{user.tier} Plan</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: 'white', marginBottom: '4px' }}>
-              ${user.tier === 'growth' ? '3,000' : user.tier === 'elite' ? '6,000' : '1,500'}/mo
+        {(() => {
+          const TIER_ORDER = ['starter', 'growth', 'elite'];
+          const TIER_PRICES = { starter: '$997', growth: '$1,997', elite: '$2,997' };
+          const TIER_FEATURES = {
+            starter: ['Email + SMS automation', 'Full AI team (6 members)', 'CRM & contacts', 'Up to 3 sequences'],
+            growth:  ['Everything in Starter', 'WhatsApp automation', 'Unlimited sequences', 'Klaviyo + Meta Ads + HubSpot'],
+            elite:   ['Everything in Growth', 'Voice AI agents', 'Shopify live data', 'Canva & Higgsfield AI briefs'],
+          };
+          const currentTier = (user.tier || 'starter').toLowerCase();
+          const currentIdx = TIER_ORDER.indexOf(currentTier);
+          const upgradablePlans = TIER_ORDER.slice(currentIdx + 1);
+
+          return (
+            <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+              <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '16px' }}>Your Plan</div>
+              <div style={{ background: 'linear-gradient(135deg, #0a1628, #112240)', borderRadius: '10px', padding: '16px 18px', marginBottom: '14px', border: '1px solid rgba(201,168,76,0.2)' }}>
+                <div style={{ fontSize: '9px', color: '#c9a84c', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>{currentTier} Plan · Active</div>
+                <div style={{ fontSize: '20px', fontWeight: 700, color: 'white', marginBottom: '4px' }}>{TIER_PRICES[currentTier] || '$997'}<span style={{ fontSize: '11px', fontWeight: 400, color: 'rgba(255,255,255,0.4)' }}>/mo</span></div>
+                <ul style={{ margin: '8px 0 0', padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  {(TIER_FEATURES[currentTier] || []).map(f => (
+                    <li key={f} style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <span style={{ color: '#c9a84c' }}>✓</span> {f}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {upgradeMsg && (
+                <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', fontSize: '12px', color: '#059669', lineHeight: 1.5 }}>
+                  {upgradeMsg}
+                </div>
+              )}
+
+              {upgradablePlans.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ fontSize: '10px', color: '#8896a8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>Available Upgrades</div>
+                  {upgradablePlans.map(planKey => (
+                    <div key={planKey} style={{ background: '#f8fafc', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                      <div>
+                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#0a1628', marginBottom: '3px' }}>
+                          {planKey.charAt(0).toUpperCase() + planKey.slice(1)} — {TIER_PRICES[planKey]}/mo
+                        </div>
+                        <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                          {(TIER_FEATURES[planKey] || []).map(f => (
+                            <li key={f} style={{ fontSize: '10px', color: '#8896a8', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <span style={{ color: '#10b981' }}>✓</span> {f}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <button
+                        onClick={() => handleSubscribe(planKey)}
+                        disabled={subscribing === planKey}
+                        style={{ background: subscribing === planKey ? '#e4e9f0' : '#0a1628', color: subscribing === planKey ? '#8896a8' : '#c9a84c', border: 'none', borderRadius: '8px', padding: '9px 16px', fontSize: '11px', fontWeight: 700, cursor: subscribing === planKey ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', flexShrink: 0, fontFamily: 'DM Sans, sans-serif' }}>
+                        {subscribing === planKey ? 'Opening...' : 'Upgrade →'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: '#059669', fontWeight: 500 }}>
+                  🏆 You're on our highest plan — Elite
+                </div>
+              )}
             </div>
-            <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>AI Revenue System · Sales Scales</div>
-          </div>
-          <button style={{ width: '100%', background: 'rgba(201,168,76,0.1)', border: '1px solid rgba(201,168,76,0.3)', color: '#c9a84c', borderRadius: '8px', padding: '10px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
-            Upgrade Plan →
-          </button>
-        </div>
+          );
+        })()}
       </div>
 
       {/* BILLING */}
