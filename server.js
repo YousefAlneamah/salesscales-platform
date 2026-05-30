@@ -3256,6 +3256,65 @@ app.post('/onboarding/complete', async (req, res) => {
   }
 });
 
+// ─── AUTO SCHEDULER: DATA RETENTION — 90-DAY PURGE ───────
+// Runs daily at 3am — purges PII for clients cancelled 90+ days ago
+cron.schedule('0 3 * * *', async () => {
+  console.log('[AUTO] Data retention — scanning for clients due for purge...');
+  try {
+    const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: markers } = await supabase.from('team_briefings')
+      .select('id, subject, content, created_at')
+      .like('subject', '[DATA_RETENTION]%')
+      .lt('created_at', cutoff);
+
+    if (!markers || markers.length === 0) {
+      console.log('[AUTO] Data retention — no clients due for purge');
+      return;
+    }
+
+    let purged = 0;
+    for (const marker of markers) {
+      const clientId = marker.subject.replace('[DATA_RETENTION]', '').trim();
+      if (!clientId) continue;
+      try {
+        const { data: client } = await supabase.from('clients')
+          .select('id, name, status').eq('id', clientId).maybeSingle();
+        if (!client || client.status !== 'cancelled') {
+          await supabase.from('team_briefings').delete().eq('id', marker.id);
+          continue;
+        }
+        // Delete PII and operational data — keep contracts, reports, case_studies for records
+        const { data: wfs } = await supabase.from('workflows').select('id').eq('client_id', clientId);
+        if (wfs && wfs.length > 0) {
+          await supabase.from('workflow_steps').delete().in('workflow_id', wfs.map(w => w.id));
+        }
+        await Promise.all([
+          supabase.from('contacts').delete().eq('client_id', clientId),
+          supabase.from('messages').delete().eq('client_id', clientId),
+          supabase.from('workflow_enrollments').delete().eq('client_id', clientId),
+          supabase.from('workflows').delete().eq('client_id', clientId),
+          supabase.from('activity').delete().eq('client_id', clientId),
+          supabase.from('approvals').delete().eq('client_id', clientId),
+          supabase.from('client_onboarding').delete().eq('client_id', clientId),
+          supabase.from('client_users').delete().eq('client_id', clientId),
+          supabase.from('shopify_connections').delete().eq('client_id', clientId),
+          supabase.from('knowledge_base').delete().eq('client_id', clientId),
+          supabase.from('pipeline_deals').delete().eq('client_id', clientId),
+        ]);
+        await supabase.from('clients').update({ status: 'data_purged' }).eq('id', clientId);
+        await supabase.from('team_briefings').delete().eq('id', marker.id);
+        console.log(`[AUTO] Data retention — purged data for ${client.name} (${clientId})`);
+        purged++;
+      } catch (purgeErr) {
+        console.error(`[AUTO] Data retention — failed for ${clientId}:`, purgeErr.message);
+      }
+    }
+    if (purged > 0) console.log(`[AUTO] Data retention — ${purged} client(s) purged`);
+  } catch (e) {
+    console.error('[AUTO] Data retention error:', e.message);
+  }
+});
+
 // ─── ROUTE MODULES ────────────────────────────────────────
 app.use('/auth',    require('./routes/auth')({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }));
 app.use('/',        require('./routes/ai-team')({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, getClientProfile, getKlaviyoContext, verifyToken, aiLimiter }));
@@ -3263,7 +3322,7 @@ app.use('/shopify', require('./routes/shopify')({ supabase, axios, crypto, proce
 app.use('/',        require('./routes/knowledge')({ supabase, axios, importLimiter, upload, PDF2Json, YoutubeTranscript }));
 app.use('/',        require('./routes/analytics')({ supabase }));
 app.use('/',        require('./routes/integrations')({ supabase, axios, aiCall, ragSearch, getBriefingsContext, verifyToken }));
-app.use('/',        require('./routes/operations')({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken, storeKnowledge, notifyClientUser }));
+app.use('/',        require('./routes/operations')({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken, storeKnowledge, notifyClientUser, sgMail }));
 
 // ─── GLOBAL ERROR HANDLER ─────────────────────────────────
 app.use((err, req, res, next) => {

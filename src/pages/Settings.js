@@ -17,6 +17,13 @@ export default function Settings() {
   const [socialNames, setSocialNames] = useState({});
   const [disconnecting, setDisconnecting] = useState({});
 
+  const [cancelModal, setCancelModal] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelOption, setCancelOption] = useState('pause_30d');
+  const [cancelStep, setCancelStep] = useState(1);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelDone, setCancelDone] = useState(null);
+
   const [profile, setProfile] = useState({
     businessName: 'Sales Scales',
     ownerName: 'Yousef',
@@ -145,6 +152,48 @@ export default function Settings() {
       alert('Disconnect failed: ' + (e.response?.data?.error || e.message));
     } finally {
       setDisconnecting(prev => ({ ...prev, [clientId]: null }));
+    }
+  };
+
+  const openCancelModal = (client) => {
+    setCancelModal(client);
+    setCancelReason('');
+    setCancelOption('pause_30d');
+    setCancelStep(1);
+    setCancelDone(null);
+  };
+
+  const closeCancelModal = () => {
+    if (cancelBusy) return;
+    setCancelModal(null);
+    setCancelDone(null);
+  };
+
+  const handleCancelSubmit = async () => {
+    if (!cancelModal) return;
+    if (cancelOption === 'cancel' && cancelStep === 1) {
+      setCancelStep(2);
+      return;
+    }
+    setCancelBusy(true);
+    try {
+      const res = await axios.post(`${API_BASE}/billing/cancel`, {
+        client_id: cancelModal.id,
+        reason: cancelReason,
+        option: cancelOption,
+      });
+      setCancelDone({ action: res.data.action });
+      if (cancelOption === 'cancel' || cancelOption === 'pause_30d') {
+        setClients(prev => prev.map(c =>
+          c.id === cancelModal.id
+            ? { ...c, status: cancelOption === 'cancel' ? 'cancelled' : 'paused' }
+            : c
+        ));
+      }
+    } catch (e) {
+      alert('Failed: ' + (e.response?.data?.error || e.message));
+    } finally {
+      setCancelBusy(false);
     }
   };
 
@@ -572,6 +621,26 @@ export default function Settings() {
                           </div>
                         );
                       })()}
+
+                      {/* DANGER ZONE */}
+                      <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #fee2e2', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontSize: '10px', color: '#dc2626', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Danger Zone</div>
+                          {client.status === 'cancelled' && (
+                            <div style={{ fontSize: '10px', color: '#dc2626', marginTop: '2px' }}>Subscription cancelled</div>
+                          )}
+                          {client.status === 'paused' && (
+                            <div style={{ fontSize: '10px', color: '#d97706', marginTop: '2px' }}>Subscription paused</div>
+                          )}
+                        </div>
+                        {client.status !== 'cancelled' && client.status !== 'data_purged' && (
+                          <button
+                            onClick={() => openCancelModal(client)}
+                            style={{ background: 'transparent', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '8px', padding: '6px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+                            Cancel Subscription
+                          </button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -600,6 +669,114 @@ export default function Settings() {
           )}
         </div>
       </div>
+
+      {/* ZAINAB CANCELLATION MODAL */}
+      {cancelModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,22,40,0.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div style={{ background: 'white', borderRadius: '14px', width: '100%', maxWidth: '480px', boxShadow: '0 20px 60px rgba(10,22,40,0.25)', overflow: 'hidden' }}>
+
+            {/* Modal header */}
+            <div style={{ background: '#0a1628', padding: '18px 22px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#1a3050', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', color: '#c9a84c', fontWeight: 700, flexShrink: 0 }}>Z</div>
+              <div>
+                <div style={{ color: 'white', fontSize: '13px', fontWeight: 600 }}>Zainab · Client Partner</div>
+                <div style={{ color: '#8896a8', fontSize: '10px', marginTop: '1px' }}>Regarding {cancelModal.name}</div>
+              </div>
+              <button onClick={closeCancelModal} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#8896a8', fontSize: '18px', cursor: 'pointer', lineHeight: 1 }}>×</button>
+            </div>
+
+            <div style={{ padding: '22px' }}>
+
+              {/* Done state */}
+              {cancelDone ? (
+                <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                  <div style={{ fontSize: '36px', marginBottom: '12px' }}>
+                    {cancelDone.action === 'cancelled' ? '🔴' : cancelDone.action === 'paused' ? '⏸️' : '📋'}
+                  </div>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#0a1628', marginBottom: '6px' }}>
+                    {cancelDone.action === 'cancelled' ? 'Subscription Cancelled' : cancelDone.action === 'paused' ? 'Paused for 30 Days' : 'Downgrade Request Sent'}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#8896a8', lineHeight: 1.6, marginBottom: '20px' }}>
+                    {cancelDone.action === 'cancelled' && 'All workflows have been paused. Hassan will follow up with a win-back offer in 30 days. Data is retained for 90 days.'}
+                    {cancelDone.action === 'paused' && 'All workflows are paused. Your data is preserved. Resume at any time.'}
+                    {cancelDone.action === 'downgrade_requested' && 'Yousef has been notified and will reach out to discuss downgrade options.'}
+                  </div>
+                  <button onClick={closeCancelModal} className="btn btn-navy" style={{ padding: '9px 24px', fontSize: '12px' }}>Close</button>
+                </div>
+              ) : cancelStep === 2 ? (
+                /* Confirmation screen */
+                <>
+                  <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '14px 16px', marginBottom: '20px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', marginBottom: '6px' }}>⚠ Final confirmation</div>
+                    <div style={{ fontSize: '12px', color: '#7f1d1d', lineHeight: 1.6 }}>
+                      You are about to cancel <strong>{cancelModal.name}</strong>'s subscription. All active workflows will be paused immediately. Client data is retained for 90 days before being permanently deleted.
+                    </div>
+                  </div>
+                  {cancelReason && (
+                    <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '10px 14px', marginBottom: '16px', fontSize: '11px', color: '#4a5568' }}>
+                      <span style={{ fontWeight: 600 }}>Reason: </span>{cancelReason}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button onClick={() => setCancelStep(1)} className="btn btn-outline" style={{ flex: 1, padding: '9px', fontSize: '12px' }}>← Go Back</button>
+                    <button onClick={handleCancelSubmit} disabled={cancelBusy}
+                      style={{ flex: 1, background: cancelBusy ? '#8896a8' : '#dc2626', color: 'white', border: 'none', borderRadius: '8px', padding: '9px', fontSize: '12px', fontWeight: 600, cursor: cancelBusy ? 'not-allowed' : 'pointer' }}>
+                      {cancelBusy ? 'Processing...' : 'Yes, Cancel Subscription'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                /* Step 1 — Zainab dialog */
+                <>
+                  <div style={{ fontSize: '13px', color: '#0a1628', lineHeight: 1.6, marginBottom: '16px' }}>
+                    Before you go — I want to make sure we haven't let you down. Can you share what's not working for <strong>{cancelModal.name}</strong>?
+                  </div>
+
+                  <div style={{ marginBottom: '16px' }}>
+                    <label style={{ ...labelStyle, marginBottom: '6px', display: 'block' }}>Reason for cancelling <span style={{ color: '#8896a8', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></label>
+                    <textarea
+                      value={cancelReason}
+                      onChange={e => setCancelReason(e.target.value)}
+                      placeholder="e.g. too expensive, not seeing results, pausing business..."
+                      rows={3}
+                      style={{ ...inputStyle, resize: 'vertical' }}
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: '20px' }}>
+                    <label style={{ ...labelStyle, marginBottom: '8px', display: 'block' }}>What would you like to do?</label>
+                    {[
+                      { value: 'pause_30d', icon: '⏸', label: 'Pause for 30 days', sub: 'Take a break — all data preserved, no charge during pause' },
+                      { value: 'downgrade', icon: '📉', label: 'Downgrade to lower plan', sub: 'Keep essential features at a lower monthly cost' },
+                      { value: 'cancel', icon: '🔴', label: 'Confirm cancellation', sub: 'End subscription — data retained for 90 days then deleted' },
+                    ].map(opt => (
+                      <div key={opt.value} onClick={() => setCancelOption(opt.value)}
+                        style={{ cursor: 'pointer', border: `1.5px solid ${cancelOption === opt.value ? (opt.value === 'cancel' ? '#fecaca' : '#c9a84c') : '#e4e9f0'}`, borderRadius: '8px', padding: '10px 14px', marginBottom: '8px', background: cancelOption === opt.value ? (opt.value === 'cancel' ? '#fef2f2' : '#fffbeb') : 'white', transition: 'all 0.1s' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '14px' }}>{opt.icon}</span>
+                          <div>
+                            <div style={{ fontSize: '12px', fontWeight: 600, color: opt.value === 'cancel' ? '#dc2626' : '#0a1628' }}>{opt.label}</div>
+                            <div style={{ fontSize: '10px', color: '#8896a8', marginTop: '1px' }}>{opt.sub}</div>
+                          </div>
+                          <div style={{ marginLeft: 'auto', width: '16px', height: '16px', borderRadius: '50%', border: `2px solid ${cancelOption === opt.value ? (opt.value === 'cancel' ? '#dc2626' : '#c9a84c') : '#e4e9f0'}`, background: cancelOption === opt.value ? (opt.value === 'cancel' ? '#dc2626' : '#c9a84c') : 'transparent', flexShrink: 0 }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button onClick={closeCancelModal} className="btn btn-outline" style={{ flex: 1, padding: '9px', fontSize: '12px' }}>Keep Subscription</button>
+                    <button onClick={handleCancelSubmit} disabled={cancelBusy}
+                      style={{ flex: 1, background: cancelBusy ? '#8896a8' : cancelOption === 'cancel' ? '#dc2626' : '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px', fontSize: '12px', fontWeight: 600, cursor: cancelBusy ? 'not-allowed' : 'pointer', transition: 'background 0.15s' }}>
+                      {cancelBusy ? 'Processing...' : cancelOption === 'cancel' ? 'Next →' : 'Confirm'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

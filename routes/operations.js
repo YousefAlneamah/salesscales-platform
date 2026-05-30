@@ -9,7 +9,7 @@ const TIER_SERVICE_MAP = {
   enterprise: 'Fully custom engagement — all platform features, white-label options, custom AI agent training, dedicated infrastructure, and a tailored SLA',
 };
 
-module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken, storeKnowledge, notifyClientUser }) => {
+module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken, storeKnowledge, notifyClientUser, sgMail }) => {
   const router = express.Router();
 
   // ─── CASE STUDIES ────────────────────────────────────────
@@ -552,6 +552,147 @@ module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToke
       if (error) throw error;
       res.json({ invoice: data });
     } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── BILLING / CANCEL ────────────────────────────────────
+  router.post('/billing/cancel', async (req, res) => {
+    const { client_id, reason, option } = req.body;
+    if (!client_id || !option) return res.status(400).json({ error: 'client_id and option required' });
+    const validOptions = ['pause_30d', 'downgrade', 'cancel'];
+    if (!validOptions.includes(option)) return res.status(400).json({ error: `option must be one of: ${validOptions.join(', ')}` });
+
+    try {
+      const { data: client } = await supabase.from('clients')
+        .select('id, name, tier, status').eq('id', client_id).maybeSingle();
+      if (!client) return res.status(404).json({ error: 'Client not found' });
+
+      // ── PAUSE 30 DAYS ──────────────────────────────────────
+      if (option === 'pause_30d') {
+        await Promise.all([
+          supabase.from('workflows').update({ status: 'paused' }).eq('client_id', client_id).eq('status', 'active'),
+          supabase.from('clients').update({ status: 'paused' }).eq('id', client_id),
+        ]);
+        if (notifyClientUser) {
+          await notifyClientUser(client_id, 'Your Sales Scales subscription is paused',
+            `<p>Hi there,</p><p>Your Sales Scales subscription has been paused for 30 days. All your workflows and data are safely preserved. We hope to see you back soon — just reach out when you're ready to resume.</p>`);
+        }
+        console.log(`Subscription paused for client ${client.name} (${client_id})`);
+        return res.json({ ok: true, action: 'paused' });
+      }
+
+      // ── DOWNGRADE REQUEST ──────────────────────────────────
+      if (option === 'downgrade') {
+        await supabase.from('team_briefings').insert([{
+          from_member: 'zainab',
+          to_member: 'yousef',
+          subject: `Downgrade Request — ${client.name}`,
+          content: `${client.name} has requested to downgrade their plan.\n\nCurrent tier: ${client.tier || 'unknown'}\nReason: ${reason || 'Not provided'}\n\nPlease contact this client to discuss downgrade options and update their plan accordingly.`,
+          priority: 'high',
+          status: 'unread',
+          created_at: new Date().toISOString(),
+        }]);
+        console.log(`Downgrade requested for client ${client.name} (${client_id})`);
+        return res.json({ ok: true, action: 'downgrade_requested' });
+      }
+
+      // ── FULL CANCELLATION ──────────────────────────────────
+      const [contractRes, dealsRes, onboardingRes] = await Promise.all([
+        supabase.from('contracts').select('monthly_fee, start_date').eq('client_id', client_id)
+          .in('status', ['signed', 'sent', 'draft']).order('created_at', { ascending: true }).limit(1).maybeSingle(),
+        supabase.from('pipeline_deals').select('value').eq('client_id', client_id),
+        supabase.from('client_onboarding').select('created_at').eq('client_id', client_id).maybeSingle(),
+      ]);
+
+      const startDate = contractRes.data?.start_date || onboardingRes.data?.created_at || null;
+      const monthlyFee = contractRes.data?.monthly_fee ? parseFloat(contractRes.data.monthly_fee) : null;
+      const totalDealValue = (dealsRes.data || []).reduce((s, d) => s + parseFloat(d.value || 0), 0);
+
+      let clientLengthStr = 'Unknown duration';
+      let months = 0;
+      if (startDate) {
+        months = Math.max(0, Math.floor((Date.now() - new Date(startDate)) / (1000 * 60 * 60 * 24 * 30.44)));
+        clientLengthStr = months < 1 ? 'Less than 1 month' : months === 1 ? '1 month' : `${months} months`;
+      }
+      const revenueStr = monthlyFee && months > 0
+        ? `$${(monthlyFee * months).toLocaleString('en-US', { minimumFractionDigits: 0 })} (${months} × $${monthlyFee.toLocaleString('en-US')}/mo)`
+        : totalDealValue > 0
+          ? `$${totalDealValue.toLocaleString('en-US', { minimumFractionDigits: 0 })} pipeline value`
+          : 'Not tracked';
+
+      const cancelledAt = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+      const followUpDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+      const purgeDate = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+      // Pause workflows + mark client cancelled (in parallel with notifications)
+      await Promise.all([
+        supabase.from('workflows').update({ status: 'paused' }).eq('client_id', client_id).eq('status', 'active'),
+        supabase.from('clients').update({ status: 'cancelled' }).eq('id', client_id),
+      ]);
+
+      // Notifications and records — all fire in parallel, none block the response
+      const notifyClient = notifyClientUser
+        ? notifyClientUser(client_id, 'Your Sales Scales subscription has been cancelled',
+            `<p>Hi there,</p>
+            <p>Your Sales Scales subscription has been cancelled as requested. Thank you for the time you spent with us — it was a genuine pleasure working on your business.</p>
+            <p>Your account data will be retained until ${purgeDate}. If you change your mind or need anything in the meantime, just reach out.</p>
+            <p>We wish you all the best.</p>`)
+        : Promise.resolve();
+
+      const ownerEmail = sgMail
+        ? sgMail.send({
+            to: 'yousef@aisalesscales.com',
+            from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+            subject: `⚠ Client Cancelled — ${client.name}`,
+            html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px">
+              <div style="background:#0a1628;padding:20px 24px;border-radius:8px 8px 0 0">
+                <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase">Sales Scales</div>
+                <div style="color:white;font-size:16px;font-weight:600;margin-top:6px">Client Cancellation Alert</div>
+              </div>
+              <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 8px 8px;padding:24px">
+                <table style="width:100%;border-collapse:collapse">
+                  <tr><td style="padding:8px 0;color:#8896a8;font-size:12px;width:140px">Client</td><td style="padding:8px 0;font-size:13px;font-weight:600;color:#0a1628">${client.name}</td></tr>
+                  <tr><td style="padding:8px 0;color:#8896a8;font-size:12px">Tier</td><td style="padding:8px 0;font-size:13px;color:#0a1628">${client.tier || 'Unknown'}</td></tr>
+                  <tr><td style="padding:8px 0;color:#8896a8;font-size:12px">Duration</td><td style="padding:8px 0;font-size:13px;color:#0a1628">${clientLengthStr}</td></tr>
+                  <tr><td style="padding:8px 0;color:#8896a8;font-size:12px">Revenue</td><td style="padding:8px 0;font-size:13px;color:#0a1628">${revenueStr}</td></tr>
+                  <tr><td style="padding:8px 0;color:#8896a8;font-size:12px">Reason</td><td style="padding:8px 0;font-size:13px;color:#dc2626">${reason || 'Not provided'}</td></tr>
+                  <tr><td style="padding:8px 0;color:#8896a8;font-size:12px">Cancelled</td><td style="padding:8px 0;font-size:13px;color:#0a1628">${cancelledAt}</td></tr>
+                </table>
+                <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 14px;margin-top:16px;font-size:12px;color:#92400e">
+                  Hassan will follow up with ${client.name} on <strong>${followUpDate}</strong> with a win-back offer. Data purge scheduled for <strong>${purgeDate}</strong>.
+                </div>
+              </div>
+            </div>`,
+          }).catch(e => console.error('Cancel owner email failed:', e.message))
+        : Promise.resolve();
+
+      const winBackBriefing = supabase.from('team_briefings').insert([{
+        from_member: 'zainab',
+        to_member: 'hassan',
+        subject: `Win-Back: ${client.name} — Follow up ${followUpDate}`,
+        content: `${client.name} has cancelled their Sales Scales subscription.\n\nCancellation details:\n- Tier: ${client.tier || 'unknown'}\n- Duration: ${clientLengthStr}\n- Revenue collected: ${revenueStr}\n- Reason for leaving: ${reason || 'Not provided'}\n\nWin-back plan:\nFollow up with ${client.name} on ${followUpDate}. Start with a genuine check-in — ask how the business is doing since they left. Don't lead with the pitch. Reference specific results we delivered during their time with us, then offer a compelling reason to come back based on their stated reason for leaving.\n\nIf their reason was pricing, consider a 20% discount for 3 months. If it was results, offer a free strategy audit. If it was a specific pain point, address it directly.`,
+        priority: 'normal',
+        status: 'unread',
+        created_at: new Date().toISOString(),
+      }]);
+
+      const retentionMarker = supabase.from('team_briefings').insert([{
+        from_member: 'fatima',
+        to_member: 'fatima',
+        subject: `[DATA_RETENTION] ${client_id}`,
+        content: `Data retention record. Client: ${client.name} (${client_id}). Cancelled: ${new Date().toISOString()}. Purge after: ${purgeDate}.`,
+        priority: 'low',
+        status: 'read',
+        created_at: new Date().toISOString(),
+      }]);
+
+      await Promise.all([notifyClient, ownerEmail, winBackBriefing, retentionMarker]);
+
+      console.log(`Subscription cancelled: ${client.name} (${client_id})`);
+      res.json({ ok: true, action: 'cancelled' });
+    } catch (e) {
+      console.error('billing/cancel error:', e.message);
       res.status(500).json({ error: e.message });
     }
   });
