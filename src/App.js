@@ -79,7 +79,7 @@ const navItems = [
     { id: "approvals", label: "Approvals", icon: "ti-bell" },
     { id: "sequences", label: "Sequences", icon: "ti-bolt" },
     { id: "pipeline", label: "Pipeline", icon: "ti-target" },
-    { id: "inbox", label: "Inbox", icon: "ti-message", badge: "12" },
+    { id: "inbox", label: "Inbox", icon: "ti-message" },
     { id: "knowledge", label: "Knowledge Base", icon: "ti-brain" },
   ]},
   { group: "INTEGRATIONS", items: [
@@ -174,6 +174,7 @@ function App() {
   const [clientOnboarded, setClientOnboarded] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState(0);
+  const [unreadInbox, setUnreadInbox] = useState(0);
   const [showLogin, setShowLogin] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState({ contacts: [], clients: [], approvals: [] });
@@ -216,6 +217,21 @@ function App() {
     };
     fetchPending();
     const interval = setInterval(fetchPending, 60000);
+    return () => clearInterval(interval);
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!user || user.role === 'client') { setUnreadInbox(0); return; }
+    const fetchUnread = () => {
+      supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('direction', 'inbound')
+        .eq('status', 'unread')
+        .then(({ count }) => setUnreadInbox(count || 0));
+    };
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 60000);
     return () => clearInterval(interval);
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -374,8 +390,8 @@ function App() {
               >
                 <i className={"ti " + item.icon} style={{fontSize:"15px"}} aria-hidden="true"></i>
                 <span>{item.label}</span>
-                {(item.id === "approvals" ? pendingApprovals > 0 : !!item.badge) && (
-                  <span className="nav-badge">{item.id === "approvals" ? pendingApprovals : item.badge}</span>
+                {(item.id === "approvals" ? pendingApprovals > 0 : item.id === "inbox" ? unreadInbox > 0 : !!item.badge) && (
+                  <span className="nav-badge">{item.id === "approvals" ? pendingApprovals : item.id === "inbox" ? unreadInbox : item.badge}</span>
                 )}
               </div>
             ))}

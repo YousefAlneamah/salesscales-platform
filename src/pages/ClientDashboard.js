@@ -595,20 +595,26 @@ export default function ClientDashboard({ user, onLogout }) {
         <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Results</div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px', marginBottom: '20px' }}>
-        {[
-          { label: 'Revenue Recovered', value: '$0', sub: 'cart recovery this month', color: '#c9a84c', icon: '💰' },
-          { label: 'Contacts Reached', value: stats.messagesSent, sub: 'messages delivered', color: '#10b981', icon: '📨' },
-          { label: 'Conversion Rate', value: '0%', sub: 'from sequences', color: '#3b82f6', icon: '🎯' },
-        ].map(stat => (
-          <div key={stat.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', borderTop: `2px solid ${stat.color}`, boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
-            <div style={{ fontSize: '24px', marginBottom: '10px' }}>{stat.icon}</div>
-            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>{stat.label}</div>
-            <div style={{ fontSize: '28px', fontWeight: 700, color: '#0a1628', marginBottom: '4px' }}>{stat.value}</div>
-            <div style={{ fontSize: '11px', color: stat.color, fontWeight: 500 }}>{stat.sub}</div>
+      {(() => {
+        const totalEnrolled = Object.values(enrollmentsByWorkflow).reduce((s, e) => s + e.total, 0);
+        const convRate = totalEnrolled > 0 ? Math.round((stats.completedEnrollments / totalEnrolled) * 100) : 0;
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px', marginBottom: '20px' }}>
+            {[
+              { label: 'Revenue Recovered', value: `$${stats.revenueRecovered.toLocaleString()}`, sub: `${stats.completedEnrollments} sequences completed · est. all time`, color: '#c9a84c', icon: '💰' },
+              { label: 'Contacts Reached', value: stats.messagesSent, sub: 'messages delivered', color: '#10b981', icon: '📨' },
+              { label: 'Conversion Rate', value: `${convRate}%`, sub: `${stats.completedEnrollments} of ${totalEnrolled} enrolled completed`, color: '#3b82f6', icon: '🎯' },
+            ].map(stat => (
+              <div key={stat.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', borderTop: `2px solid ${stat.color}`, boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+                <div style={{ fontSize: '24px', marginBottom: '10px' }}>{stat.icon}</div>
+                <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>{stat.label}</div>
+                <div style={{ fontSize: '28px', fontWeight: 700, color: '#0a1628', marginBottom: '4px' }}>{stat.value}</div>
+                <div style={{ fontSize: '11px', color: stat.color, fontWeight: 500 }}>{stat.sub}</div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        );
+      })()}
 
       {/* EMAIL PERFORMANCE */}
       <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)', marginBottom: '20px' }}>
@@ -631,52 +637,72 @@ export default function ClientDashboard({ user, onLogout }) {
 
       <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase' }}>Sequence Performance &amp; Revenue Attribution</div>
-          <div style={{ fontSize: '10px', color: '#8896a8' }}>AOV: <span style={{ fontWeight: 700, color: '#c9a84c' }}>${aov}</span></div>
+          <div>
+            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '2px' }}>Revenue Attribution by Sequence</div>
+            <div style={{ fontSize: '11px', color: '#4a5568' }}>Active sequences only · sorted by estimated revenue recovered</div>
+          </div>
+          <div style={{ fontSize: '10px', color: '#8896a8', textAlign: 'right' }}>
+            AOV: <span style={{ fontWeight: 700, color: '#c9a84c' }}>${aov}</span>
+          </div>
         </div>
-        {workflows.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: '#8896a8' }}>No sequences yet</div>
-        ) : (() => {
-          const withRevenue = workflows.map(w => {
+        {(() => {
+          const activeWorkflows = workflows.filter(w => w.status === 'active');
+          if (activeWorkflows.length === 0) {
+            return <div style={{ textAlign: 'center', padding: '40px', color: '#8896a8', fontSize: '12px' }}>No active sequences yet</div>;
+          }
+          const withRevenue = activeWorkflows.map(w => {
             const e = enrollmentsByWorkflow[w.id] || { total: 0, completed: 0, active: 0 };
             const revenue = e.completed * aov;
             const completionRate = e.total > 0 ? Math.round((e.completed / e.total) * 100) : 0;
-            return { ...w, enrolled: e.total, completed: e.completed, active: e.active, revenue, completionRate };
+            return { ...w, enrolled: e.total, completed: e.completed, activeCount: e.active, revenue, completionRate };
           }).sort((a, b) => b.revenue - a.revenue || b.enrolled - a.enrolled);
+          const topRevenue = withRevenue[0]?.revenue > 0;
 
           return (
             <div>
-              <div style={{ display: 'grid', gridTemplateColumns: '2.2fr 0.8fr 0.9fr 1fr 1fr 1.4fr', padding: '10px 14px', background: '#0a1628', borderRadius: '8px', marginBottom: '2px' }}>
-                {['Sequence', 'Status', 'Enrolled', 'Completed', 'Rate', 'Est. Revenue'].map(h => (
+              <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 1fr 1fr 1fr 1.5fr', padding: '10px 14px', background: '#0a1628', borderRadius: '8px 8px 0 0', marginBottom: 0 }}>
+                {['Sequence', 'Enrolled', 'Completed', 'Rate', 'Est. Revenue'].map(h => (
                   <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase' }}>{h}</div>
                 ))}
               </div>
-              {withRevenue.map((w, i) => (
-                <div key={w.id} style={{ display: 'grid', gridTemplateColumns: '2.2fr 0.8fr 0.9fr 1fr 1fr 1.4fr', padding: '12px 14px', borderBottom: '1px solid #f4f6fa', alignItems: 'center', background: i === 0 && w.revenue > 0 ? 'rgba(201,168,76,0.04)' : undefined }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {i === 0 && w.revenue > 0 && <span style={{ fontSize: '12px' }}>🏆</span>}
-                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</div>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '9px', padding: '3px 8px', borderRadius: '20px', fontWeight: 600, background: w.status === 'active' ? '#ecfdf5' : '#fffbeb', color: w.status === 'active' ? '#059669' : '#d97706', border: `1px solid ${w.status === 'active' ? '#a7f3d0' : '#fde68a'}` }}>
-                      {w.status}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#4a5568' }}>{w.enrolled}</div>
-                  <div style={{ fontSize: '12px', color: '#4a5568' }}>{w.completed}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <div style={{ width: '32px', height: '4px', background: '#f0f3f8', borderRadius: '2px', overflow: 'hidden' }}>
-                      <div style={{ width: `${w.completionRate}%`, height: '100%', background: w.completionRate >= 50 ? '#10b981' : '#c9a84c' }} />
+              <div style={{ border: '1px solid #e4e9f0', borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+                {withRevenue.map((w, i) => {
+                  const isTop = i === 0 && topRevenue;
+                  return (
+                    <div key={w.id} style={{
+                      display: 'grid', gridTemplateColumns: '2.5fr 1fr 1fr 1fr 1.5fr',
+                      padding: '13px 14px', alignItems: 'center',
+                      borderBottom: i < withRevenue.length - 1 ? '1px solid #f4f6fa' : 'none',
+                      background: isTop ? 'rgba(201,168,76,0.06)' : 'white',
+                      borderLeft: isTop ? '3px solid #c9a84c' : '3px solid transparent',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+                        {isTop && (
+                          <span style={{ fontSize: '10px', background: '#c9a84c', color: '#0a1628', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', flexShrink: 0 }}>TOP</span>
+                        )}
+                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</div>
+                      </div>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628' }}>{w.enrolled}</div>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628' }}>{w.completed}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <div style={{ width: '28px', height: '4px', background: '#f0f3f8', borderRadius: '2px', overflow: 'hidden', flexShrink: 0 }}>
+                          <div style={{ width: `${w.completionRate}%`, height: '100%', background: w.completionRate >= 50 ? '#10b981' : '#c9a84c' }} />
+                        </div>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: w.completionRate >= 50 ? '#10b981' : '#c9a84c' }}>{w.completionRate}%</span>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: isTop ? '#c9a84c' : '#0a1628' }}>
+                          {w.revenue > 0 ? `$${w.revenue.toLocaleString()}` : '—'}
+                        </div>
+                        {w.completed > 0 && (
+                          <div style={{ fontSize: '9px', color: '#8896a8', marginTop: '1px' }}>{w.completed} × ${aov}</div>
+                        )}
+                      </div>
                     </div>
-                    <span style={{ fontSize: '11px', fontWeight: 600, color: w.completionRate >= 50 ? '#10b981' : '#c9a84c' }}>{w.completionRate}%</span>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#c9a84c' }}>${w.revenue.toLocaleString()}</div>
-                    <div style={{ fontSize: '9px', color: '#8896a8' }}>{w.completed} × ${aov}</div>
-                  </div>
-                </div>
-              ))}
-              <div style={{ marginTop: '10px', fontSize: '10px', color: '#8896a8', lineHeight: 1.6, paddingTop: '4px', borderTop: '1px solid #f4f6fa' }}>
+                  );
+                })}
+              </div>
+              <div style={{ marginTop: '10px', fontSize: '10px', color: '#8896a8', lineHeight: 1.6 }}>
                 Revenue estimated from completed sequences × your average order value of ${aov}. Actual results may vary.
               </div>
             </div>
