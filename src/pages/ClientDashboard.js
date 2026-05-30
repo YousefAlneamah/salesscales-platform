@@ -43,6 +43,8 @@ export default function ClientDashboard({ user, onLogout }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [bellOpen, setBellOpen] = useState(false);
   const bellRef = useRef(null);
+  const [aov, setAov] = useState(75);
+  const [workflowStepsMap, setWorkflowStepsMap] = useState({});
 
   useEffect(() => { fetchData(); }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -151,6 +153,7 @@ export default function ClientDashboard({ user, onLogout }) {
       setEnrollmentsByWorkflow(byWorkflow);
 
       const aov = parseAov(onboardingRes.data?.average_order_value);
+      setAov(aov);
       const completedTotal = allEnrollments.filter(e => e.status === 'completed').length;
 
       setContacts(cts);
@@ -189,12 +192,29 @@ export default function ClientDashboard({ user, onLogout }) {
     return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
+  useEffect(() => {
+    if (workflows.length === 0) return;
+    const wfIds = workflows.map(w => w.id);
+    supabase.from('workflow_steps').select('*').in('workflow_id', wfIds).order('step_order')
+      .then(({ data }) => {
+        const map = {};
+        (data || []).forEach(s => {
+          if (!map[s.workflow_id]) map[s.workflow_id] = [];
+          map[s.workflow_id].push(s);
+        });
+        setWorkflowStepsMap(map);
+      })
+      .catch(() => {});
+  }, [workflows]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const channelIcon = (ch) => ({ Email: '✉', SMS: '💬', WhatsApp: '📱', Instagram: '📸', Facebook: '👥' }[ch] || '💌');
+  const stepTypeIcon = (t) => ({ email: '✉', sms: '💬', whatsapp: '📱', wait: '⏱', tag: '🏷', pipeline: '🎯', notify: '🔔' }[t] || '·');
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: '▦' },
     { id: 'results', label: 'My Results', icon: '📈' },
     { id: 'sequences', label: 'Sequences', icon: '⚡' },
+    { id: 'activity', label: 'Recent Activity', icon: '📊' },
     { id: 'approvals', label: 'My Approvals', icon: '✓' },
     { id: 'messages', label: 'Messages', icon: '💬' },
     { id: 'contacts', label: 'Contacts', icon: '👥' },
@@ -211,6 +231,7 @@ export default function ClientDashboard({ user, onLogout }) {
     dashboard: 'Dashboard',
     results: 'My Results',
     sequences: 'Active Sequences',
+    activity: 'Recent Activity',
     approvals: 'My Approvals',
     messages: 'Messages',
     contacts: 'My Contacts',
@@ -228,6 +249,7 @@ export default function ClientDashboard({ user, onLogout }) {
       case 'dashboard': return <ClientHome />;
       case 'results': return <ClientResults />;
       case 'sequences': return <ClientSequences />;
+      case 'activity': return <ClientActivity />;
       case 'approvals': return <ClientApprovals />;
       case 'messages': return <ClientMessages />;
       case 'contacts': return <ClientContacts />;
@@ -593,31 +615,58 @@ export default function ClientDashboard({ user, onLogout }) {
       </div>
 
       <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
-        <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '16px' }}>Sequence Performance</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase' }}>Sequence Performance &amp; Revenue Attribution</div>
+          <div style={{ fontSize: '10px', color: '#8896a8' }}>AOV: <span style={{ fontWeight: 700, color: '#c9a84c' }}>${aov}</span></div>
+        </div>
         {workflows.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px', color: '#8896a8' }}>No sequences yet</div>
-        ) : (
-          <div>
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', padding: '10px 14px', background: '#0a1628', borderRadius: '8px', marginBottom: '4px' }}>
-              {['SEQUENCE', 'STATUS', 'ENROLLED', 'ACTIVE', 'CONVERTED'].map(h => (
-                <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px', fontWeight: 700 }}>{h}</div>
-              ))}
-            </div>
-            {workflows.map(w => (
-              <div key={w.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', padding: '12px 14px', borderBottom: '1px solid #f4f6fa', alignItems: 'center' }}>
-                <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628' }}>{w.name}</div>
-                <div>
-                  <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: w.status === 'active' ? '#ecfdf5' : '#fffbeb', color: w.status === 'active' ? '#059669' : '#d97706', border: `1px solid ${w.status === 'active' ? '#a7f3d0' : '#fde68a'}` }}>
-                    {w.status}
-                  </span>
-                </div>
-                <div style={{ fontSize: '12px', color: '#4a5568' }}>{w.enrolled_count || 0}</div>
-                <div style={{ fontSize: '12px', color: '#4a5568' }}>{w.active_count || 0}</div>
-                <div style={{ fontSize: '12px', fontWeight: 600, color: '#c9a84c' }}>{w.converted_count || 0}</div>
+        ) : (() => {
+          const withRevenue = workflows.map(w => {
+            const e = enrollmentsByWorkflow[w.id] || { total: 0, completed: 0, active: 0 };
+            const revenue = e.completed * aov;
+            const completionRate = e.total > 0 ? Math.round((e.completed / e.total) * 100) : 0;
+            return { ...w, enrolled: e.total, completed: e.completed, active: e.active, revenue, completionRate };
+          }).sort((a, b) => b.revenue - a.revenue || b.enrolled - a.enrolled);
+
+          return (
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: '2.2fr 0.8fr 0.9fr 1fr 1fr 1.4fr', padding: '10px 14px', background: '#0a1628', borderRadius: '8px', marginBottom: '2px' }}>
+                {['Sequence', 'Status', 'Enrolled', 'Completed', 'Rate', 'Est. Revenue'].map(h => (
+                  <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase' }}>{h}</div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
+              {withRevenue.map((w, i) => (
+                <div key={w.id} style={{ display: 'grid', gridTemplateColumns: '2.2fr 0.8fr 0.9fr 1fr 1fr 1.4fr', padding: '12px 14px', borderBottom: '1px solid #f4f6fa', alignItems: 'center', background: i === 0 && w.revenue > 0 ? 'rgba(201,168,76,0.04)' : undefined }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {i === 0 && w.revenue > 0 && <span style={{ fontSize: '12px' }}>🏆</span>}
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '9px', padding: '3px 8px', borderRadius: '20px', fontWeight: 600, background: w.status === 'active' ? '#ecfdf5' : '#fffbeb', color: w.status === 'active' ? '#059669' : '#d97706', border: `1px solid ${w.status === 'active' ? '#a7f3d0' : '#fde68a'}` }}>
+                      {w.status}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#4a5568' }}>{w.enrolled}</div>
+                  <div style={{ fontSize: '12px', color: '#4a5568' }}>{w.completed}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <div style={{ width: '32px', height: '4px', background: '#f0f3f8', borderRadius: '2px', overflow: 'hidden' }}>
+                      <div style={{ width: `${w.completionRate}%`, height: '100%', background: w.completionRate >= 50 ? '#10b981' : '#c9a84c' }} />
+                    </div>
+                    <span style={{ fontSize: '11px', fontWeight: 600, color: w.completionRate >= 50 ? '#10b981' : '#c9a84c' }}>{w.completionRate}%</span>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#c9a84c' }}>${w.revenue.toLocaleString()}</div>
+                    <div style={{ fontSize: '9px', color: '#8896a8' }}>{w.completed} × ${aov}</div>
+                  </div>
+                </div>
+              ))}
+              <div style={{ marginTop: '10px', fontSize: '10px', color: '#8896a8', lineHeight: 1.6, paddingTop: '4px', borderTop: '1px solid #f4f6fa' }}>
+                Revenue estimated from completed sequences × your average order value of ${aov}. Actual results may vary.
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
     );
@@ -628,8 +677,8 @@ export default function ClientDashboard({ user, onLogout }) {
     <div>
       <div style={{ marginBottom: '24px' }}>
         <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Automation</div>
-        <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>Active Sequences</div>
-        <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>{workflows.filter(w => w.status === 'active').length} running · {workflows.length} total</div>
+        <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Sequences</div>
+        <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>{workflows.filter(w => w.status === 'active').length} running · {workflows.length} total · full step-by-step visibility into what your AI team is sending</div>
       </div>
 
       {workflows.length === 0 ? (
@@ -641,20 +690,26 @@ export default function ClientDashboard({ user, onLogout }) {
       ) : workflows.map(workflow => {
         const wfStats = enrollmentsByWorkflow[workflow.id] || { total: 0, completed: 0, active: 0 };
         const completionRate = wfStats.total > 0 ? Math.round((wfStats.completed / wfStats.total) * 100) : 0;
+        const steps = workflowStepsMap[workflow.id] || [];
+        const actionSteps = steps.filter(s => s.step_type !== 'wait').length;
         return (
-          <div key={workflow.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', marginBottom: '10px', boxShadow: '0 1px 3px rgba(10,22,40,0.04)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+          <div key={workflow.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', marginBottom: '12px', boxShadow: '0 1px 3px rgba(10,22,40,0.04)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
               <div>
                 <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628', marginBottom: '4px' }}>{workflow.name}</div>
-                <div style={{ fontSize: '11px', color: '#8896a8' }}>Trigger: {workflow.trigger_type} · Created {formatDate(workflow.created_at)}</div>
+                <div style={{ fontSize: '11px', color: '#8896a8' }}>
+                  Trigger: {workflow.trigger_type} · {actionSteps} messages · Created {formatDate(workflow.created_at)}
+                </div>
               </div>
-              <span style={{ fontSize: '9px', padding: '4px 12px', borderRadius: '20px', fontWeight: 600, background: workflow.status === 'active' ? '#ecfdf5' : '#fffbeb', color: workflow.status === 'active' ? '#059669' : '#d97706', border: `1px solid ${workflow.status === 'active' ? '#a7f3d0' : '#fde68a'}` }}>
+              <span style={{ fontSize: '9px', padding: '4px 12px', borderRadius: '20px', fontWeight: 600, background: workflow.status === 'active' ? '#ecfdf5' : '#fffbeb', color: workflow.status === 'active' ? '#059669' : '#d97706', border: `1px solid ${workflow.status === 'active' ? '#a7f3d0' : '#fde68a'}`, flexShrink: 0 }}>
                 {workflow.status === 'active' ? '● Active' : '○ Paused'}
               </span>
             </div>
+
+            {/* Stats row */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '14px' }}>
               {[
-                { label: 'Total Enrolled', value: wfStats.total, color: '#c9a84c' },
+                { label: 'Contacts Enrolled', value: wfStats.total, color: '#c9a84c' },
                 { label: 'Currently Active', value: wfStats.active, color: '#3b82f6' },
                 { label: 'Completed', value: wfStats.completed, color: '#10b981' },
                 { label: 'Completion Rate', value: `${completionRate}%`, color: completionRate >= 50 ? '#10b981' : '#c9a84c' },
@@ -665,18 +720,131 @@ export default function ClientDashboard({ user, onLogout }) {
                 </div>
               ))}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+
+            {/* Completion bar */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: steps.length > 0 ? '16px' : 0 }}>
               <div style={{ fontSize: '9px', color: '#8896a8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', whiteSpace: 'nowrap' }}>Completion</div>
               <div style={{ flex: 1, height: '6px', background: '#f0f3f8', borderRadius: '4px', overflow: 'hidden' }}>
                 <div style={{ width: `${completionRate}%`, height: '100%', background: `linear-gradient(90deg, ${completionRate >= 50 ? '#10b981' : '#c9a84c'}, ${completionRate >= 50 ? '#059669' : '#a07234'})`, borderRadius: '4px', transition: 'width 0.6s' }} />
               </div>
               <div style={{ fontSize: '11px', fontWeight: 700, color: completionRate >= 50 ? '#10b981' : '#c9a84c', minWidth: '36px' }}>{completionRate}%</div>
             </div>
+
+            {/* Step timeline */}
+            {steps.length > 0 && (
+              <div style={{ borderTop: '1px solid #f0f3f8', paddingTop: '16px' }}>
+                <div style={{ fontSize: '9px', color: '#8896a8', fontWeight: 700, letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '12px' }}>
+                  Sequence Timeline — {steps.length} steps
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+                  {steps.map((step, idx) => {
+                    const isWait = step.step_type === 'wait';
+                    const waitLabel = step.wait_hours >= 24
+                      ? `${Math.floor(step.wait_hours / 24)}d${step.wait_hours % 24 ? ` ${step.wait_hours % 24}h` : ''} delay`
+                      : `${step.wait_hours || 0}h delay`;
+                    return (
+                      <div key={step.id} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', paddingBottom: idx < steps.length - 1 ? '8px' : 0 }}>
+                        {/* icon + connector */}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                          <div style={{ width: '28px', height: '28px', borderRadius: '7px', background: isWait ? '#f8fafc' : '#0a1628', border: `1px solid ${isWait ? '#e4e9f0' : '#0a1628'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px' }}>
+                            {stepTypeIcon(step.step_type)}
+                          </div>
+                          {idx < steps.length - 1 && (
+                            <div style={{ width: '1px', flex: 1, minHeight: '8px', background: '#e4e9f0', margin: '2px 0' }} />
+                          )}
+                        </div>
+                        {/* content */}
+                        <div style={{ paddingBottom: idx < steps.length - 1 ? '6px' : 0, paddingTop: '3px', flex: 1 }}>
+                          {isWait ? (
+                            <div style={{ fontSize: '11px', color: '#8896a8', fontStyle: 'italic' }}>{waitLabel}</div>
+                          ) : (
+                            <>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: step.subject ? '2px' : 0 }}>
+                                <span style={{ fontSize: '11px', fontWeight: 700, color: '#0a1628', textTransform: 'capitalize' }}>{step.step_type}</span>
+                                <span style={{ fontSize: '9px', padding: '1px 6px', borderRadius: '4px', background: '#f0f3f8', color: '#8896a8', fontWeight: 600 }}>Step {idx + 1}</span>
+                              </div>
+                              {step.subject && (
+                                <div style={{ fontSize: '11px', color: '#4a5568' }}>{step.subject}</div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         );
       })}
     </div>
   );
+
+  // ─── RECENT ACTIVITY ─────────────────────────────────
+  const ClientActivity = () => {
+    const contactMap = {};
+    contacts.forEach(c => {
+      contactMap[c.id] = [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || '—';
+    });
+
+    const outbound = messages
+      .filter(m => m.direction === 'outbound')
+      .slice(0, 20);
+
+    const getStatus = (msg) => {
+      if (msg.clicked_at) return { label: 'Clicked', color: '#c9a84c', border: '#fde68a', bg: '#fffbeb' };
+      if (msg.opened_at)  return { label: 'Opened',  color: '#3b82f6', border: '#bfdbfe', bg: '#eff6ff' };
+      return { label: 'Sent', color: '#8896a8', border: '#e4e9f0', bg: '#f8fafc' };
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Outreach Log</div>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>Recent Activity</div>
+          <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>Last 20 messages sent to your contacts by your AI team</div>
+        </div>
+
+        {outbound.length === 0 ? (
+          <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '60px', textAlign: 'center' }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>📊</div>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: '#0a1628', marginBottom: '6px' }}>No activity yet</div>
+            <div style={{ fontSize: '12px', color: '#8896a8' }}>Activity appears here as your AI team sends messages to contacts</div>
+          </div>
+        ) : (
+          <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.7fr 3fr 0.8fr 0.9fr', padding: '12px 18px', background: '#0a1628' }}>
+              {['Contact', 'Channel', 'Message', 'Status', 'Sent'].map(h => (
+                <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase' }}>{h}</div>
+              ))}
+            </div>
+            {outbound.map(msg => {
+              const st = getStatus(msg);
+              const contactName = contactMap[msg.contact_id] || '—';
+              return (
+                <div key={msg.id} style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.7fr 3fr 0.8fr 0.9fr', padding: '11px 18px', borderBottom: '1px solid #f4f6fa', alignItems: 'center' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 500, color: '#0a1628' }}>{contactName}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: '#4a5568' }}>
+                    {channelIcon(msg.channel)} <span style={{ fontSize: '11px' }}>{msg.channel}</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#8896a8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: '12px' }}>
+                    {(msg.content || '').slice(0, 90)}
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', fontWeight: 600, background: st.bg, color: st.color, border: `1px solid ${st.border}` }}>
+                      {st.label}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#8896a8' }}>{formatTime(msg.created_at)}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // ─── MESSAGES ────────────────────────────────────────
   const ClientMessages = () => (
