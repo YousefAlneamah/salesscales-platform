@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { supabase } from '../supabase';
 import { API_BASE } from '../config';
 
@@ -11,6 +12,10 @@ export default function Settings() {
   const [emailSaved, setEmailSaved] = useState(null);
   const [twilioProvisioning, setTwilioProvisioning] = useState(null);
   const [twilioResult, setTwilioResult] = useState({});
+  const [shopifyConns, setShopifyConns] = useState({});
+  const [socialConfig, setSocialConfig] = useState({});
+  const [socialNames, setSocialNames] = useState({});
+  const [disconnecting, setDisconnecting] = useState({});
 
   const [profile, setProfile] = useState({
     businessName: 'Sales Scales',
@@ -53,15 +58,23 @@ export default function Settings() {
   });
 
   useEffect(() => {
-    supabase.from('clients').select('id, name, from_email, from_name, klaviyo_api_key, meta_access_token, meta_ad_account_id, hubspot_api_key, hubspot_portal_id, twilio_phone_number, twilio_subaccount_sid').order('name').then(({ data }) => {
+    supabase.from('clients').select('id, name, from_email, from_name, klaviyo_api_key, meta_access_token, meta_ad_account_id, meta_page_id, meta_ig_user_id, hubspot_api_key, hubspot_portal_id, twilio_phone_number, twilio_subaccount_sid').order('name').then(({ data }) => {
       if (!data) return;
       setClients(data);
       const cfg = {};
       data.forEach(c => { cfg[c.id] = { from_email: c.from_email || '', from_name: c.from_name || '', klaviyo_api_key: c.klaviyo_api_key || '', meta_access_token: c.meta_access_token || '', meta_ad_account_id: c.meta_ad_account_id || '', hubspot_api_key: c.hubspot_api_key || '', hubspot_portal_id: c.hubspot_portal_id || '' }; });
       setEmailConfig(cfg);
+      const sc = {};
+      data.forEach(c => { sc[c.id] = { meta_page_id: c.meta_page_id || '', meta_ig_user_id: c.meta_ig_user_id || '' }; });
+      setSocialConfig(sc);
       const tr = {};
       data.forEach(c => { if (c.twilio_phone_number) tr[c.id] = { phone: c.twilio_phone_number, sid: c.twilio_subaccount_sid }; });
       setTwilioResult(tr);
+    });
+    supabase.from('shopify_connections').select('client_id, shop').then(({ data }) => {
+      const sc = {};
+      (data || []).forEach(c => { sc[c.client_id] = c.shop; });
+      setShopifyConns(sc);
     });
   }, []);
 
@@ -80,6 +93,58 @@ export default function Settings() {
       alert('Provisioning failed: ' + e.message);
     } finally {
       setTwilioProvisioning(null);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'email-domains') return;
+    clients.forEach(c => {
+      const sc = socialConfig[c.id] || {};
+      if (sc.meta_page_id || sc.meta_ig_user_id) {
+        axios.get(`${API_BASE}/meta/page-info`, { params: { client_id: c.id } })
+          .then(r => setSocialNames(prev => ({ ...prev, [c.id]: r.data })))
+          .catch(() => {});
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, clients.length]);
+
+  const disconnectSocial = async (clientId, platform) => {
+    if (!window.confirm(`Disconnect ${platform === 'facebook' ? 'Facebook' : 'Instagram'} for this client?`)) return;
+    setDisconnecting(prev => ({ ...prev, [clientId]: platform }));
+    try {
+      await axios.post(`${API_BASE}/auth/${platform}/disconnect`, { client_id: clientId });
+      setSocialConfig(prev => ({
+        ...prev,
+        [clientId]: {
+          ...prev[clientId],
+          ...(platform === 'facebook' ? { meta_page_id: '' } : { meta_ig_user_id: '' }),
+        },
+      }));
+      setSocialNames(prev => ({
+        ...prev,
+        [clientId]: {
+          ...prev[clientId],
+          ...(platform === 'facebook' ? { page_name: null } : { ig_username: null }),
+        },
+      }));
+    } catch (e) {
+      alert('Disconnect failed: ' + (e.response?.data?.error || e.message));
+    } finally {
+      setDisconnecting(prev => ({ ...prev, [clientId]: null }));
+    }
+  };
+
+  const disconnectShopify = async (clientId) => {
+    if (!window.confirm('Disconnect Shopify? This will pause all active workflows for this client.')) return;
+    setDisconnecting(prev => ({ ...prev, [clientId]: 'shopify' }));
+    try {
+      await axios.post(`${API_BASE}/shopify/disconnect`, { client_id: clientId });
+      setShopifyConns(prev => { const n = { ...prev }; delete n[clientId]; return n; });
+    } catch (e) {
+      alert('Disconnect failed: ' + (e.response?.data?.error || e.message));
+    } finally {
+      setDisconnecting(prev => ({ ...prev, [clientId]: null }));
     }
   };
 
@@ -436,6 +501,77 @@ export default function Settings() {
                           </div>
                         )}
                       </div>
+
+                      {/* SOCIAL CONNECTIONS */}
+                      {(() => {
+                        const sc = socialConfig[client.id] || {};
+                        const names = socialNames[client.id] || {};
+                        const shopDomain = shopifyConns[client.id];
+                        const hasFb = !!sc.meta_page_id;
+                        const hasIg = !!sc.meta_ig_user_id;
+                        const connBadge = { fontSize: '9px', padding: '2px 8px', borderRadius: '20px', background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', fontWeight: 600 };
+                        const disconnBtn = (clientId, platform, busy) => (
+                          <button
+                            onClick={() => disconnectSocial(clientId, platform)}
+                            disabled={busy}
+                            style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '6px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                            {busy ? '...' : 'Disconnect'}
+                          </button>
+                        );
+                        return (
+                          <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #e4e9f0' }}>
+                            <div style={{ fontSize: '10px', color: '#8896a8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>Social Connections</div>
+                            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+
+                              {/* Facebook */}
+                              {hasFb ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f0f4ff', border: '1px solid #c7d7ff', borderRadius: '8px', padding: '7px 12px' }}>
+                                  <span style={connBadge}>● Facebook</span>
+                                  <span style={{ fontSize: '11px', color: '#0a1628', fontWeight: 500 }}>
+                                    {names.page_name || sc.meta_page_id}
+                                  </span>
+                                  {disconnBtn(client.id, 'facebook', disconnecting[client.id] === 'facebook')}
+                                </div>
+                              ) : (
+                                <a href={`${API_BASE}/auth/facebook/connect?client_id=${client.id}`}
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#1877f2', color: 'white', borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, textDecoration: 'none' }}>
+                                  <i className="ti ti-brand-facebook" style={{ fontSize: '13px' }} /> Connect Facebook
+                                </a>
+                              )}
+
+                              {/* Instagram */}
+                              {hasIg ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#fff0f7', border: '1px solid #fbc8e2', borderRadius: '8px', padding: '7px 12px' }}>
+                                  <span style={connBadge}>● Instagram</span>
+                                  <span style={{ fontSize: '11px', color: '#0a1628', fontWeight: 500 }}>
+                                    {names.ig_username ? `@${names.ig_username}` : sc.meta_ig_user_id}
+                                  </span>
+                                  {disconnBtn(client.id, 'instagram', disconnecting[client.id] === 'instagram')}
+                                </div>
+                              ) : (
+                                <a href={`${API_BASE}/auth/instagram/connect?client_id=${client.id}`}
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'linear-gradient(135deg,#f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%)', color: 'white', borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, textDecoration: 'none' }}>
+                                  <i className="ti ti-brand-instagram" style={{ fontSize: '13px' }} /> Connect Instagram
+                                </a>
+                              )}
+
+                              {/* Shopify */}
+                              {shopDomain && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '7px 12px' }}>
+                                  <span style={connBadge}>● Shopify</span>
+                                  <span style={{ fontSize: '11px', color: '#0a1628', fontWeight: 500, fontFamily: 'DM Mono, monospace' }}>{shopDomain}</span>
+                                  <button
+                                    onClick={() => disconnectShopify(client.id)}
+                                    disabled={disconnecting[client.id] === 'shopify'}
+                                    style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '6px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: disconnecting[client.id] === 'shopify' ? 'not-allowed' : 'pointer' }}>
+                                    {disconnecting[client.id] === 'shopify' ? '...' : 'Disconnect'}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}

@@ -758,6 +758,44 @@ module.exports = ({ supabase, axios, aiCall, ragSearch, getBriefingsContext, ver
     }
   });
 
+  // GET /meta/page-info?client_id=xxx — live page/IG name lookup for display
+  router.get('/meta/page-info', async (req, res) => {
+    const { client_id } = req.query;
+    if (!client_id) return res.status(400).json({ error: 'client_id required' });
+    try {
+      const { data: client } = await supabase.from('clients')
+        .select('meta_access_token, meta_page_id, meta_ig_user_id')
+        .eq('id', client_id).maybeSingle();
+      if (!client) return res.json({ page_name: null, ig_username: null });
+
+      const token = client.meta_access_token;
+      let page_name = null, ig_username = null;
+
+      if (token && client.meta_page_id) {
+        try {
+          const r = await axios.get(`https://graph.facebook.com/v21.0/${client.meta_page_id}`, {
+            params: { access_token: token, fields: 'name' },
+          });
+          page_name = r.data.name || null;
+        } catch { /* best effort */ }
+      }
+
+      if (token && client.meta_ig_user_id) {
+        try {
+          const r = await axios.get(`https://graph.facebook.com/v21.0/${client.meta_ig_user_id}`, {
+            params: { access_token: token, fields: 'username' },
+          });
+          ig_username = r.data.username || null;
+        } catch { /* best effort */ }
+      }
+
+      res.json({ page_name, ig_username });
+    } catch (e) {
+      console.error('Meta page-info error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // POST /social/schedule-post — schedule/publish a post to Facebook and/or Instagram
   router.post('/social/schedule-post', async (req, res) => {
     const { client_id, content, platforms = [], scheduled_time, image_url } = req.body;

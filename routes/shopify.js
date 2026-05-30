@@ -400,5 +400,19 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
     }
   });
 
+  router.post('/disconnect', async (req, res) => {
+    const { client_id } = req.body;
+    if (!client_id) return res.status(400).json({ error: 'client_id required' });
+    try {
+      await supabase.from('shopify_connections').delete().eq('client_id', client_id);
+      await supabase.from('workflows').update({ status: 'paused' }).eq('client_id', client_id).eq('status', 'active');
+      console.log(`Shopify disconnected for client ${client_id} — active workflows paused`);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('Shopify disconnect error:', e.message);
+      res.status(500).json({ error: 'Disconnect failed', details: e.message });
+    }
+  });
+
   return router;
 };
