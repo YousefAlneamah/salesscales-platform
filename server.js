@@ -2568,6 +2568,49 @@ app.get('/team/briefings', async (req, res) => {
   }
 });
 
+app.get('/team/performance', async (req, res) => {
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    const [briefingsRes, approvalsRes] = await Promise.all([
+      supabase.from('team_briefings').select('from_member, subject, created_at').gte('created_at', weekAgo),
+      supabase.from('approvals').select('from_member, type, created_at').gte('created_at', weekAgo),
+    ]);
+    const briefings = briefingsRes.data || [];
+    const approvals = approvalsRes.data || [];
+
+    const stats = {
+      mahdi: {
+        sequences_generated: approvals.filter(a => a.from_member === 'mahdi' && ['email_sequence', 'sms_sequence', 'whatsapp_sequence'].includes(a.type)).length,
+        content_pieces: briefings.filter(b => b.from_member === 'mahdi').length,
+      },
+      hassan: {
+        prospects_found: approvals.filter(a => a.from_member === 'hassan' && a.type === 'prospect').length,
+        outreach_sent: briefings.filter(b => b.from_member === 'hassan').length,
+      },
+      hussain: {
+        briefings_generated: briefings.filter(b => b.from_member === 'hussain').length,
+        competitor_reports: approvals.filter(a => a.from_member === 'hussain' && a.type === 'competitor_report').length,
+      },
+      fatima: {
+        issues_flagged: briefings.filter(b => b.from_member === 'fatima').length,
+        refunds_handled: approvals.filter(a => a.from_member === 'fatima' && /refund|return/.test(a.type)).length,
+      },
+      zainab: {
+        reports_sent: briefings.filter(b => b.from_member === 'zainab').length,
+        client_chats: approvals.filter(a => a.from_member === 'zainab').length,
+      },
+      ali: {
+        closing_scripts: briefings.filter(b => b.from_member === 'ali').length,
+      },
+    };
+
+    res.json({ stats, week_start: weekAgo });
+  } catch (e) {
+    console.error('/team/performance error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── APPROVAL ENDPOINTS ──────────────────────────────────
 app.post('/approvals/submit', async (req, res) => {
   const { type, title, content, metadata, from_member, client_id } = req.body;
@@ -2760,8 +2803,9 @@ app.post('/approvals/action', async (req, res) => {
         </div>`
       });
     } else if (approval.type === 'prospect') {
+      const prospectName = meta.prospect_name || approval.title;
       await supabase.from('my_pipeline').insert([{
-        name: meta.prospect_name || approval.title,
+        name: prospectName,
         niche: meta.niche || null,
         channel: meta.channel || null,
         pain_point: meta.pain_point || null,
@@ -2770,10 +2814,47 @@ app.post('/approvals/action', async (req, res) => {
         stage: 'new',
       }]);
       await storeBriefing('hassan', 'ali',
-        `New Prospect to Close: ${meta.prospect_name || approval.title}`,
-        `Hassan has sourced a new prospect that Yousef approved.\n\nProspect: ${meta.prospect_name || approval.title}\nNiche: ${meta.niche || 'unknown'}\nChannel: ${meta.channel || 'unknown'}\nPain Point: ${meta.pain_point || 'unknown'}\n\nOutreach message sent:\n${effectiveContent}\n\nDraft a NEPQ-based closing script for this prospect and prepare follow-up questions.`,
+        `New Prospect to Close: ${prospectName}`,
+        `Hassan has sourced a new prospect that Yousef approved.\n\nProspect: ${prospectName}\nNiche: ${meta.niche || 'unknown'}\nChannel: ${meta.channel || 'unknown'}\nPain Point: ${meta.pain_point || 'unknown'}\n\nOutreach message sent:\n${effectiveContent}\n\nDraft a NEPQ-based closing script for this prospect and prepare follow-up questions.`,
         'high'
       );
+
+      // Ali generates closing script then schedules 3 follow-up briefings to Yousef
+      try {
+        const closingScript = await aiCall(
+          `You are Ali, the Sales Closer AI at Sales Scales. You use the NEPQ (Neuro-Emotional Persuasion Questioning) framework. You are direct, confident, and focused on high-ticket closing. Never break character.`,
+          `Generate a concise NEPQ-based closing script for this prospect:\n\nName: ${prospectName}\nNiche: ${meta.niche || 'ecommerce'}\nPain Point: ${meta.pain_point || 'scaling their store'}\nChannel: ${meta.channel || 'outreach'}\n\nInclude: opening NEPQ questions, a problem-agitation frame, and 2 key objection-handling lines. Keep it under 300 words.`
+        );
+
+        const outreachDate = new Date();
+        const day3Date = new Date(outreachDate.getTime() + 3 * 24 * 60 * 60 * 1000)
+          .toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+        const day7Date = new Date(outreachDate.getTime() + 7 * 24 * 60 * 60 * 1000)
+          .toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+        const day14Date = new Date(outreachDate.getTime() + 14 * 24 * 60 * 60 * 1000)
+          .toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+        await Promise.all([
+          storeBriefing('ali', 'yousef',
+            `Day 3 Follow-up: Value Add — ${prospectName}`,
+            `Send on: ${day3Date}\n\nAngle: Value Add\nDo not pitch. Send a specific insight, tip, or mini-resource that directly addresses their pain point (${meta.pain_point || 'scaling their store'}). Frame it as something useful you thought of after your first message. No CTA beyond a soft "happy to go deeper on this."\n\nProspect niche: ${meta.niche || 'ecommerce'} | Channel: ${meta.channel || 'outreach'}\n\n--- Closing Script (for reference) ---\n${closingScript}`,
+            'high'
+          ),
+          storeBriefing('ali', 'yousef',
+            `Day 7 Follow-up: Case Study Share — ${prospectName}`,
+            `Send on: ${day7Date}\n\nAngle: Case Study Share\nShare a relevant Sales Scales case study from the ${meta.niche || 'ecommerce'} niche. Lead with the measurable result (e.g. "3.2x ROAS in 6 weeks"), then connect it directly to ${prospectName}'s situation. End with a single question: "Would results like this be useful for you right now?"`,
+            'high'
+          ),
+          storeBriefing('ali', 'yousef',
+            `Day 14 Follow-up: Final Attempt — ${prospectName}`,
+            `Send on: ${day14Date}\n\nAngle: Final Attempt\nThis is the last touch in the sequence. Keep it short. Acknowledge you've reached out a couple of times. Let them know the door stays open whenever the timing is right. Give one clear CTA: a 15-minute call. If no reply after this, mark the prospect as nurture-only in the pipeline.`,
+            'high'
+          ),
+        ]);
+        console.log(`[prospect-approval] Ali follow-up sequence created for ${prospectName}`);
+      } catch (followUpErr) {
+        console.error('[prospect-approval] Ali follow-up sequence failed:', followUpErr.message);
+      }
     }
 
     await supabase.from('approvals').update({
@@ -3596,11 +3677,49 @@ app.use('/',        require('./routes/operations')({ supabase, aiCall, ragSearch
 app.use('/',        require('./routes/notifications')({ supabase }));
 app.use('/billing', require('./routes/billing')({ supabase, axios, sgMail, storeBriefing }));
 
+// ─── ERROR MONITORING ─────────────────────────────────────
+// SQL to create errors table in Supabase:
+// create table errors (
+//   id uuid default gen_random_uuid() primary key,
+//   message text not null,
+//   stack text,
+//   endpoint text,
+//   created_at timestamptz default now()
+// );
+const logError = (err, endpoint = 'unknown') => {
+  const ts = new Date().toISOString();
+  const msg = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error ? (err.stack || '') : '';
+
+  supabase.from('errors').insert([{ message: msg, stack, endpoint, created_at: ts }])
+    .catch(dbErr => console.error('Failed to log error to DB:', dbErr.message));
+
+  if (process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM_EMAIL) {
+    sgMail.send({
+      to: 'yousef@aisalesscales.com',
+      from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales Errors' },
+      subject: `Server Error — ${endpoint} — ${new Date(ts).toLocaleString()}`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:620px;margin:0 auto;padding:24px">
+        <div style="background:#dc2626;padding:16px 24px;border-radius:8px 8px 0 0">
+          <div style="color:white;font-size:14px;font-weight:700">Server Error Detected</div>
+        </div>
+        <div style="background:#fff;border:1px solid #fecaca;border-top:none;border-radius:0 0 8px 8px;padding:20px 24px">
+          <p style="font-size:12px;color:#8896a8;margin:0 0 4px">Timestamp: ${ts}</p>
+          <p style="font-size:12px;color:#8896a8;margin:0 0 16px">Endpoint: ${endpoint}</p>
+          <div style="font-size:13px;font-weight:600;color:#dc2626;margin-bottom:14px">${msg}</div>
+          <pre style="font-size:11px;color:#4a5568;background:#f9fafb;border:1px solid #e4e9f0;padding:12px;border-radius:6px;overflow-x:auto;white-space:pre-wrap;margin:0">${stack.slice(0, 2000)}</pre>
+        </div>
+      </div>`,
+    }).catch(mailErr => console.error('Error notification email failed:', mailErr.message));
+  }
+};
+
 // ─── GLOBAL ERROR HANDLER ─────────────────────────────────
 app.use((err, req, res, next) => {
-  const ts = new Date().toISOString();
-  console.error(`[${ts}] Unhandled error — ${req.method} ${req.path} — ${err.message}`);
+  const endpoint = `${req.method} ${req.path}`;
+  console.error(`[${new Date().toISOString()}] Unhandled error — ${endpoint} — ${err.message}`);
   console.error(err.stack);
+  logError(err, endpoint);
   if (!res.headersSent) {
     res.status(500).json({ error: 'Internal server error', details: err.message });
   }
@@ -3615,10 +3734,12 @@ app.listen(3001, () => {
 process.on('uncaughtException', (err) => {
   console.error(`[${new Date().toISOString()}] uncaughtException — ${err.message}`);
   console.error(err.stack);
+  logError(err, 'uncaughtException');
 });
 
 process.on('unhandledRejection', (reason) => {
   const msg = reason instanceof Error ? reason.message : String(reason);
   console.error(`[${new Date().toISOString()}] unhandledRejection — ${msg}`);
   if (reason instanceof Error) console.error(reason.stack);
+  logError(reason instanceof Error ? reason : new Error(msg), 'unhandledRejection');
 });
