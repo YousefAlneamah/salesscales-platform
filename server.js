@@ -3525,6 +3525,7 @@ app.use('/',        require('./routes/analytics')({ supabase, aiCall }));
 app.use('/',        require('./routes/integrations')({ supabase, axios, aiCall, ragSearch, getBriefingsContext, verifyToken }));
 app.use('/',        require('./routes/operations')({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken, storeKnowledge, notifyClientUser, sgMail }));
 app.use('/',        require('./routes/notifications')({ supabase }));
+app.use('/billing', require('./routes/billing')({ supabase, axios, sgMail, storeBriefing }));
 
 // ─── GLOBAL ERROR HANDLER ─────────────────────────────────
 app.use((err, req, res, next) => {

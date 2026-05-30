@@ -92,6 +92,9 @@ TWILIO_WHATSAPP_NUMBER=     # +1... format — Twilio WhatsApp sender (sandbox o
 SENDGRID_API_KEY=
 SENDGRID_FROM_EMAIL=        # Verified sender address
 YOUTUBE_API_KEY=            # YouTube Data API v3 — bulk channel import (server-side only)
+PAYPAL_CLIENT_ID=           # PayPal REST API app client ID — server-side only
+PAYPAL_CLIENT_SECRET=       # PayPal REST API app secret — server-side only
+PAYPAL_MODE=                # 'sandbox' (default) or 'live' — controls PayPal API base URL
 ```
 
 ## Supabase Tables

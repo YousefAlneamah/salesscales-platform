@@ -1272,6 +1272,9 @@ export default function ClientDashboard({ user, onLogout }) {
     const [savingP, setSavingP] = useState(false);
     const [savedP, setSavedP] = useState(false);
     const [whatsappNumber, setWhatsappNumber] = useState('');
+    const [billing, setBilling] = useState(null);
+    const [billingLoading, setBillingLoading] = useState(true);
+    const [subscribing, setSubscribing] = useState(null);
 
     useEffect(() => {
       (async () => {
@@ -1291,6 +1294,33 @@ export default function ClientDashboard({ user, onLogout }) {
         setLoadingP(false);
       })();
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+      axios.get(`${API_BASE}/billing/status?client_id=${user.clientId}`)
+        .then(r => setBilling(r.data))
+        .catch(() => setBilling(null))
+        .finally(() => setBillingLoading(false));
+    }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const handleSubscribe = async (plan) => {
+      setSubscribing(plan);
+      try {
+        const { data: clientUserData } = await axios.get(`${API_BASE}/client-profile`, { params: { client_id: user.clientId } });
+        const email = user.email;
+        const res = await axios.post(`${API_BASE}/billing/create-subscription`, {
+          client_id: user.clientId,
+          plan,
+          email,
+        });
+        if (res.data.approval_url) {
+          window.open(res.data.approval_url, '_blank');
+        }
+      } catch (e) {
+        alert(e.response?.data?.error || 'Could not start subscription. Please try again.');
+      } finally {
+        setSubscribing(null);
+      }
+    };
 
     const saveProfile = async () => {
       setSavingP(true);
@@ -1384,6 +1414,70 @@ export default function ClientDashboard({ user, onLogout }) {
             Upgrade Plan →
           </button>
         </div>
+      </div>
+
+      {/* BILLING */}
+      <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)', marginTop: '16px', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase' }}>Billing & Subscription</div>
+          {billing?.has_subscription && billing?.paypal_status && (
+            <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600,
+              background: billing.paypal_status === 'ACTIVE' ? '#ecfdf5' : '#fef2f2',
+              color: billing.paypal_status === 'ACTIVE' ? '#059669' : '#dc2626',
+              border: `1px solid ${billing.paypal_status === 'ACTIVE' ? '#a7f3d0' : '#fecaca'}` }}>
+              ● {billing.paypal_status === 'ACTIVE' ? 'Active' : billing.paypal_status}
+            </span>
+          )}
+        </div>
+
+        {billingLoading ? (
+          <div style={{ fontSize: '12px', color: '#8896a8', padding: '12px 0' }}>Loading billing status...</div>
+        ) : billing?.has_subscription ? (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
+              {[
+                { label: 'Plan', value: billing.tier || '—' },
+                { label: 'Status', value: billing.paypal_status || '—' },
+                { label: 'Next Billing', value: billing.next_billing_date ? new Date(billing.next_billing_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' },
+                { label: 'Last Payment', value: billing.last_payment?.time ? new Date(billing.last_payment.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' },
+              ].map(item => (
+                <div key={item.label} style={{ background: '#f8fafc', borderRadius: '8px', padding: '10px 14px' }}>
+                  <div style={{ fontSize: '9px', color: '#8896a8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{item.label}</div>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628' }}>{item.value}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: '11px', color: '#8896a8', lineHeight: 1.6 }}>
+              Subscription ID: <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '10px' }}>{billing.subscription_id}</span>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontSize: '12px', color: '#8896a8', marginBottom: '16px', lineHeight: 1.6 }}>
+              No active subscription. Subscribe via PayPal to enable automated recurring billing.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {[
+                { key: 'starter', label: 'Starter', price: '$997/mo', desc: 'Email, SMS, workflows, AI team, CRM' },
+                { key: 'growth',  label: 'Growth',  price: '$1,997/mo', desc: 'Everything in Starter + WhatsApp, Klaviyo, Meta Ads, HubSpot' },
+                { key: 'elite',   label: 'Elite',   price: '$2,997/mo', desc: 'Everything in Growth + voice agents, Shopify live data, Canva & Higgsfield AI' },
+              ].map(plan => (
+                <div key={plan.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f8fafc', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '12px 16px' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#0a1628', marginBottom: '2px' }}>{plan.label} — {plan.price}</div>
+                    <div style={{ fontSize: '10px', color: '#8896a8' }}>{plan.desc}</div>
+                  </div>
+                  <button
+                    onClick={() => handleSubscribe(plan.key)}
+                    disabled={subscribing === plan.key}
+                    style={{ background: subscribing === plan.key ? '#e4e9f0' : '#0a1628', color: subscribing === plan.key ? '#8896a8' : '#c9a84c', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '11px', fontWeight: 700, cursor: subscribing === plan.key ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                    {subscribing === plan.key ? 'Opening...' : 'Subscribe'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* KNOWLEDGE BASE */}
