@@ -34,6 +34,37 @@ const createClientNotification = async (clientId, title, message, type = 'info')
   } catch { /* notifications are non-critical — never throw */ }
 };
 
+const inferApprovalPriority = (type = '', title = '', fromMember = '') => {
+  const t = type.toLowerCase();
+  const ti = title.toLowerCase();
+  if (/refund|return|complaint|dispute|money.?back/.test(ti)) return 'urgent';
+  if (/refund|complaint/.test(t)) return 'urgent';
+  if (['prospect', 'outreach', 'outreach_message', 'brand_deal', 'competitor_report', 'client_request'].includes(t)) return 'high';
+  if (/prospect|outreach|brand.?deal/.test(t)) return 'high';
+  return 'normal';
+};
+
+const onUrgentApproval = (approval) => {
+  if (!approval || approval.priority !== 'urgent') return;
+  sgMail.send({
+    to: 'yousef@aisalesscales.com',
+    from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+    subject: `🚨 Urgent Approval — ${approval.title}`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px">
+      <div style="background:#dc2626;padding:16px 24px;border-radius:8px 8px 0 0">
+        <div style="color:white;font-size:14px;font-weight:700">⚠ Urgent Approval Requires Your Attention</div>
+      </div>
+      <div style="background:#fff;border:1px solid #fecaca;border-top:none;border-radius:0 0 8px 8px;padding:20px 24px">
+        <div style="font-size:14px;color:#0a1628;font-weight:600;margin-bottom:10px">${approval.title}</div>
+        <div style="font-size:12px;color:#4a5568;line-height:1.7;margin-bottom:16px">${(approval.content || '').slice(0, 300)}${approval.content && approval.content.length > 300 ? '...' : ''}</div>
+        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:10px 14px;font-size:12px;color:#dc2626;font-weight:600">
+          This approval has been marked urgent — please review it immediately in the Approval Queue.
+        </div>
+      </div>
+    </div>`,
+  }).catch(e => console.error('Urgent approval email failed:', e.message));
+};
+
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -1174,6 +1205,7 @@ Return JSON exactly: {"trigger_type":"manual","steps":[{"step_type":"email","sub
           metadata: { steps: emailParsed.steps || [], trigger_type: emailParsed.trigger_type || 'manual' },
           from_member: 'mahdi',
           client_id: client.id,
+          priority: 'normal',
           status: 'pending',
           created_at: new Date().toISOString()
         }]);
@@ -1197,6 +1229,7 @@ Return JSON exactly: {"trigger_type":"cart_abandoned","steps":[{"step_type":"sms
           metadata: { steps: smsParsed.steps || [], trigger_type: smsParsed.trigger_type || 'cart_abandoned' },
           from_member: 'mahdi',
           client_id: client.id,
+          priority: 'normal',
           status: 'pending',
           created_at: new Date().toISOString()
         }]);
@@ -1286,6 +1319,7 @@ cron.schedule('0 * * * *', async () => {
           metadata: { to_email: clientUser.email, to_name: clientUser.name || flaggedClient.name, subject: `Quick check-in from Sales Scales` },
           from_member: 'fatima',
           client_id: flaggedClient.id,
+          priority: 'normal',
           status: 'pending',
           created_at: new Date().toISOString()
         }]);
@@ -1514,6 +1548,7 @@ Return JSON: {"prospects":[{"name":"...","niche":"...","channel":"Email","pain_p
           metadata: { prospect_name: p.name, niche: p.niche, channel: p.channel, pain_point: p.pain_point, subject: p.subject },
           from_member: 'hassan',
           client_id: null,
+          priority: 'high',
           status: 'pending',
           created_at: new Date().toISOString()
         }]);
@@ -1654,6 +1689,7 @@ cron.schedule('0 6 * * *', async () => {
             metadata: { steps: emailSteps, trigger_type: 'cart_abandoned', shop, aov, regenerated: true },
             from_member: 'mahdi',
             client_id,
+            priority: 'normal',
             status: 'pending',
             created_at: new Date().toISOString()
           },
@@ -1664,6 +1700,7 @@ cron.schedule('0 6 * * *', async () => {
             metadata: { steps: smsSteps, trigger_type: 'cart_abandoned', shop, aov, regenerated: true },
             from_member: 'mahdi',
             client_id,
+            priority: 'normal',
             status: 'pending',
             created_at: new Date().toISOString()
           },
@@ -1674,6 +1711,7 @@ cron.schedule('0 6 * * *', async () => {
             metadata: { steps: waSteps, trigger_type: 'cart_abandoned', shop, aov, regenerated: true },
             from_member: 'mahdi',
             client_id,
+            priority: 'normal',
             status: 'pending',
             created_at: new Date().toISOString()
           },
@@ -1736,6 +1774,7 @@ cron.schedule('0 9 * * *', async () => {
             metadata: { to_email: clientUser.email, to_name: clientUser.name || client.name, subject: `Checking in — ${client.name}` },
             from_member: 'zainab',
             client_id: client.id,
+            priority: 'normal',
             status: 'pending',
             created_at: new Date().toISOString()
           }]);
@@ -1756,6 +1795,7 @@ cron.schedule('0 9 * * *', async () => {
             metadata: { to_email: clientUser.email, to_name: clientUser.name || client.name, subject: `We miss you — ${client.name}` },
             from_member: 'zainab',
             client_id: client.id,
+            priority: 'normal',
             status: 'pending',
             created_at: new Date().toISOString()
           }]);
@@ -2464,15 +2504,18 @@ app.post('/approvals/submit', async (req, res) => {
   const { type, title, content, metadata, from_member, client_id } = req.body;
   if (!type || !title) return res.status(400).json({ error: 'type and title are required' });
   try {
+    const priority = inferApprovalPriority(type, title, from_member);
     const { data, error } = await supabase.from('approvals').insert([{
       type, title, content: content || '',
       metadata: metadata || {},
       from_member: from_member || 'system',
       client_id: client_id || null,
+      priority,
       status: 'pending',
       created_at: new Date().toISOString()
     }]).select().single();
     if (error) throw error;
+    onUrgentApproval(data);
     if (data?.client_id) {
       await notifyClientUser(
         data.client_id,
@@ -2511,6 +2554,7 @@ const reviseApprovalWithMahdi = async (approval, feedback) => {
       metadata,
       from_member: 'mahdi',
       client_id: approval.client_id,
+      priority: approval.priority || 'normal',
       status: 'pending',
       created_at: new Date().toISOString(),
     }]).select().single();
@@ -2728,15 +2772,17 @@ app.post('/client/zainab', async (req, res) => {
     const actionKeywords = /\b(change|update|edit|fix|remove|add|rewrite)\b/i;
     if (actionKeywords.test(message)) {
       try {
-        await supabase.from('approvals').insert([{
+        const { data: crData } = await supabase.from('approvals').insert([{
           type: 'client_request',
           title: `Client request from ${store}`,
           content: message,
           from_member: 'zainab',
           client_id: client_id || null,
+          priority: /refund|return|complaint|dispute|money.?back/i.test(message) ? 'urgent' : 'high',
           status: 'pending',
           created_at: new Date().toISOString()
-        }]);
+        }]).select().single();
+        if (crData) onUrgentApproval(crData);
         result += `\n\nI've flagged this for the Sales Scales team to action — they'll get it handled and you'll see it move through your approvals.`;
       } catch (apprErr) {
         console.error('Zainab approval submit error:', apprErr.message);

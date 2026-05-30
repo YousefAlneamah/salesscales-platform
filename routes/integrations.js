@@ -747,6 +747,7 @@ module.exports = ({ supabase, axios, aiCall, ragSearch, getBriefingsContext, ver
         metadata: { competitor_url, competitor_name: brand, ad_library_url: adLibraryUrl, active_ads_count: activeAds.length, analysis_id: stored?.id || null },
         from_member: 'hussain',
         client_id: client_id || null,
+        priority: 'high',
         status: 'pending',
         created_at: new Date().toISOString(),
       }]);

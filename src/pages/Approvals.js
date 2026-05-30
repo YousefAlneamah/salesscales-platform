@@ -24,6 +24,14 @@ const MEMBER_COLORS = {
   mahdi: '#8b5cf6', fatima: '#f59e0b', zainab: '#ec4899',
 };
 
+const PRIORITY_STYLES = {
+  urgent: { bg: '#fee2e2', color: '#dc2626', border: '#fecaca', label: '● Urgent' },
+  high:   { bg: '#fffbeb', color: '#c9a84c', border: '#fde68a', label: '● High' },
+  normal: { bg: '#f8fafc', color: '#8896a8', border: '#e4e9f0', label: '● Normal' },
+};
+
+const PRIORITY_ORDER = { urgent: 0, high: 1, normal: 2 };
+
 const MEMBER_LABELS = {
   hussain: 'Hussain AI', hassan: 'Hassan AI', ali: 'Ali AI',
   mahdi: 'Mahdi AI', fatima: 'Fatima AI', zainab: 'Zainab AI', system: 'System',
@@ -101,12 +109,19 @@ export default function Approvals() {
 
   const typeStyle = (t) => TYPE_COLORS[t] || { bg: '#f8fafc', color: '#64748b', border: '#e4e9f0' };
 
-  const filtered = approvals.filter(a => {
-    const matchS = filterStatus === 'All' || a.status === filterStatus;
-    const matchT = filterType === 'All' || a.type === filterType;
-    const matchC = filterClient === 'All' || a.client_id === filterClient;
-    return matchS && matchT && matchC;
-  });
+  const filtered = approvals
+    .filter(a => {
+      const matchS = filterStatus === 'All' || a.status === filterStatus;
+      const matchT = filterType === 'All' || a.type === filterType;
+      const matchC = filterClient === 'All' || a.client_id === filterClient;
+      return matchS && matchT && matchC;
+    })
+    .sort((a, b) => {
+      const pa = PRIORITY_ORDER[a.priority || 'normal'] ?? 2;
+      const pb = PRIORITY_ORDER[b.priority || 'normal'] ?? 2;
+      if (pa !== pb) return pa - pb;
+      return new Date(b.created_at) - new Date(a.created_at);
+    });
 
   const pendingCount = approvals.filter(a => a.status === 'pending').length;
 
@@ -191,6 +206,11 @@ export default function Approvals() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap' }}>
+                          {(() => { const ps = PRIORITY_STYLES[approval.priority || 'normal'] || PRIORITY_STYLES.normal; return (
+                            <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', fontWeight: 700, background: ps.bg, color: ps.color, border: `1px solid ${ps.border}` }}>
+                              {ps.label}
+                            </span>
+                          );})()}
                           {approval.type && (
                             <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', fontWeight: 700, letterSpacing: '0.5px', background: ts.bg, color: ts.color, border: `1px solid ${ts.border}` }}>
                               {TYPE_LABELS[approval.type] || approval.type}
@@ -246,6 +266,9 @@ export default function Approvals() {
             </div>
 
             <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
+              {(() => { const ps = PRIORITY_STYLES[selected.priority || 'normal'] || PRIORITY_STYLES.normal; return (
+                <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 700, background: ps.bg, color: ps.color, border: `1px solid ${ps.border}` }}>{ps.label}</span>
+              );})()}
               {selected.type && (() => { const ts = typeStyle(selected.type); return (
                 <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 700, background: ts.bg, color: ts.color, border: `1px solid ${ts.border}` }}>{TYPE_LABELS[selected.type] || selected.type}</span>
               );})()}

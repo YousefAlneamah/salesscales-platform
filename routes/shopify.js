@@ -71,6 +71,7 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
       metadata: { steps: emailSteps, trigger_type: 'cart_abandoned', shop, aov },
       from_member: 'mahdi',
       client_id: clientId,
+      priority: 'normal',
       status: 'pending',
       created_at: new Date().toISOString()
     }]);
@@ -101,6 +102,7 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
       metadata: { steps: smsSteps, trigger_type: 'cart_abandoned', shop, aov },
       from_member: 'mahdi',
       client_id: clientId,
+      priority: 'normal',
       status: 'pending',
       created_at: new Date().toISOString()
     }]);
@@ -131,6 +133,7 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
       metadata: { steps: waSteps, trigger_type: 'cart_abandoned', shop, aov },
       from_member: 'mahdi',
       client_id: clientId,
+      priority: 'normal',
       status: 'pending',
       created_at: new Date().toISOString()
     }]);
