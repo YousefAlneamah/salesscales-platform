@@ -41,6 +41,8 @@ import WhiteLabel from "./pages/WhiteLabel";
 import Settings from "./pages/Settings";
 import Referrals from "./pages/Referrals";
 import Retention from "./pages/Retention";
+import Terms from "./pages/Terms";
+import Privacy from "./pages/Privacy";
 import Calls from "./pages/Calls";
 import ClientDashboard from "./pages/ClientDashboard";
 import ClientOnboardingFlow from "./pages/ClientOnboardingFlow";
@@ -200,6 +202,8 @@ function App() {
     setUser(null);
   };
 
+  if (window.location.pathname === '/terms') return <Terms />;
+  if (window.location.pathname === '/privacy') return <Privacy />;
   if (window.location.pathname === '/signup') return <ClientSignup />;
 
   if (!user) return <Login onLogin={handleLogin} />;

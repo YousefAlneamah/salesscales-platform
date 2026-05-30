@@ -134,6 +134,29 @@ module.exports = ({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }) =>
     }
   });
 
+  // ─── TERMS ACCEPTANCE ────────────────────────────────────
+  router.post('/accept-terms', async (req, res) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'email required' });
+    try {
+      const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+        || req.socket?.remoteAddress
+        || req.ip
+        || 'unknown';
+      const now = new Date().toISOString();
+      await supabase.from('client_users').update({
+        accepted_terms: true,
+        accepted_terms_at: now,
+        accepted_terms_ip: ip,
+      }).eq('email', email.toLowerCase());
+      console.log(`Terms accepted: ${email} from ${ip}`);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('accept-terms error:', e.message);
+      res.status(500).json({ error: 'Failed to record terms acceptance' });
+    }
+  });
+
   // ─── FACEBOOK OAUTH ──────────────────────────────────────
   router.get('/facebook/connect', (req, res) => {
     const { client_id } = req.query;

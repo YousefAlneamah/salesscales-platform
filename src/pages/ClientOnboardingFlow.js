@@ -78,6 +78,7 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
     biggest_challenge: '',
     goals: '',
   });
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
@@ -93,8 +94,18 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
         : [...f.current_tools, tool],
     }));
 
+  const handleStep1Continue = () => {
+    // Record terms acceptance server-side (non-blocking — captures real IP)
+    fetch(`${API_BASE}/auth/accept-terms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: user.email }),
+    }).catch(() => {});
+    setStep(2);
+  };
+
   const canNext = {
-    1: !!(form.store_url && form.monthly_revenue && form.average_order_value),
+    1: !!(form.store_url && form.monthly_revenue && form.average_order_value && termsAccepted),
     2: !!(form.main_products && form.brand_voice && form.target_customer),
     3: true,
     4: !!(form.biggest_challenge && form.goals),
@@ -259,6 +270,38 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
                   ))}
                 </div>
               </div>
+
+              {/* TERMS & PRIVACY */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '16px' }}>
+                <div style={{ fontSize: '11px', color: '#4a5568', lineHeight: '1.7', marginBottom: '12px' }}>
+                  Before proceeding, please review our legal documents:
+                  <div style={{ marginTop: '6px', display: 'flex', gap: '16px' }}>
+                    <a href="/terms" target="_blank" rel="noopener noreferrer"
+                      style={{ color: '#c9a84c', fontWeight: 600, fontSize: '12px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      📋 Terms of Service
+                    </a>
+                    <a href="/privacy" target="_blank" rel="noopener noreferrer"
+                      style={{ color: '#c9a84c', fontWeight: 600, fontSize: '12px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      🔒 Privacy Policy
+                    </a>
+                  </div>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={termsAccepted}
+                    onChange={e => setTermsAccepted(e.target.checked)}
+                    style={{ marginTop: '2px', width: '16px', height: '16px', accentColor: '#c9a84c', flexShrink: 0, cursor: 'pointer' }}
+                  />
+                  <span style={{ fontSize: '12px', color: '#0a1628', lineHeight: '1.6' }}>
+                    I have read and agree to the{' '}
+                    <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: '#c9a84c', fontWeight: 600, textDecoration: 'none' }}>Terms of Service</a>
+                    {' '}and{' '}
+                    <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: '#c9a84c', fontWeight: 600, textDecoration: 'none' }}>Privacy Policy</a>.
+                    My acceptance is recorded with timestamp and IP address.
+                  </span>
+                </label>
+              </div>
             </div>
           )}
 
@@ -370,7 +413,7 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
             ) : <div />}
 
             {step < 4 ? (
-              <button type="button" onClick={() => setStep(s => s + 1)} disabled={!canNext[step]}
+              <button type="button" onClick={step === 1 ? handleStep1Continue : () => setStep(s => s + 1)} disabled={!canNext[step]}
                 style={{ background: canNext[step] ? '#c9a84c' : '#e4e9f0', color: canNext[step] ? '#0a1628' : '#a0aec0', border: 'none', borderRadius: '10px', padding: '11px 26px', fontSize: '13px', fontWeight: 700, cursor: canNext[step] ? 'pointer' : 'not-allowed', fontFamily: 'DM Sans, sans-serif', letterSpacing: '-0.2px', transition: 'all 0.15s' }}>
                 Continue →
               </button>
