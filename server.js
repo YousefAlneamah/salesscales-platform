@@ -24,6 +24,16 @@ const supabase = createClient(
   process.env.REACT_APP_SUPABASE_ANON_KEY
 );
 
+const createClientNotification = async (clientId, title, message, type = 'info') => {
+  if (!clientId) return;
+  try {
+    await supabase.from('client_notifications').insert([{
+      client_id: clientId, title, message, type, read: false,
+      created_at: new Date().toISOString(),
+    }]);
+  } catch { /* notifications are non-critical — never throw */ }
+};
+
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -882,6 +892,12 @@ cron.schedule('*/15 * * * *', async () => {
           'A sequence just completed',
           `<p>Good news — an automated sequence has finished running for <strong>${contactLabel}</strong>.</p><p>Log in to your Sales Scales portal to see the results.</p>`
         );
+        createClientNotification(
+          enrollment.client_id,
+          'Sequence completed',
+          `An automated sequence finished running for ${contactLabel}`,
+          'sequence'
+        ).catch(() => {});
       }
     }
   } catch (e) {
@@ -923,8 +939,24 @@ const storeBriefing = async (from_member, to_member, subject, content, priority 
 };
 
 // ─── HELPER: REFUND / RETURN AUTO-HANDLING ───────────────
+const handleBrandDeal = async (channel, contact, body) => {
+  if (!/\b(deal|partner|collab|sponsor|collaborat|opportunit|work together|campaign|brand)\b/i.test(body || '')) return;
+  createClientNotification(
+    contact.client_id,
+    'Brand deal inquiry',
+    `${contact.first_name || 'A contact'} may have sent a deal or partnership inquiry via ${channel}`,
+    'deal'
+  ).catch(() => {});
+};
+
 const handleRefundRequest = async (channel, contact, fromNumber, body) => {
   if (!/refund|return|money back/i.test(body || '')) return;
+  createClientNotification(
+    contact.client_id,
+    'Refund request received',
+    `${[contact.first_name, contact.last_name].filter(Boolean).join(' ') || 'A customer'} sent a refund request via ${channel}`,
+    'refund'
+  ).catch(() => {});
   const name = `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || 'Customer';
   await storeBriefing('fatima', 'yousef',
     `Refund/Return request from ${name}`,
@@ -1917,6 +1949,7 @@ app.post('/sms/inbound', async (req, res) => {
         ).catch(e => console.error('Unhandled SMS briefing failed:', e.message));
       }
       await handleRefundRequest('SMS', contact, From, Body);
+      await handleBrandDeal('SMS', contact, Body);
     } else {
       await supabase.from('messages').insert([{
         channel: 'SMS', direction: 'inbound',
@@ -1965,6 +1998,7 @@ app.post('/whatsapp/inbound', async (req, res) => {
         ).catch(e => console.error('Unhandled WhatsApp briefing failed:', e.message));
       }
       await handleRefundRequest('WhatsApp', contact, phone, Body);
+      await handleBrandDeal('WhatsApp', contact, Body);
     } else {
       await supabase.from('messages').insert([{
         channel: 'WhatsApp', direction: 'inbound',
@@ -2445,6 +2479,12 @@ app.post('/approvals/submit', async (req, res) => {
         'New content is ready for your review',
         `<p>Your AI team has prepared new content — <strong>${title}</strong> — that is ready for your review.</p><p>Log in to your Sales Scales portal to review and approve it.</p>`
       );
+      createClientNotification(
+        data.client_id,
+        'New approval pending',
+        `"${title}" is ready for your review`,
+        'approval'
+      ).catch(() => {});
     }
     res.json({ approval: data });
   } catch (e) {
@@ -3411,6 +3451,7 @@ app.use('/',        require('./routes/knowledge')({ supabase, axios, importLimit
 app.use('/',        require('./routes/analytics')({ supabase, aiCall }));
 app.use('/',        require('./routes/integrations')({ supabase, axios, aiCall, ragSearch, getBriefingsContext, verifyToken }));
 app.use('/',        require('./routes/operations')({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken, storeKnowledge, notifyClientUser, sgMail }));
+app.use('/',        require('./routes/notifications')({ supabase }));
 
 // ─── GLOBAL ERROR HANDLER ─────────────────────────────────
 app.use((err, req, res, next) => {

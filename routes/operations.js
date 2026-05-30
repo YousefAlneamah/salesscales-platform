@@ -488,6 +488,14 @@ module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToke
           `<p>Hi ${client.name || 'there'},</p><p>Your ${period} performance report from Zainab is ready to view.</p><p>Log in to your Sales Scales portal to read the full report and recommendations for next month.</p>`
         );
       }
+      supabase.from('client_notifications').insert([{
+        client_id,
+        title: 'Monthly report ready',
+        message: `Your ${period} performance report from Zainab is ready to view`,
+        type: 'report',
+        read: false,
+        created_at: new Date().toISOString(),
+      }]).catch(() => {});
 
       // Feedback loop: store the month's insights & recommendations so the AI
       // team can reference what worked when planning the next month.

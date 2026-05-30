@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { supabase } from '../supabase';
 import { API_BASE } from '../config';
@@ -39,6 +39,10 @@ export default function ClientDashboard({ user, onLogout }) {
   const [showWalkthrough, setShowWalkthrough] = useState(false);
   const [walkthroughStep, setWalkthroughStep] = useState(0);
   const [referralData, setReferralData] = useState({ referral_code: null, referral_link: null, referrals: [], total: 0, converted: 0, rewards_earned: 0 });
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [bellOpen, setBellOpen] = useState(false);
+  const bellRef = useRef(null);
 
   useEffect(() => { fetchData(); }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -47,6 +51,35 @@ export default function ClientDashboard({ user, onLogout }) {
       .then(r => setReferralData(r.data))
       .catch(() => {});
   }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const fetchNotifs = () => {
+      axios.get(`${API_BASE}/notifications?client_id=${user.clientId}`)
+        .then(r => {
+          setNotifications(r.data.notifications || []);
+          setUnreadCount(r.data.unread_count || 0);
+        })
+        .catch(() => {});
+    };
+    fetchNotifs();
+    const interval = setInterval(fetchNotifs, 30000);
+    return () => clearInterval(interval);
+  }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!bellOpen) return;
+    const handler = (e) => { if (bellRef.current && !bellRef.current.contains(e.target)) setBellOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [bellOpen]);
+
+  const markAllRead = async () => {
+    try {
+      await axios.post(`${API_BASE}/notifications/read`, { client_id: user.clientId });
+      setUnreadCount(0);
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    } catch { /* non-critical */ }
+  };
 
   useEffect(() => {
     axios.get(`${API_BASE}/shopify/products?client_id=${user.clientId}`)
@@ -1435,6 +1468,70 @@ export default function ClientDashboard({ user, onLogout }) {
         <div style={{ background: 'white', borderBottom: '1px solid #e4e9f0', padding: '0 28px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 1px 3px rgba(10,22,40,0.04)', flexShrink: 0 }}>
           <div style={{ fontSize: '14px', fontWeight: 600, color: '#0a1628' }}>{pageTitles[currentPage]}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {/* NOTIFICATION BELL */}
+            <div ref={bellRef} style={{ position: 'relative' }}>
+              <button
+                onClick={() => setBellOpen(o => !o)}
+                style={{ position: 'relative', background: 'transparent', border: '1px solid #e4e9f0', borderRadius: '8px', width: '34px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.15s' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#c9a84c'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#e4e9f0'; }}>
+                <i className="ti ti-bell" style={{ fontSize: '15px', color: '#4a5568' }} />
+                {unreadCount > 0 && (
+                  <span style={{ position: 'absolute', top: '-4px', right: '-4px', minWidth: '16px', height: '16px', borderRadius: '8px', background: '#dc2626', color: 'white', fontSize: '9px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px', lineHeight: 1, pointerEvents: 'none' }}>
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {bellOpen && (() => {
+                const typeIcon = (t) => ({ approval: '✓', sequence: '⚡', report: '📄', deal: '🤝', refund: '↩', info: 'ℹ' }[t] || 'ℹ');
+                const timeAgo = (d) => {
+                  const diff = Date.now() - new Date(d).getTime();
+                  const m = Math.floor(diff / 60000);
+                  if (m < 1) return 'just now';
+                  if (m < 60) return `${m}m ago`;
+                  const h = Math.floor(m / 60);
+                  if (h < 24) return `${h}h ago`;
+                  return `${Math.floor(h / 24)}d ago`;
+                };
+                const typeDot = (t) => ({ approval: '#10b981', sequence: '#c9a84c', report: '#3b82f6', deal: '#8b5cf6', refund: '#dc2626', info: '#8896a8' }[t] || '#8896a8');
+                return (
+                  <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: '340px', background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', boxShadow: '0 8px 32px rgba(10,22,40,0.14)', zIndex: 1000, overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '13px 16px', borderBottom: '1px solid #e4e9f0' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#0a1628' }}>
+                        Notifications {unreadCount > 0 && <span style={{ fontSize: '10px', background: '#fee2e2', color: '#dc2626', borderRadius: '10px', padding: '1px 7px', marginLeft: '6px', fontWeight: 600 }}>{unreadCount} new</span>}
+                      </div>
+                      {unreadCount > 0 && (
+                        <button onClick={markAllRead} style={{ fontSize: '11px', color: '#c9a84c', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, padding: 0 }}>
+                          Mark all read
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ maxHeight: '380px', overflowY: 'auto' }}>
+                      {notifications.length === 0 ? (
+                        <div style={{ padding: '32px 16px', textAlign: 'center', color: '#8896a8', fontSize: '12px' }}>
+                          <div style={{ fontSize: '24px', marginBottom: '8px' }}>🔔</div>
+                          No notifications yet
+                        </div>
+                      ) : notifications.map(n => (
+                        <div key={n.id} style={{ display: 'flex', gap: '10px', padding: '11px 14px', borderBottom: '1px solid #f4f6fa', background: n.read ? 'white' : '#fefef4', alignItems: 'flex-start', transition: 'background 0.15s' }}>
+                          <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: `${typeDot(n.type)}18`, border: `1px solid ${typeDot(n.type)}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', flexShrink: 0 }}>
+                            {typeIcon(n.type)}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '12px', fontWeight: n.read ? 500 : 700, color: '#0a1628', marginBottom: '2px', lineHeight: 1.3 }}>{n.title}</div>
+                            <div style={{ fontSize: '11px', color: '#4a5568', lineHeight: 1.5, marginBottom: '3px' }}>{n.message}</div>
+                            <div style={{ fontSize: '9px', color: '#8896a8', fontWeight: 500 }}>{timeAgo(n.created_at)}</div>
+                          </div>
+                          {!n.read && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#dc2626', flexShrink: 0, marginTop: '5px' }} />}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
             <button onClick={openWalkthrough}
               style={{ background: 'transparent', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '6px 13px', fontSize: '11px', fontWeight: 600, color: '#8896a8', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', transition: 'all 0.15s' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = '#c9a84c'; e.currentTarget.style.color = '#c9a84c'; }}
