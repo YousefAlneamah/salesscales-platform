@@ -1,6 +1,6 @@
 const express = require('express');
 
-module.exports = ({ supabase }) => {
+module.exports = ({ supabase, aiCall }) => {
   const router = express.Router();
 
   router.get('/analytics/stats', async (req, res) => {
@@ -299,6 +299,118 @@ module.exports = ({ supabase }) => {
     } catch (e) {
       console.error('Revenue dashboard error:', e.message);
       res.status(500).json({ error: 'Failed to fetch revenue data', details: e.message });
+    }
+  });
+
+  // ─── RETENTION DASHBOARD ─────────────────────────────────
+  router.get('/retention/dashboard', async (req, res) => {
+    try {
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+
+      const [
+        { data: clients },
+        { data: enrollments },
+        { data: onboarding },
+      ] = await Promise.all([
+        supabase.from('clients').select('id, name, tier, status, health_score').eq('status', 'active').order('health_score', { ascending: true }),
+        supabase.from('workflow_enrollments').select('client_id, status, enrolled_at'),
+        supabase.from('client_onboarding').select('client_id, average_order_value'),
+      ]);
+
+      const aovMap = {};
+      for (const o of (onboarding || [])) {
+        const parseAov = (txt) => {
+          if (!txt) return 75;
+          if (txt.includes('Under')) return 25;
+          if (txt === '$30–$75') return 52;
+          if (txt === '$75–$150') return 112;
+          if (txt === '$150–$300') return 225;
+          if (txt.includes('Over')) return 350;
+          const n = parseFloat(txt.replace(/[^0-9.]/g, ''));
+          return isNaN(n) ? 75 : n;
+        };
+        if (o.client_id) aovMap[o.client_id] = parseAov(o.average_order_value);
+      }
+
+      const now = Date.now();
+      const enriched = (clients || []).map(c => {
+        const clientEnrollments = (enrollments || []).filter(e => e.client_id === c.id);
+        const completed = clientEnrollments.filter(e => e.status === 'completed').length;
+        const recent = clientEnrollments.filter(e => e.enrolled_at && e.enrolled_at >= fourteenDaysAgo).length;
+
+        const dates = clientEnrollments
+          .map(e => e.enrolled_at ? new Date(e.enrolled_at).getTime() : 0)
+          .filter(Boolean);
+        const lastActivityTs = dates.length > 0 ? Math.max(...dates) : null;
+        const daysSinceActivity = lastActivityTs
+          ? Math.floor((now - lastActivityTs) / 86400000)
+          : null;
+
+        const aov = aovMap[c.id] || 75;
+        const revenueRecovered = completed * aov;
+        const churnRisk = recent === 0;
+
+        const score = typeof c.health_score === 'number' ? c.health_score : null;
+        const tier = score !== null
+          ? (score < 50 ? 'at_risk' : score < 80 ? 'needs_attention' : 'healthy')
+          : 'needs_attention';
+
+        return {
+          id: c.id, name: c.name, tier: c.tier, health_score: score,
+          days_since_activity: daysSinceActivity,
+          revenue_recovered: revenueRecovered,
+          recent_enrollments_14d: recent,
+          total_completed: completed,
+          churn_risk: churnRisk,
+          retention_tier: tier,
+        };
+      });
+
+      const at_risk = enriched.filter(c => c.retention_tier === 'at_risk');
+      const needs_attention = enriched.filter(c => c.retention_tier === 'needs_attention');
+      const healthy = enriched.filter(c => c.retention_tier === 'healthy');
+
+      res.json({ clients: enriched, at_risk, needs_attention, healthy });
+    } catch (e) {
+      console.error('Retention dashboard error:', e.message);
+      res.status(500).json({ error: 'Failed to load retention data', details: e.message });
+    }
+  });
+
+  // POST /retention/checkin — generate a Zainab check-in message for an at-risk client
+  router.post('/retention/checkin', async (req, res) => {
+    const { client_id } = req.body;
+    if (!client_id) return res.status(400).json({ error: 'client_id required' });
+    try {
+      const [clientRes, enrollRes, onboardRes] = await Promise.all([
+        supabase.from('clients').select('id, name, niche, tier, health_score').eq('id', client_id).maybeSingle(),
+        supabase.from('workflow_enrollments').select('id, status, enrolled_at')
+          .eq('client_id', client_id).order('enrolled_at', { ascending: false }).limit(50),
+        supabase.from('client_onboarding').select('biggest_challenge, goals, monthly_revenue').eq('client_id', client_id).maybeSingle(),
+      ]);
+
+      const client = clientRes.data;
+      if (!client) return res.status(404).json({ error: 'Client not found' });
+
+      const enrollments = enrollRes.data || [];
+      const recent = enrollments.filter(e => {
+        const d = new Date(e.enrolled_at);
+        return (Date.now() - d.getTime()) < 14 * 86400000;
+      }).length;
+      const completed = enrollments.filter(e => e.status === 'completed').length;
+
+      const ob = onboardRes.data || {};
+
+      const message = await aiCall(
+        `You are Zainab, the Client Partner AI at Sales Scales. You write warm, genuine, personal check-in messages to clients whose engagement has dropped. Your tone is caring and professional — never pushy or salesy. You write as though you know this client personally.`,
+        `Write a short check-in message for ${client.name} (${client.niche || 'ecommerce'}, ${client.tier || 'starter'} plan).\n\nContext:\n- Health score: ${client.health_score ?? 'unknown'}/100\n- Enrollments in last 14 days: ${recent}\n- Total completed sequences: ${completed}\n- Their challenge: ${ob.biggest_challenge || 'not specified'}\n- Their goals: ${ob.goals || 'not specified'}\n\nWrite a 3-4 sentence personal message. Open with their name. Reference something specific about their account. Offer to jump on a call or answer questions. Sound like a real person who cares about their results — not a template.`,
+        ''
+      );
+
+      res.json({ message, client_name: client.name });
+    } catch (e) {
+      console.error('Retention checkin error:', e.message);
+      res.status(500).json({ error: 'Failed to generate check-in message', details: e.message });
     }
   });
 

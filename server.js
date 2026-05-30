@@ -1739,6 +1739,94 @@ cron.schedule('0 9 * * *', async () => {
   }
 });
 
+// ─── AUTO SCHEDULER: RETENTION — DAILY HEALTH ALERT ─────
+// Every day at 8am — alert Yousef for any client below health score 50
+cron.schedule('0 8 * * *', async () => {
+  console.log('[AUTO] Retention alert — checking at-risk clients...');
+  try {
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: atRisk } = await supabase
+      .from('clients')
+      .select('id, name, tier, health_score')
+      .eq('status', 'active')
+      .lt('health_score', 50)
+      .not('health_score', 'is', null);
+
+    if (!atRisk || atRisk.length === 0) {
+      console.log('[AUTO] Retention alert — no at-risk clients today');
+      return;
+    }
+
+    const enriched = await Promise.all(atRisk.map(async (c) => {
+      const [enrollRecent, enrollLast7, completedRes] = await Promise.all([
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true })
+          .eq('client_id', c.id).gte('enrolled_at', fourteenDaysAgo),
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true })
+          .eq('client_id', c.id).gte('enrolled_at', sevenDaysAgo),
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true })
+          .eq('client_id', c.id).eq('status', 'completed'),
+      ]);
+
+      const enroll14d = enrollRecent.count || 0;
+      const enroll7d = enrollLast7.count || 0;
+      const completed = completedRes.count || 0;
+
+      const issues = [];
+      if (enroll14d === 0) issues.push('Zero enrollments in last 14 days — high churn risk');
+      else if (enroll7d === 0) issues.push('Zero enrollments in last 7 days');
+      if ((c.health_score || 0) < 30) issues.push(`Critical health score: ${c.health_score}/100`);
+      else issues.push(`Low health score: ${c.health_score}/100`);
+      if (completed === 0) issues.push('No sequences have ever completed');
+
+      return { ...c, enroll14d, enroll7d, completed, issues };
+    }));
+
+    const rows = enriched.map(c =>
+      `<tr>
+        <td style="padding:10px 14px;font-weight:600;color:#0a1628">${c.name}</td>
+        <td style="padding:10px 14px;color:#dc2626;font-weight:700">${c.health_score ?? '—'}</td>
+        <td style="padding:10px 14px;color:#4a5568">${c.tier || '—'}</td>
+        <td style="padding:10px 14px;font-size:12px;color:#4a5568">${c.issues.join('<br>')}</td>
+      </tr>`
+    ).join('');
+
+    await sgMail.send({
+      to: 'yousef@aisalesscales.com',
+      from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+      subject: `⚠ ${atRisk.length} At-Risk Client${atRisk.length !== 1 ? 's' : ''} — Retention Alert`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto;padding:24px">
+        <div style="background:#0a1628;padding:20px 24px;border-radius:8px 8px 0 0">
+          <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase">Sales Scales</div>
+          <div style="color:white;font-size:16px;font-weight:600;margin-top:6px">Daily Retention Alert — ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</div>
+        </div>
+        <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 8px 8px;overflow:hidden">
+          <div style="padding:16px 24px;background:#fef2f2;border-bottom:1px solid #fecaca">
+            <span style="font-size:13px;color:#dc2626;font-weight:600">${atRisk.length} client${atRisk.length !== 1 ? 's' : ''} with health score below 50 require your attention today.</span>
+          </div>
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:#f8fafc">
+              <th style="padding:10px 14px;text-align:left;font-size:10px;color:#8896a8;letter-spacing:1.5px;font-weight:700;text-transform:uppercase">Client</th>
+              <th style="padding:10px 14px;text-align:left;font-size:10px;color:#8896a8;letter-spacing:1.5px;font-weight:700;text-transform:uppercase">Score</th>
+              <th style="padding:10px 14px;text-align:left;font-size:10px;color:#8896a8;letter-spacing:1.5px;font-weight:700;text-transform:uppercase">Tier</th>
+              <th style="padding:10px 14px;text-align:left;font-size:10px;color:#8896a8;letter-spacing:1.5px;font-weight:700;text-transform:uppercase">What Dropped</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <div style="padding:16px 24px;border-top:1px solid #e4e9f0;font-size:12px;color:#8896a8">
+            Log in to the Retention Dashboard to generate check-in messages for these clients.
+          </div>
+        </div>
+      </div>`,
+    });
+
+    console.log(`[AUTO] Retention alert sent — ${atRisk.length} at-risk client(s)`);
+  } catch (e) {
+    console.error('[AUTO] Retention alert error:', e.message);
+  }
+});
+
 // ─── AUTO SCHEDULER: HUSSAIN — FRIDAY STRATEGY REPORT ────
 // Every Friday at 4pm
 cron.schedule('0 16 * * 5', async () => {
@@ -3320,7 +3408,7 @@ app.use('/auth',    require('./routes/auth')({ supabase, jwt, bcrypt, JWT_SECRET
 app.use('/',        require('./routes/ai-team')({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, getClientProfile, getKlaviyoContext, verifyToken, aiLimiter }));
 app.use('/shopify', require('./routes/shopify')({ supabase, axios, crypto, processWebhookEvent, aiCall }));
 app.use('/',        require('./routes/knowledge')({ supabase, axios, importLimiter, upload, PDF2Json, YoutubeTranscript }));
-app.use('/',        require('./routes/analytics')({ supabase }));
+app.use('/',        require('./routes/analytics')({ supabase, aiCall }));
 app.use('/',        require('./routes/integrations')({ supabase, axios, aiCall, ragSearch, getBriefingsContext, verifyToken }));
 app.use('/',        require('./routes/operations')({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToken, storeKnowledge, notifyClientUser, sgMail }));
 

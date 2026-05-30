@@ -40,6 +40,7 @@ import Marketplace from "./pages/Marketplace";
 import WhiteLabel from "./pages/WhiteLabel";
 import Settings from "./pages/Settings";
 import Referrals from "./pages/Referrals";
+import Retention from "./pages/Retention";
 import Calls from "./pages/Calls";
 import ClientDashboard from "./pages/ClientDashboard";
 import ClientOnboardingFlow from "./pages/ClientOnboardingFlow";
@@ -58,6 +59,7 @@ const navItems = [
     { id: "clients", label: "Clients", icon: "ti-users" },
     { id: "contacts", label: "Contacts", icon: "ti-user" },
     { id: "analytics", label: "Analytics", icon: "ti-chart-bar" },
+    { id: "retention", label: "Retention", icon: "ti-heart-rate-monitor" },
   ]},
   { group: "AI TEAM", items: [
     { id: "hussain", label: "Hussain AI", icon: "ti-brain" },
@@ -116,6 +118,7 @@ const pageTitles = {
   clients: "Ecommerce Clients",
   contacts: "Contacts",
   analytics: "Analytics",
+  retention: "Retention Dashboard",
   hussain: "Hussain — Intelligence & Strategy",
   hassan: "Hassan — Growth & Outreach",
   ali: "Ali — Sales Closer",
@@ -221,6 +224,7 @@ function App() {
       case "clients": return <Clients />;
       case "contacts": return <Contacts />;
       case "analytics": return <Analytics />;
+      case "retention": return <Retention />;
       case "hussain": return <Hussain />;
       case "hassan": return <Hassan />;
       case "ali": return <Ali />;
