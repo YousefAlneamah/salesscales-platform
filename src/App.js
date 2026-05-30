@@ -54,6 +54,7 @@ import Mahdi from "./pages/Mahdi";
 import Fatima from "./pages/Fatima";
 import Zainab from "./pages/Zainab";
 import TeamBriefings from "./pages/TeamBriefings";
+import LandingPage from "./pages/LandingPage";
 
 const navItems = [
   { group: "MAIN", items: [
@@ -73,7 +74,7 @@ const navItems = [
     { id: "briefings", label: "Team Briefings", icon: "ti-mail-forward" },
   ]},
   { group: "CLIENT MGMT", items: [
-    { id: "approvals", label: "Approvals", icon: "ti-bell", badge: "4" },
+    { id: "approvals", label: "Approvals", icon: "ti-bell" },
     { id: "sequences", label: "Sequences", icon: "ti-bolt" },
     { id: "pipeline", label: "Pipeline", icon: "ti-target" },
     { id: "inbox", label: "Inbox", icon: "ti-message", badge: "12" },
@@ -169,6 +170,8 @@ function App() {
   const [currentPage, setCurrentPage] = useState("dashboard");
   const [clientOnboarded, setClientOnboarded] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
+  const [showLogin, setShowLogin] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("user");
@@ -193,6 +196,20 @@ function App() {
       });
   }, [user]);
 
+  useEffect(() => {
+    if (!user || user.role === 'client') { setPendingApprovals(0); return; }
+    const fetchPending = () => {
+      supabase
+        .from('approvals')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending')
+        .then(({ count }) => setPendingApprovals(count || 0));
+    };
+    fetchPending();
+    const interval = setInterval(fetchPending, 60000);
+    return () => clearInterval(interval);
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleLogin = (userData) => setUser(userData);
 
   const handleLogout = () => {
@@ -206,7 +223,10 @@ function App() {
   if (window.location.pathname === '/privacy') return <Privacy />;
   if (window.location.pathname === '/signup') return <ClientSignup />;
 
-  if (!user) return <Login onLogin={handleLogin} />;
+  if (!user) {
+    if (showLogin) return <Login onLogin={(u) => { setShowLogin(false); handleLogin(u); }} />;
+    return <LandingPage onLoginClick={() => setShowLogin(true)} />;
+  }
 
   if (user.role === 'client') {
     if (clientOnboarded === null) {
@@ -295,7 +315,9 @@ function App() {
               >
                 <i className={"ti " + item.icon} style={{fontSize:"15px"}} aria-hidden="true"></i>
                 <span>{item.label}</span>
-                {item.badge && <span className="nav-badge">{item.badge}</span>}
+                {(item.id === "approvals" ? pendingApprovals > 0 : !!item.badge) && (
+                  <span className="nav-badge">{item.id === "approvals" ? pendingApprovals : item.badge}</span>
+                )}
               </div>
             ))}
           </div>
@@ -315,7 +337,9 @@ function App() {
           </button>
           <div className="page-title">{pageTitles[currentPage]}</div>
           <div className="topbar-right">
-            <div className="top-badge">4 approvals waiting</div>
+            {pendingApprovals > 0 && (
+              <div className="top-badge">{pendingApprovals} approval{pendingApprovals !== 1 ? 's' : ''} waiting</div>
+            )}
             <div className="avatar">{user.name ? user.name[0].toUpperCase() : "Y"}</div>
           </div>
         </div>

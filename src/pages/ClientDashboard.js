@@ -1305,6 +1305,7 @@ export default function ClientDashboard({ user, onLogout }) {
     const handleSubscribe = async (plan) => {
       setSubscribing(plan);
       try {
+        // eslint-disable-next-line no-unused-vars
         const { data: clientUserData } = await axios.get(`${API_BASE}/client-profile`, { params: { client_id: user.clientId } });
         const email = user.email;
         const res = await axios.post(`${API_BASE}/billing/create-subscription`, {
