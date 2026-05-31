@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 // REPLACE_WITH_REAL_CALENDLY_LINK
 const CALENDLY_URL = 'https://calendly.com/yousef-salesscales/30min';
@@ -139,9 +139,25 @@ const trackPageview = (path) => {
 
 export default function LandingPage({ onLoginClick }) {
   const [openFaq, setOpenFaq] = useState(null);
+  const CONSENT_KEY = 'ss_cookie_consent';
+  const [cookieConsent, setCookieConsent] = useState(() => localStorage.getItem(CONSENT_KEY));
+
+  useEffect(() => {
+    if (cookieConsent === 'accepted' && typeof window.gtag === 'function') {
+      window.gtag('consent', 'update', { analytics_storage: 'granted' });
+    }
+  }, [cookieConsent]);
+
+  const handleConsent = (choice) => {
+    localStorage.setItem(CONSENT_KEY, choice);
+    setCookieConsent(choice);
+    if (choice === 'accepted' && typeof window.gtag === 'function') {
+      window.gtag('consent', 'update', { analytics_storage: 'granted' });
+    }
+  };
 
   // Track landing page view on mount — useEffect is imported at top via React, useState above
-  React.useEffect(() => { trackPageview('/'); }, []);
+  React.useEffect(() => { if (cookieConsent === 'accepted') trackPageview('/'); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const scrollTo = (id) => {
     const el = document.getElementById(id);
@@ -468,6 +484,18 @@ export default function LandingPage({ onLoginClick }) {
         <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.2)' }}>© {new Date().getFullYear()} Sales Scales. All rights reserved.</div>
       </footer>
 
+      {/* Cookie consent banner */}
+      {!cookieConsent && (
+        <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999, background: '#0a1628', borderTop: '1px solid rgba(201,168,76,0.3)', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap', fontFamily: 'DM Sans, Arial, sans-serif' }}>
+          <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.8)', lineHeight: '1.5', flex: '1 1 300px' }}>
+            We use cookies to improve your experience and analyze site traffic.
+          </div>
+          <div style={{ display: 'flex', gap: '10px', flexShrink: 0 }}>
+            <button onClick={() => handleConsent('declined')} style={{ padding: '8px 18px', background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', borderRadius: '8px', color: 'rgba(255,255,255,0.7)', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, Arial, sans-serif' }}>Decline</button>
+            <button onClick={() => handleConsent('accepted')} style={{ padding: '8px 18px', background: '#c9a84c', border: 'none', borderRadius: '8px', color: '#0a1628', fontSize: '12px', fontWeight: 700, cursor: 'pointer', fontFamily: 'DM Sans, Arial, sans-serif' }}>Accept</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.svg" type="image/svg+xml" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0a1628" />
 
@@ -43,13 +43,18 @@
     </script>
 
     <!-- Fix 2: Google Analytics 4 — REPLACE_WITH_YOUR_GA4_MEASUREMENT_ID -->
-    <!-- To activate: replace G-XXXXXXXXXX with your real Measurement ID from Google Analytics -->
+    <!-- Cookie consent: analytics_storage defaults to denied; LandingPage.js grants it on accept -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
       function gtag(){dataLayer.push(arguments);}
+      gtag('consent', 'default', { analytics_storage: 'denied' });
       gtag('js', new Date());
       gtag('config', 'G-XXXXXXXXXX'); /* REPLACE_WITH_YOUR_GA4_MEASUREMENT_ID */
+      /* Auto-grant if previously accepted */
+      if (localStorage.getItem('ss_cookie_consent') === 'accepted') {
+        gtag('consent', 'update', { analytics_storage: 'granted' });
+      }
     </script>
   </head>
   <body>

@@ -388,6 +388,17 @@ function App() {
   if (window.location.pathname === '/signup') return <ClientSignup />;
   if (window.location.pathname === '/roadmap') return <PublicRoadmap />;
 
+  const knownPaths = ['/', '/terms', '/privacy', '/signup', '/roadmap'];
+  if (!knownPaths.includes(window.location.pathname)) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0a1628', fontFamily: 'DM Sans, sans-serif' }}>
+        <div style={{ fontSize: '96px', fontWeight: 800, color: '#c9a84c', lineHeight: 1 }}>404</div>
+        <div style={{ fontSize: '20px', fontWeight: 600, color: 'white', margin: '16px 0 32px' }}>Page Not Found</div>
+        <button onClick={() => window.location.href = '/'} style={{ padding: '12px 28px', background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>Go Home</button>
+      </div>
+    );
+  }
+
   if (!user) {
     if (showLogin) return <Login onLogin={(u) => { setShowLogin(false); handleLogin(u); }} />;
     return <LandingPage onLoginClick={() => setShowLogin(true)} />;
@@ -464,7 +475,13 @@ function App() {
       case "platform-health": return <PlatformHealth />;
       case "success-scores": return <SuccessScores />;
       case "settings": return <Settings />;
-      default: return <Dashboard />;
+      default: return (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '70vh', fontFamily: 'DM Sans, sans-serif' }}>
+          <div style={{ fontSize: '80px', fontWeight: 800, color: 'var(--gold)', lineHeight: 1 }}>404</div>
+          <div style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text)', margin: '12px 0 24px' }}>Page Not Found</div>
+          <button className="btn btn-navy" onClick={() => setCurrentPage('dashboard')}>Go Home</button>
+        </div>
+      );
     }
   };
 
