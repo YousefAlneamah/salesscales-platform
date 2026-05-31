@@ -3246,11 +3246,23 @@ app.get('/team/briefings', async (req, res) => {
 
 app.get('/team/performance', async (req, res) => {
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const emptyStats = {
+    mahdi:   { sequences_generated: 0, content_pieces: 0 },
+    hassan:  { prospects_found: 0, outreach_sent: 0 },
+    hussain: { briefings_generated: 0, competitor_reports: 0 },
+    fatima:  { issues_flagged: 0, refunds_handled: 0 },
+    zainab:  { reports_sent: 0, client_chats: 0 },
+    ali:     { closing_scripts: 0 },
+  };
   try {
     const [briefingsRes, approvalsRes] = await Promise.all([
       supabase.from('team_briefings').select('from_member, subject, created_at').gte('created_at', weekAgo),
       supabase.from('approvals').select('from_member, type, created_at').gte('created_at', weekAgo),
     ]);
+
+    if (briefingsRes.error) console.error('/team/performance briefings error:', briefingsRes.error.message);
+    if (approvalsRes.error) console.error('/team/performance approvals error:', approvalsRes.error.message);
+
     const briefings = briefingsRes.data || [];
     const approvals = approvalsRes.data || [];
 
@@ -3269,7 +3281,7 @@ app.get('/team/performance', async (req, res) => {
       },
       fatima: {
         issues_flagged: briefings.filter(b => b.from_member === 'fatima').length,
-        refunds_handled: approvals.filter(a => a.from_member === 'fatima' && /refund|return/.test(a.type)).length,
+        refunds_handled: approvals.filter(a => a.from_member === 'fatima' && /refund|return/.test(a.type || '')).length,
       },
       zainab: {
         reports_sent: briefings.filter(b => b.from_member === 'zainab').length,
@@ -3283,7 +3295,7 @@ app.get('/team/performance', async (req, res) => {
     res.json({ stats, week_start: weekAgo });
   } catch (e) {
     console.error('/team/performance error:', e.message);
-    res.status(500).json({ error: e.message });
+    res.json({ stats: emptyStats, week_start: weekAgo, error: e.message });
   }
 });
 
@@ -5690,32 +5702,28 @@ app.use('/billing', require('./routes/billing')({ supabase, axios, sgMail, store
 //   endpoint text,
 //   created_at timestamptz default now()
 // );
-const logError = (err, endpoint = 'unknown') => {
+const logError = async (err, endpoint = 'unknown') => {
   const ts = new Date().toISOString();
   const msg = err instanceof Error ? err.message : String(err);
   const stack = err instanceof Error ? (err.stack || '') : '';
 
-  supabase.from('errors').insert([{ message: msg, stack, endpoint, created_at: ts }])
-    .catch(dbErr => console.error('Failed to log error to DB:', dbErr.message));
-  sendSlackAlert(`🔴 *Server Error* | ${endpoint}\n${msg}`);
+  try {
+    await supabase.from('errors').insert([{ message: msg, stack, endpoint, created_at: ts }]);
+  } catch (dbErr) {
+    console.error('Failed to log error to DB:', dbErr.message);
+  }
 
   if (process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM_EMAIL) {
-    sgMail.send({
-      to: 'yousef@aisalesscales.com',
-      from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales Errors' },
-      subject: `Server Error — ${endpoint} — ${new Date(ts).toLocaleString()}`,
-      html: `<div style="font-family:Arial,sans-serif;max-width:620px;margin:0 auto;padding:24px">
-        <div style="background:#dc2626;padding:16px 24px;border-radius:8px 8px 0 0">
-          <div style="color:white;font-size:14px;font-weight:700">Server Error Detected</div>
-        </div>
-        <div style="background:#fff;border:1px solid #fecaca;border-top:none;border-radius:0 0 8px 8px;padding:20px 24px">
-          <p style="font-size:12px;color:#8896a8;margin:0 0 4px">Timestamp: ${ts}</p>
-          <p style="font-size:12px;color:#8896a8;margin:0 0 16px">Endpoint: ${endpoint}</p>
-          <div style="font-size:13px;font-weight:600;color:#dc2626;margin-bottom:14px">${msg}</div>
-          <pre style="font-size:11px;color:#4a5568;background:#f9fafb;border:1px solid #e4e9f0;padding:12px;border-radius:6px;overflow-x:auto;white-space:pre-wrap;margin:0">${stack.slice(0, 2000)}</pre>
-        </div>
-      </div>`,
-    }).catch(mailErr => console.error('Error notification email failed:', mailErr.message));
+    try {
+      await sgMail.send({
+        to: 'yousef@aisalesscales.com',
+        from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales Errors' },
+        subject: `Server Error — ${endpoint} — ${new Date(ts).toLocaleString()}`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:620px;margin:0 auto;padding:24px"><div style="background:#dc2626;padding:16px 24px;border-radius:8px 8px 0 0"><div style="color:white;font-size:14px;font-weight:700">Server Error Detected</div></div><div style="background:#fff;border:1px solid #fecaca;border-top:none;border-radius:0 0 8px 8px;padding:20px 24px"><p style="font-size:12px;color:#8896a8;margin:0 0 4px">Timestamp: ${ts}</p><p style="font-size:12px;color:#8896a8;margin:0 0 16px">Endpoint: ${endpoint}</p><div style="font-size:13px;font-weight:600;color:#dc2626;margin-bottom:14px">${msg}</div><pre style="font-size:11px;color:#4a5568;background:#f9fafb;border:1px solid #e4e9f0;padding:12px;border-radius:6px;overflow-x:auto;white-space:pre-wrap;margin:0">${stack.slice(0, 2000)}</pre></div></div>`,
+      });
+    } catch (mailErr) {
+      console.error('Error notification email failed:', mailErr.message);
+    }
   }
 };
 
