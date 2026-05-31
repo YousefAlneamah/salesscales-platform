@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-// REPLACE_WITH_YOUR_CALENDLY_URL
-const CALENDLY_URL = 'https://calendly.com/yousef-salesscales/30min';
+const CALENDLY_URL = 'https://calendly.com/y2005funnels/new-meeting';
 
 const NAVY   = '#0a1628';
 const NAVYM  = '#112240';
@@ -359,7 +358,7 @@ export default function LandingPage({ onLoginClick }) {
       </section>
 
       {/* ── CALENDLY INLINE EMBED ── */}
-      {/* REPLACE_WITH_YOUR_CALENDLY_URL — update CALENDLY_URL at the top of this file */}
+      {/* ── CALENDLY INLINE BOOKING ── */}
       <section style={{ background: NAVY, padding: '72px 24px' }}>
         <div style={{ maxWidth: 900, margin: '0 auto', textAlign: 'center' }}>
           <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '3px', color: GOLD, textTransform: 'uppercase', marginBottom: '16px' }}>Book a Call</div>
