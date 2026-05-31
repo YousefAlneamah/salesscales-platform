@@ -12,6 +12,9 @@ export default function Clients() {
   const [healthBreakdowns, setHealthBreakdowns] = useState({});
   const [tooltipClientId, setTooltipClientId] = useState(null);
   const [ltvData, setLtvData] = useState({});
+  const [comms, setComms] = useState({});
+  const [commForm, setCommForm] = useState({ type: 'call', date: new Date().toISOString().slice(0,10), summary: '', next_action: '' });
+  const [commSaving, setCommSaving] = useState(false);
   const [clientNotes, setClientNotes] = useState({});
   const [notesSaving, setNotesSaving] = useState({});
   const [notesUpdatedAt, setNotesUpdatedAt] = useState({});
@@ -128,6 +131,30 @@ export default function Clients() {
       setShowForm(false);
       setForm({ name: "", email: "", niche: "", tier: "starter", status: "onboarding" });
     }
+  };
+
+  const loadComms = async (clientId) => {
+    if (comms[clientId]) return;
+    try {
+      const res = await fetch(`${API_BASE}/client-comms?client_id=${clientId}`);
+      const data = await res.json();
+      setComms(prev => ({ ...prev, [clientId]: data.comms || [] }));
+    } catch { setComms(prev => ({ ...prev, [clientId]: [] })); }
+  };
+
+  const saveComm = async (clientId) => {
+    if (!commForm.summary.trim()) return;
+    setCommSaving(true);
+    try {
+      await fetch(`${API_BASE}/client-comms/log`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: clientId, ...commForm }),
+      });
+      setComms(prev => ({ ...prev, [clientId]: undefined }));
+      setCommForm({ type: 'call', date: new Date().toISOString().slice(0,10), summary: '', next_action: '' });
+      loadComms(clientId);
+    } catch {}
+    setCommSaving(false);
   };
 
   const loadChecklist = async (clientId) => {
@@ -338,6 +365,41 @@ export default function Clients() {
               style={{ width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: '#0a1628', outline: 'none', resize: 'vertical', fontFamily: 'DM Sans, sans-serif', boxSizing: 'border-box', lineHeight: 1.6 }}
             />
           </div>
+
+          {/* Fix 3: Communication History */}
+          <div style={{ borderTop: '1px solid #f0f3f8', paddingTop: '16px', marginTop: '4px' }}>
+            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '12px' }}>Communication History</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+              <select value={commForm.type} onChange={e => setCommForm(f => ({ ...f, type: e.target.value }))} style={inputStyle}>
+                <option value="call">Phone Call</option>
+                <option value="whatsapp">WhatsApp</option>
+                <option value="email">Email</option>
+                <option value="meeting">Meeting</option>
+                <option value="note">Note</option>
+              </select>
+              <input type="date" value={commForm.date} onChange={e => setCommForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+            </div>
+            <textarea rows={2} placeholder="Summary of the conversation..." value={commForm.summary} onChange={e => setCommForm(f => ({ ...f, summary: e.target.value }))}
+              style={{ ...inputStyle, resize: 'none', marginBottom: '6px', display: 'block' }} />
+            <input type="text" placeholder="Next action (optional)..." value={commForm.next_action} onChange={e => setCommForm(f => ({ ...f, next_action: e.target.value }))} style={{ ...inputStyle, marginBottom: '8px' }} />
+            <button onClick={() => saveComm(selectedClient.id)} disabled={commSaving || !commForm.summary.trim()}
+              style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '7px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', marginBottom: '12px', opacity: commSaving ? 0.6 : 1 }}>
+              {commSaving ? 'Saving…' : '+ Log Communication'}
+            </button>
+            {(comms[selectedClient.id] || []).slice(0, 5).map(c => (
+              <div key={c.id} style={{ background: '#f8fafc', border: '1px solid #f0f3f8', borderRadius: '8px', padding: '10px 12px', marginBottom: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '9px', padding: '2px 7px', borderRadius: '20px', background: '#0a1628', color: '#c9a84c', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{c.type}</span>
+                    <span style={{ fontSize: '10px', color: '#8896a8' }}>{c.date}</span>
+                  </div>
+                </div>
+                <div style={{ fontSize: '11px', color: '#0a1628', lineHeight: 1.5 }}>{c.summary}</div>
+                {c.next_action && <div style={{ fontSize: '10px', color: '#c9a84c', marginTop: '4px', fontWeight: 500 }}>→ {c.next_action}</div>}
+              </div>
+            ))}
+            {(comms[selectedClient.id] || []).length === 0 && <div style={{ fontSize: '11px', color: '#8896a8' }}>No communications logged yet.</div>}
+          </div>
         </div>
       )}
 
@@ -361,7 +423,7 @@ export default function Clients() {
             const sc = statusColor(client.status);
             return (
               <div key={client.id}
-                onClick={() => { const c = selectedClient?.id === client.id ? null : client; setSelectedClient(c); if (c) loadChecklist(c.id); }}
+                onClick={() => { const c = selectedClient?.id === client.id ? null : client; setSelectedClient(c); if (c) { loadChecklist(c.id); loadComms(c.id); } }}
                 style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1fr 1fr', padding: '14px 18px', borderBottom: '1px solid #f4f6fa', cursor: 'pointer', background: selectedClient?.id === client.id ? '#fafbfd' : 'white', transition: 'background 0.1s' }}
                 onMouseEnter={e => { if (selectedClient?.id !== client.id) e.currentTarget.style.background = '#fafbfd'; }}
                 onMouseLeave={e => { if (selectedClient?.id !== client.id) e.currentTarget.style.background = 'white'; }}>

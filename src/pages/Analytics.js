@@ -53,10 +53,14 @@ export default function Analytics() {
   const [loading, setLoading] = useState(true);
   const [filterClient, setFilterClient] = useState('All');
   const [webhookLogs, setWebhookLogs] = useState([]);
+  const [usageStats, setUsageStats] = useState(null);
+  const [revenueClients, setRevenueClients] = useState([]);
 
   useEffect(() => {
     fetchAll();
     axios.get(`${API_BASE}/webhooks/logs`).then(r => setWebhookLogs(r.data.logs || [])).catch(() => {});
+    axios.get(`${API_BASE}/admin/usage`).then(r => setUsageStats(r.data)).catch(() => {});
+    supabase.from('clients').select('id, name, tier, status').eq('status', 'active').then(({ data }) => setRevenueClients(data || []));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchAll = async () => {
@@ -324,6 +328,91 @@ export default function Analytics() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* FIX 2: REVENUE FORECAST */}
+      {(() => {
+        const TIER_MRR = { starter: 997, growth: 1997, elite: 2997, Starter: 997, Growth: 1997, Elite: 2997 };
+        const mrr = revenueClients.reduce((s, c) => s + (TIER_MRR[c.tier] || 997), 0);
+        const churnRate = 0.05;
+        const proj = [1, 2, 3].map(m => Math.round(mrr * Math.pow(1 - churnRate, m)));
+        return mrr > 0 ? (
+          <div className="card" style={{ marginBottom: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div className="section-label">Revenue Forecast</div>
+              <div style={{ fontSize: '10px', color: '#8896a8' }}>5% monthly churn assumption · {revenueClients.length} active clients</div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+              {[
+                { label: 'Current MRR', value: `$${mrr.toLocaleString()}`, sub: `${revenueClients.length} clients`, color: '#c9a84c', top: 'gold' },
+                { label: 'Month 1 Projection', value: `$${proj[0].toLocaleString()}`, sub: `−$${(mrr - proj[0]).toLocaleString()} est. churn`, color: '#3b82f6', top: 'blue' },
+                { label: 'Month 2 Projection', value: `$${proj[1].toLocaleString()}`, sub: `−$${(mrr - proj[1]).toLocaleString()} est. churn`, color: '#10b981', top: 'green' },
+                { label: 'Month 3 Projection', value: `$${proj[2].toLocaleString()}`, sub: `${Math.round((1 - proj[2] / mrr) * 100)}% attrition`, color: '#8b5cf6', top: 'navy' },
+              ].map(s => (
+                <div key={s.label} className={`stat-card ${s.top}-top`}>
+                  <div className="stat-label">{s.label}</div>
+                  <div className="stat-value" style={{ color: s.color }}>{s.value}</div>
+                  <div style={{ fontSize: '10px', color: '#8896a8', marginTop: '4px' }}>{s.sub}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: '14px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1px', background: '#e4e9f0', borderRadius: '8px', overflow: 'hidden' }}>
+              {[mrr, ...proj].map((v, i) => {
+                const max = mrr;
+                const pct = max > 0 ? (v / max) * 100 : 0;
+                const labels = ['Now', 'M+1', 'M+2', 'M+3'];
+                const colors = ['#c9a84c', '#3b82f6', '#10b981', '#8b5cf6'];
+                return (
+                  <div key={i} style={{ background: 'white', padding: '12px 14px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ width: '100%', height: '4px', background: '#f0f3f8', borderRadius: '2px', marginBottom: '6px', overflow: 'hidden' }}>
+                      <div style={{ width: `${pct}%`, height: '100%', background: colors[i], borderRadius: '2px' }} />
+                    </div>
+                    <div style={{ fontSize: '9px', color: '#8896a8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px' }}>{labels[i]}</div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: colors[i] }}>${v.toLocaleString()}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null;
+      })()}
+
+      {/* FIX 5: PLATFORM USAGE */}
+      {usageStats && (
+        <div className="card" style={{ marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <div className="section-label">Platform Usage This Month</div>
+            <div style={{ fontSize: '10px', color: '#8896a8' }}>Avg response: {usageStats.avgResponseMs}ms</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '16px' }}>
+            <div>
+              <div style={{ fontSize: '28px', fontWeight: 800, color: '#0a1628' }}>{usageStats.totalCalls?.toLocaleString()}</div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '16px' }}>Total API calls this month</div>
+              <div style={{ fontSize: '11px', color: '#4a5568', fontWeight: 600, marginBottom: '8px' }}>Avg Response Time</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ flex: 1, height: '6px', background: '#f0f3f8', borderRadius: '3px', overflow: 'hidden' }}>
+                  <div style={{ width: `${Math.min(100, (usageStats.avgResponseMs / 1000) * 100)}%`, height: '100%', background: usageStats.avgResponseMs < 200 ? '#10b981' : usageStats.avgResponseMs < 500 ? '#c9a84c' : '#dc2626', borderRadius: '3px' }} />
+                </div>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#0a1628' }}>{usageStats.avgResponseMs}ms</span>
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '10px' }}>Top Endpoints</div>
+              {(usageStats.topEndpoints || []).slice(0, 8).map((ep, i) => {
+                const max = usageStats.topEndpoints?.[0]?.calls || 1;
+                return (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                    <div style={{ fontSize: '10px', color: '#4a5568', width: '200px', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'DM Mono, monospace' }}>{ep.endpoint}</div>
+                    <div style={{ flex: 1, height: '4px', background: '#f0f3f8', borderRadius: '2px', overflow: 'hidden' }}>
+                      <div style={{ width: `${(ep.calls / max) * 100}%`, height: '100%', background: '#3b82f6', borderRadius: '2px' }} />
+                    </div>
+                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#0a1628', width: '32px', textAlign: 'right' }}>{ep.calls}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 

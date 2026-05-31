@@ -5117,6 +5117,267 @@ cron.schedule('0 6 * * 2', async () => {
   }
 });
 
+// ─── FIX 1: CHURN PREDICTION — WEEKLY WEDNESDAY 9AM ──────
+// SQL: ALTER TABLE clients ADD COLUMN IF NOT EXISTS churn_risk text;
+cron.schedule('0 9 * * 3', async () => {
+  console.log('[AUTO] Churn prediction scan starting...');
+  try {
+    const now = new Date();
+    const fourteenDaysAgo = new Date(now - 14 * 86400000).toISOString();
+    const sevenDaysAgo = new Date(now - 7 * 86400000).toISOString();
+
+    const { data: clients } = await supabase.from('clients').select('id, name, tier, health_score').eq('status', 'active');
+    if (!clients || clients.length === 0) return;
+
+    const highRisk = [];
+    const mediumRisk = [];
+
+    for (const client of clients) {
+      const reasons = [];
+      let risk = 'low';
+
+      if ((client.health_score || 0) < 50) reasons.push(`Health score ${client.health_score || 0}/100 (below 50)`);
+
+      const [enrollRes, approvedRes, loginRes] = await Promise.all([
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('client_id', client.id).gte('enrolled_at', sevenDaysAgo),
+        supabase.from('approvals').select('id', { count: 'exact', head: true }).eq('client_id', client.id).eq('status', 'approved').gte('created_at', fourteenDaysAgo),
+        supabase.from('client_users').select('last_login').eq('client_id', client.id).order('last_login', { ascending: false }).limit(1),
+      ]);
+
+      const lastLogin = loginRes.data?.[0]?.last_login;
+      if (!lastLogin || new Date(lastLogin) < new Date(fourteenDaysAgo)) reasons.push(`No login in 14+ days (last: ${lastLogin ? new Date(lastLogin).toLocaleDateString() : 'never'})`);
+      if ((enrollRes.count || 0) === 0) reasons.push('Zero sequence enrollments in last 7 days');
+      if ((approvedRes.count || 0) === 0) reasons.push('No approved content in last 14 days');
+
+      const highSignals = reasons.filter(r => r.includes('Health score') || r.includes('No login'));
+      if (highSignals.length >= 1 && reasons.length >= 2) risk = 'high';
+      else if (reasons.length >= 1) risk = 'medium';
+
+      await supabase.from('clients').update({ churn_risk: risk }).eq('id', client.id);
+
+      if (risk === 'high') highRisk.push({ name: client.name, tier: client.tier, reasons });
+      else if (risk === 'medium') mediumRisk.push({ name: client.name, tier: client.tier, reasons });
+    }
+
+    if (process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM_EMAIL) {
+      const rows = [...highRisk.map(c => `<tr><td style="padding:10px 14px;font-weight:700;color:#dc2626">${c.name}</td><td style="padding:10px 14px"><span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">HIGH</span></td><td style="padding:10px 14px;font-size:12px;color:#4a5568">${c.reasons.join('<br>')}</td></tr>`),
+        ...mediumRisk.map(c => `<tr><td style="padding:10px 14px;font-weight:600;color:#d97706">${c.name}</td><td style="padding:10px 14px"><span style="background:#fffbeb;color:#d97706;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">MEDIUM</span></td><td style="padding:10px 14px;font-size:12px;color:#4a5568">${c.reasons.join('<br>')}</td></tr>`)].join('');
+
+      await sgMail.send({
+        to: 'yousef@aisalesscales.com',
+        from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+        subject: `⚠️ Weekly Churn Report — ${highRisk.length} high risk client${highRisk.length !== 1 ? 's' : ''}`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;background:#f0f3f8;padding:24px">
+          <div style="background:#0a1628;padding:20px 28px;border-radius:10px 10px 0 0">
+            <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase">Sales Scales — Weekly Churn Report</div>
+            <div style="color:white;font-size:16px;font-weight:600;margin-top:4px">${highRisk.length} high risk · ${mediumRisk.length} medium risk · ${clients.length - highRisk.length - mediumRisk.length} healthy</div>
+          </div>
+          <div style="background:white;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 10px 10px;padding:24px">
+            ${highRisk.length === 0 && mediumRisk.length === 0 ? '<p style="color:#059669;font-weight:600">✓ All clients are healthy this week. No churn risk detected.</p>' : `
+            <table style="width:100%;border-collapse:collapse">
+              <thead><tr style="background:#0a1628"><th style="padding:10px 14px;text-align:left;color:rgba(255,255,255,0.4);font-size:9px;letter-spacing:1.5px;font-weight:700;text-transform:uppercase">Client</th><th style="padding:10px 14px;text-align:left;color:rgba(255,255,255,0.4);font-size:9px;letter-spacing:1.5px;font-weight:700;text-transform:uppercase">Risk</th><th style="padding:10px 14px;text-align:left;color:rgba(255,255,255,0.4);font-size:9px;letter-spacing:1.5px;font-weight:700;text-transform:uppercase">Reasons</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+            <div style="margin-top:20px;background:#f8fafc;border-radius:8px;padding:14px;font-size:12px;color:#4a5568">
+              <strong>Recommended actions for HIGH risk clients:</strong><br>• Book a check-in call within 48 hours<br>• Send a personalised value recap email<br>• Have Zainab generate a results summary showing their ROI<br>• Offer a strategy session to re-engage them
+            </div>`}
+          </div>
+        </div>`,
+      });
+    }
+    console.log(`[AUTO] Churn report sent — ${highRisk.length} high, ${mediumRisk.length} medium`);
+  } catch (e) {
+    console.error('[AUTO] Churn prediction error:', e.message);
+  }
+});
+
+// ─── FIX 3: CLIENT COMMUNICATION LOG ─────────────────────
+// SQL: CREATE TABLE IF NOT EXISTS client_comms (id uuid default gen_random_uuid() primary key, client_id uuid, date date, type text, summary text, next_action text, created_by text default 'yousef', created_at timestamptz default now());
+app.post('/client-comms/log', async (req, res) => {
+  const { client_id, date, type, summary, next_action } = req.body;
+  if (!client_id || !summary) return res.status(400).json({ error: 'client_id and summary required' });
+  try {
+    const { data, error } = await supabase.from('client_comms').insert([{
+      client_id, date: date || new Date().toISOString().slice(0, 10),
+      type: type || 'note', summary, next_action: next_action || null,
+    }]).select().single();
+    if (error) throw error;
+    res.json({ comm: data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/client-comms', async (req, res) => {
+  const { client_id } = req.query;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+  try {
+    const { data, error } = await supabase.from('client_comms').select('*').eq('client_id', client_id).order('date', { ascending: false }).limit(50);
+    if (error) throw error;
+    res.json({ comms: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 4: AUTOMATED INVOICE EMAIL — 1ST OF MONTH 9AM ───
+cron.schedule('0 9 1 * *', async () => {
+  console.log('[AUTO] Monthly invoice email sending starting...');
+  const TIER_PRICES_MAP = { starter: 997, growth: 1997, elite: 2997, Starter: 997, Growth: 1997, Elite: 2997 };
+  try {
+    const { data: clients } = await supabase.from('clients').select('id, name, tier, status').eq('status', 'active');
+    if (!clients || clients.length === 0) return;
+    const period = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    let sent = 0;
+    for (const client of clients) {
+      try {
+        const { data: users } = await supabase.from('client_users').select('email, name').eq('client_id', client.id);
+        if (!users || users.length === 0) continue;
+        const amount = TIER_PRICES_MAP[client.tier] || 997;
+        const invNum = `SS-${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2,'0')}-${client.id.slice(0,6).toUpperCase()}`;
+        const { data: inv } = await supabase.from('invoices').insert([{
+          invoice_number: invNum, client_id: client.id, client_name: client.name,
+          plan: `${client.tier} Plan`, amount, due_date: new Date(Date.now() + 7*86400000).toISOString().slice(0,10),
+          status: 'sent',
+        }]).select().single().catch(() => ({ data: null }));
+
+        for (const u of users) {
+          await sgMail.send({
+            to: u.email,
+            from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales Billing' },
+            subject: `Your Sales Scales Invoice — ${period} ($${amount.toLocaleString()})`,
+            html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f0f3f8;padding:24px">
+              <div style="background:#0a1628;padding:24px 32px;border-radius:10px 10px 0 0;display:flex;justify-content:space-between;align-items:center">
+                <div style="color:#c9a84c;font-size:18px;font-weight:800;letter-spacing:2px">SALES SCALES</div>
+                <div style="text-align:right"><div style="color:white;font-size:20px;font-weight:700">INVOICE</div><div style="color:#c9a84c;font-size:11px;font-family:monospace">${invNum}</div></div>
+              </div>
+              <div style="background:white;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 10px 10px;padding:28px">
+                <div style="display:flex;justify-content:space-between;margin-bottom:24px;font-size:12px;color:#4a5568">
+                  <div><strong>Bill To:</strong><br>${u.name}<br>${client.name}</div>
+                  <div style="text-align:right"><strong>Invoice Date:</strong><br>${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}<br><strong>Due:</strong> ${new Date(Date.now()+7*86400000).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
+                </div>
+                <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+                  <thead><tr style="background:#0a1628"><th style="padding:10px 14px;text-align:left;color:rgba(255,255,255,0.5);font-size:10px;letter-spacing:1px">Description</th><th style="padding:10px 14px;text-align:right;color:rgba(255,255,255,0.5);font-size:10px;letter-spacing:1px">Amount</th></tr></thead>
+                  <tbody><tr><td style="padding:16px 14px;font-size:13px;color:#0a1628">${client.tier} Plan — ${period}<br><span style="font-size:11px;color:#8896a8">AI revenue system: email, SMS, sequences, AI team</span></td><td style="padding:16px 14px;text-align:right;font-size:15px;font-weight:700;color:#c9a84c">$${amount.toLocaleString()}</td></tr></tbody>
+                </table>
+                <div style="font-size:11px;color:#8896a8;border-top:1px solid #e4e9f0;padding-top:16px">Questions? Reply to this email or contact billing@salesscales.com</div>
+              </div>
+            </div>`,
+          });
+          sent++;
+        }
+      } catch (clientErr) {
+        console.error(`[AUTO] Invoice email failed for ${client.name}:`, clientErr.message);
+      }
+    }
+    console.log(`[AUTO] Monthly invoices sent to ${sent} client users`);
+  } catch (e) {
+    console.error('[AUTO] Monthly invoice email error:', e.message);
+  }
+});
+
+// ─── FIX 5: PLATFORM USAGE ANALYTICS ─────────────────────
+app.get('/admin/usage', async (req, res) => {
+  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+  try {
+    const { data: logs } = await supabase.from('request_logs').select('method, path, created_at, response_time_ms').gte('created_at', monthStart);
+    const allLogs = logs || [];
+    const totalCalls = allLogs.length;
+    const byPath = {};
+    let totalRespTime = 0;
+    for (const l of allLogs) {
+      const key = `${l.method} ${l.path}`;
+      byPath[key] = (byPath[key] || 0) + 1;
+      totalRespTime += l.response_time_ms || 0;
+    }
+    const topEndpoints = Object.entries(byPath).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([endpoint, calls]) => ({ endpoint, calls }));
+    const avgResponseMs = totalCalls > 0 ? Math.round(totalRespTime / totalCalls) : 0;
+    res.json({ totalCalls, topEndpoints, avgResponseMs, monthStart });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 7: REFERRAL CREDIT SYSTEM ───────────────────────
+// SQL: CREATE TABLE IF NOT EXISTS credits (id uuid default gen_random_uuid() primary key, client_id uuid, amount numeric, reason text, applied boolean DEFAULT false, created_at timestamptz default now());
+app.post('/credits/issue', async (req, res) => {
+  const { client_id, amount, reason } = req.body;
+  if (!client_id || !amount) return res.status(400).json({ error: 'client_id and amount required' });
+  try {
+    const { data, error } = await supabase.from('credits').insert([{ client_id, amount, reason: reason || 'Manual credit', applied: false }]).select().single();
+    if (error) throw error;
+    res.json({ credit: data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/credits', async (req, res) => {
+  const { client_id } = req.query;
+  try {
+    let q = supabase.from('credits').select('*').order('created_at', { ascending: false });
+    if (client_id) q = q.eq('client_id', client_id);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json({ credits: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Called when a referral is marked 'converted' — issues 1 month credit to referrer
+app.post('/referrals/process-reward', async (req, res) => {
+  const { referral_id } = req.body;
+  if (!referral_id) return res.status(400).json({ error: 'referral_id required' });
+  try {
+    const { data: referral } = await supabase.from('referrals').select('*').eq('id', referral_id).maybeSingle();
+    if (!referral) return res.status(404).json({ error: 'Referral not found' });
+    const { data: referrerClient } = await supabase.from('client_users').select('client_id').eq('email', referral.referrer_email).maybeSingle();
+    if (!referrerClient) return res.json({ ok: false, note: 'Referrer not a platform client — cannot auto-credit' });
+    const { data: clientData } = await supabase.from('clients').select('tier').eq('id', referrerClient.client_id).maybeSingle();
+    const TIER_P = { starter: 997, growth: 1997, elite: 2997, Starter: 997, Growth: 1997, Elite: 2997 };
+    const creditAmount = TIER_P[clientData?.tier] || 997;
+    const { data: credit, error } = await supabase.from('credits').insert([{
+      client_id: referrerClient.client_id, amount: creditAmount,
+      reason: `Referral reward — ${referral.referred_business} converted`, applied: false,
+    }]).select().single();
+    if (error) throw error;
+    await supabase.from('referrals').update({ status: 'converted' }).eq('id', referral_id);
+    res.json({ ok: true, credit });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 10: MOBILE APP FOUNDATION ───────────────────────
+// SQL: CREATE TABLE IF NOT EXISTS device_tokens (id uuid default gen_random_uuid() primary key, client_id uuid, device_token text unique, platform text, created_at timestamptz default now());
+app.get('/mobile/config', (req, res) => {
+  res.json({
+    api_base: process.env.REACT_APP_API_URL || 'https://api.aisalesscales.com',
+    app_version: '1.0.0',
+    min_app_version: '1.0.0',
+    features: {
+      dark_mode: true,
+      push_notifications: true,
+      arabic_support: true,
+      referral_rewards: true,
+      sequence_analytics: true,
+    },
+    support_email: 'yousef@aisalesscales.com',
+  });
+});
+
+app.post('/mobile/register-device', async (req, res) => {
+  const { client_id, device_token, platform } = req.body;
+  if (!client_id || !device_token || !platform) return res.status(400).json({ error: 'client_id, device_token, and platform required' });
+  try {
+    await supabase.from('device_tokens').upsert([{ client_id, device_token, platform }], { onConflict: 'device_token' });
+    res.json({ ok: true, registered: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── ROUTE MODULES ────────────────────────────────────────
 app.use('/auth',    require('./routes/auth')({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }));
 app.use('/',        require('./routes/ai-team')({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, getClientProfile, getKlaviyoContext, verifyToken, aiLimiter }));

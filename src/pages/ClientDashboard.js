@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { supabase } from '../supabase';
 import { API_BASE } from '../config';
+import { t } from '../i18n';
 
 const parseAov = (text) => {
   if (!text) return 75;
@@ -55,6 +56,14 @@ export default function ClientDashboard({ user, onLogout }) {
   const [workflowStepsMap, setWorkflowStepsMap] = useState({});
   const [onboardingSteps, setOnboardingSteps] = useState(null);
   const [daysSinceJoined, setDaysSinceJoined] = useState(null);
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('cd_dark') === '1');
+  const [lang, setLang] = useState(() => localStorage.getItem('cd_lang') || 'en');
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpRef = useRef(null);
+
+  // persist dark mode + lang preferences
+  useEffect(() => { localStorage.setItem('cd_dark', darkMode ? '1' : '0'); }, [darkMode]);
+  useEffect(() => { localStorage.setItem('cd_lang', lang); }, [lang]);
 
   useEffect(() => { fetchData(); }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -249,20 +258,20 @@ export default function ClientDashboard({ user, onLogout }) {
   const stepTypeIcon = (t) => ({ email: '✉', sms: '💬', whatsapp: '📱', wait: '⏱', tag: '🏷', pipeline: '🎯', notify: '🔔' }[t] || '·');
 
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: '▦' },
-    { id: 'results', label: 'My Results', icon: '📈' },
-    { id: 'sequences', label: 'Sequences', icon: '⚡' },
-    { id: 'activity', label: 'Recent Activity', icon: '📊' },
-    { id: 'approvals', label: 'My Approvals', icon: '✓' },
-    { id: 'messages', label: 'Messages', icon: '💬' },
-    { id: 'contacts', label: 'Contacts', icon: '👥' },
-    { id: 'calls', label: 'My Calls', icon: '📞' },
-    { id: 'reports', label: 'My Reports', icon: '📄' },
-    { id: 'invoices', label: 'My Invoices', icon: '🧾' },
-    { id: 'zainab', label: 'Zainab AI', icon: '🤖' },
-    { id: 'referrals', label: 'Refer & Earn', icon: '🎁' },
-    { id: 'help', label: 'Help', icon: '❔' },
-    { id: 'settings', label: 'Settings', icon: '⚙' },
+    { id: 'dashboard', label: t('dashboard', lang), icon: '▦' },
+    { id: 'results', label: t('myResults', lang), icon: '📈' },
+    { id: 'sequences', label: t('sequences', lang), icon: '⚡' },
+    { id: 'activity', label: t('recentActivity', lang), icon: '📊' },
+    { id: 'approvals', label: t('myApprovals', lang), icon: '✓' },
+    { id: 'messages', label: t('messages', lang), icon: '💬' },
+    { id: 'contacts', label: t('contacts', lang), icon: '👥' },
+    { id: 'calls', label: t('calls', lang), icon: '📞' },
+    { id: 'reports', label: t('reports', lang), icon: '📄' },
+    { id: 'invoices', label: t('invoices', lang), icon: '🧾' },
+    { id: 'zainab', label: t('zainab', lang), icon: '🤖' },
+    { id: 'referrals', label: t('referrals', lang), icon: '🎁' },
+    { id: 'help', label: t('help', lang), icon: '❔' },
+    { id: 'settings', label: t('settings', lang), icon: '⚙' },
   ];
 
   const pageTitles = {
@@ -1963,10 +1972,13 @@ export default function ClientDashboard({ user, onLogout }) {
     );
   };
 
+  const dm = (light, dark) => darkMode ? dark : light;
+  const rtl = lang === 'ar';
+
   return (
-    <div style={{ display: 'flex', height: '100vh', fontFamily: 'DM Sans, sans-serif', background: '#f0f3f8' }}>
+    <div style={{ display: 'flex', height: '100vh', fontFamily: 'DM Sans, sans-serif', background: dm('#f0f3f8', '#070e1c'), direction: rtl ? 'rtl' : 'ltr' }}>
       {/* SIDEBAR */}
-      <div style={{ width: '220px', background: '#0a1628', display: 'flex', flexDirection: 'column', flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.06)' }}>
+      <div style={{ width: '220px', background: dm('#0a1628', '#050b16'), display: 'flex', flexDirection: 'column', flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.06)' }}>
         {/* LOGO */}
         <div style={{ padding: '22px 18px 18px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '4px', color: 'white', marginBottom: '3px' }}>SALES SCALES</div>
@@ -2002,11 +2014,33 @@ export default function ClientDashboard({ user, onLogout }) {
       </div>
 
       {/* MAIN */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: dm('#f0f3f8', '#0d1523') }}>
         {/* TOPBAR */}
-        <div style={{ background: 'white', borderBottom: '1px solid #e4e9f0', padding: '0 28px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 1px 3px rgba(10,22,40,0.04)', flexShrink: 0 }}>
-          <div style={{ fontSize: '14px', fontWeight: 600, color: '#0a1628' }}>{pageTitles[currentPage]}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ background: dm('white', '#0d1a2d'), borderBottom: `1px solid ${dm('#e4e9f0', 'rgba(255,255,255,0.08)')}`, padding: '0 28px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 1px 3px rgba(10,22,40,0.04)', flexShrink: 0 }}>
+          <div style={{ fontSize: '14px', fontWeight: 600, color: dm('#0a1628', 'rgba(255,255,255,0.85)') }}>{pageTitles[currentPage]}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+
+            {/* Fix 9: Dark mode toggle */}
+            <button onClick={() => setDarkMode(d => !d)} title={darkMode ? 'Light mode' : 'Dark mode'}
+              style={{ background: dm('transparent', 'rgba(255,255,255,0.06)'), border: `1px solid ${dm('#e4e9f0', 'rgba(255,255,255,0.12)')}`, borderRadius: '8px', width: '34px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+              <i className={`ti ${darkMode ? 'ti-sun' : 'ti-moon'}`} style={{ fontSize: '14px', color: dm('#4a5568', 'rgba(255,255,255,0.6)') }} />
+            </button>
+
+            {/* Fix 8: Language toggle */}
+            <button onClick={() => setLang(l => l === 'en' ? 'ar' : 'en')}
+              style={{ background: dm('transparent', 'rgba(255,255,255,0.06)'), border: `1px solid ${dm('#e4e9f0', 'rgba(255,255,255,0.12)')}`, borderRadius: '8px', padding: '5px 10px', fontSize: '10px', fontWeight: 700, cursor: 'pointer', color: dm('#4a5568', 'rgba(255,255,255,0.6)'), letterSpacing: '0.5px', fontFamily: 'DM Sans, sans-serif' }}>
+              {lang === 'en' ? 'العربية' : 'English'}
+            </button>
+
+            {/* Fix 6: Help button */}
+            <div ref={helpRef} style={{ position: 'relative' }}>
+              <button onClick={() => setHelpOpen(o => !o)} title="Help Center"
+                style={{ background: dm('transparent', 'rgba(255,255,255,0.06)'), border: `1px solid ${dm('#e4e9f0', 'rgba(255,255,255,0.12)')}`, borderRadius: '8px', width: '34px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                <i className="ti ti-help-circle" style={{ fontSize: '15px', color: dm('#4a5568', 'rgba(255,255,255,0.6)') }} />
+              </button>
+            </div>
+
+
             {/* NOTIFICATION BELL */}
             <div ref={bellRef} style={{ position: 'relative' }}>
               <button
@@ -2087,12 +2121,60 @@ export default function ClientDashboard({ user, onLogout }) {
         </div>
 
         {/* CONTENT */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px', background: dm('#f0f3f8', '#0d1523') }}>
           {loading ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '400px', color: '#8896a8' }}>Loading your dashboard...</div>
           ) : renderPage()}
         </div>
       </div>
+
+      {/* Fix 6: HELP CENTER SLIDE-IN PANEL */}
+      {helpOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1100, display: 'flex', justifyContent: 'flex-end' }} onClick={() => setHelpOpen(false)}>
+          <div style={{ width: '380px', height: '100vh', background: dm('white', '#0d1a2d'), boxShadow: '-8px 0 40px rgba(10,22,40,0.2)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+            <div style={{ background: '#0a1628', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <div>
+                <div style={{ color: '#c9a84c', fontSize: '10px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '3px' }}>Help Center</div>
+                <div style={{ color: 'white', fontSize: '14px', fontWeight: 600 }}>How can we help?</div>
+              </div>
+              <button onClick={() => setHelpOpen(false)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: '22px', lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ padding: '20px 24px', flex: 1 }}>
+              {[
+                { icon: '🚀', title: 'Getting Started', body: 'Connect your Shopify store, complete the onboarding questionnaire, and approve your first sequences. Your AI team starts working immediately after store connection.' },
+                { icon: '⚡', title: 'How Sequences Work', body: 'Sequences are automated email, SMS, and WhatsApp campaigns that fire based on customer actions — like abandoning a cart or placing an order. Each sequence is written by Mahdi in your brand voice and goes live after your approval.' },
+                { icon: '📊', title: 'Reading Your Reports', body: 'Check My Results for email open rates, click rates, and estimated revenue recovered. Revenue is estimated as completed sequence enrollments × your average order value. Actual results vary.' },
+              ].map(item => (
+                <div key={item.title} style={{ background: dm('#f8fafc', 'rgba(255,255,255,0.04)'), border: `1px solid ${dm('#e4e9f0', 'rgba(255,255,255,0.08)')}`, borderRadius: '10px', padding: '16px', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                    <span style={{ fontSize: '18px', flexShrink: 0 }}>{item.icon}</span>
+                    <div>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: dm('#0a1628', 'rgba(255,255,255,0.9)'), marginBottom: '5px' }}>{item.title}</div>
+                      <div style={{ fontSize: '11px', color: dm('#4a5568', 'rgba(255,255,255,0.5)'), lineHeight: 1.7 }}>{item.body}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', margin: '16px 0 10px' }}>FAQ</div>
+              {[
+                ['Why haven\'t I seen any revenue yet?', 'Revenue recovery requires your Shopify store to be connected and your sequences to be approved and active. Check the Sequences page to confirm they\'re running.'],
+                ['Can I edit the sequences?', 'Yes — go to My Approvals to review each sequence before it goes live, and request changes in the feedback box.'],
+                ['How often are sequences sent?', 'Sequences fire based on customer behaviour, not a fixed schedule. Cart recovery emails fire 1 hour after abandonment by default.'],
+                ['Who writes the emails?', 'Mahdi, your AI Marketing & Content specialist, writes every email in your brand voice based on your onboarding questionnaire.'],
+                ['What\'s the best way to get support?', 'Reply to any email from the team, or use the Contact Support button below — Zainab monitors the inbox and replies within a few hours.'],
+              ].map(([q, a], i) => (
+                <div key={i} style={{ borderBottom: `1px solid ${dm('#f0f3f8', 'rgba(255,255,255,0.06)')}`, paddingBottom: '12px', marginBottom: '12px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: dm('#0a1628', 'rgba(255,255,255,0.85)'), marginBottom: '5px' }}>{q}</div>
+                  <div style={{ fontSize: '11px', color: dm('#4a5568', 'rgba(255,255,255,0.5)'), lineHeight: 1.7 }}>{a}</div>
+                </div>
+              ))}
+              <a href="mailto:yousef@aisalesscales.com" style={{ display: 'block', background: '#c9a84c', color: '#0a1628', borderRadius: '10px', padding: '12px', textAlign: 'center', fontSize: '12px', fontWeight: 700, textDecoration: 'none', marginTop: '8px' }}>
+                Contact Support →
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── ONBOARDING WALKTHROUGH MODAL ───────────────────── */}
       {showWalkthrough && (() => {
