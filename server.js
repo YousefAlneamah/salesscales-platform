@@ -14,6 +14,7 @@ const cron = require('node-cron');
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const compression = require('compression');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'salesscales-jwt-secret-change-in-production';
 
@@ -111,6 +112,7 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use(compression());
 app.use(cors());
 app.use(express.json({ limit: '50mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
