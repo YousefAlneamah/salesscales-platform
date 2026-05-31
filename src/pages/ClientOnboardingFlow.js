@@ -30,37 +30,38 @@ const STEP_DESCS = [
 
 const fieldStyle = {
   width: '100%',
-  border: '1.5px solid #e4e9f0',
+  border: '1px solid rgba(255,255,255,0.1)',
   borderRadius: '10px',
-  padding: '10px 14px',
+  padding: '11px 14px',
   fontSize: '13px',
-  color: '#0a1628',
+  color: '#f0f4f8',
   outline: 'none',
-  fontFamily: 'DM Sans, sans-serif',
+  fontFamily: 'Inter, DM Sans, sans-serif',
   boxSizing: 'border-box',
-  background: '#fafbfc',
+  background: 'rgba(255,255,255,0.05)',
 };
 
 const labelStyle = {
   display: 'block',
   fontSize: '9px',
-  color: '#8896a8',
+  color: '#4a5568',
   letterSpacing: '1.5px',
   fontWeight: 700,
   textTransform: 'uppercase',
   marginBottom: '8px',
+  fontFamily: 'DM Mono, monospace',
 };
 
 const pillBtn = (active) => ({
   padding: '8px 14px',
   borderRadius: '8px',
-  border: `1.5px solid ${active ? '#c9a84c' : '#e4e9f0'}`,
-  background: active ? 'rgba(201,168,76,0.09)' : 'white',
-  color: active ? '#0a1628' : '#8896a8',
+  border: `1px solid ${active ? '#c9a84c' : 'rgba(255,255,255,0.1)'}`,
+  background: active ? 'rgba(201,168,76,0.12)' : 'rgba(255,255,255,0.04)',
+  color: active ? '#c9a84c' : '#8896a8',
   fontSize: '12px',
-  fontWeight: active ? 600 : 400,
+  fontWeight: active ? 700 : 400,
   cursor: 'pointer',
-  fontFamily: 'DM Sans, sans-serif',
+  fontFamily: 'Inter, DM Sans, sans-serif',
   transition: 'all 0.15s',
 });
 
@@ -208,43 +209,57 @@ export default function ClientOnboardingFlow({ user, onComplete }) {
   }
 
   // ─── FLOW ─────────────────────────────────────────────────
+  const STEP_ICONS = ['🏪', '✍️', '🔧', '🎯', '🔗'];
+
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'DM Sans, sans-serif', zIndex: 1000, padding: '20px', overflowY: 'auto' }}>
-      <div style={{ background: 'white', borderRadius: '18px', width: '100%', maxWidth: '590px', overflow: 'hidden', boxShadow: '0 32px 72px rgba(0,0,0,0.55)', margin: 'auto' }}>
+    <div style={{ position: 'fixed', inset: 0, background: '#050d1a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Inter, DM Sans, sans-serif', zIndex: 1000, padding: '20px', overflowY: 'auto' }}>
+      <div style={{ background: '#0f1f35', borderRadius: '20px', width: '100%', maxWidth: '620px', overflow: 'hidden', boxShadow: '0 32px 80px rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.07)', margin: 'auto' }}>
 
         {/* TOP BAR */}
-        <div style={{ background: '#0a1628', padding: '16px 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ background: '#0a1628', padding: '18px 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
           <div>
-            <div style={{ fontSize: '8px', fontWeight: 800, letterSpacing: '3px', color: 'rgba(255,255,255,0.5)', marginBottom: '3px' }}>SALES SCALES</div>
-            <div style={{ fontSize: '11px', color: '#c9a84c', fontWeight: 500 }}>Account Setup</div>
+            <div style={{ fontSize: '8px', fontWeight: 800, letterSpacing: '3px', color: 'rgba(255,255,255,0.4)', marginBottom: '3px', fontFamily: 'DM Mono, monospace' }}>SALES SCALES</div>
+            <div style={{ fontSize: '12px', color: '#c9a84c', fontWeight: 700 }}>Account Setup</div>
           </div>
-          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)' }}>
-            Step {step} of {TOTAL_STEPS}
+          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.25)', fontFamily: 'DM Mono, monospace' }}>
+            {step}/{TOTAL_STEPS}
           </div>
         </div>
 
-        {/* PROGRESS BAR */}
-        <div style={{ display: 'flex', background: '#0a1628', gap: '3px', padding: '0 0 1px' }}>
-          {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
-            <div key={i} style={{ flex: 1, height: '3px', background: i < step ? '#c9a84c' : 'rgba(255,255,255,0.08)', transition: 'background 0.3s' }} />
-          ))}
+        {/* STEP INDICATOR */}
+        <div style={{ background: '#0a1628', padding: '16px 28px 0' }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
+              <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: '100%', height: 3, background: i < step ? '#c9a84c' : 'rgba(255,255,255,0.07)', borderRadius: 2, transition: 'background 0.3s' }} />
+                <div style={{ fontSize: 9, color: i < step ? '#c9a84c' : 'rgba(255,255,255,0.2)', fontWeight: i === step - 1 ? 700 : 400, fontFamily: 'DM Mono, monospace' }}>{STEP_TITLES[i]}</div>
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* CONTENT */}
-        <div style={{ padding: '32px 32px 28px' }}>
+        <div style={{ padding: '28px 32px 28px' }}>
           {/* Step header */}
-          <div style={{ marginBottom: '28px' }}>
-            <div style={{ fontSize: '9px', color: '#c9a84c', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '7px' }}>
-              {STEP_TITLES[step - 1]}
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
+                {STEP_ICONS[step - 1]}
+              </div>
+              <div>
+                <div style={{ fontSize: 9, color: '#c9a84c', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono, monospace', marginBottom: 3 }}>
+                  Step {step} — {STEP_TITLES[step - 1]}
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: '#f0f4f8', letterSpacing: '-0.5px' }}>
+                  {step === 1 && `Welcome, ${user.name.split(' ')[0]}.`}
+                  {step === 2 && 'Tell us about your brand.'}
+                  {step === 3 && "What's in your stack?"}
+                  {step === 4 && 'Define your success.'}
+                  {step === 5 && 'Connect your store.'}
+                </div>
+              </div>
             </div>
-            <div style={{ fontSize: '21px', fontWeight: 700, color: '#0a1628', letterSpacing: '-0.5px', marginBottom: '7px' }}>
-              {step === 1 && `Welcome, ${user.name.split(' ')[0]}.`}
-              {step === 2 && 'Tell us about your brand.'}
-              {step === 3 && "What's in your stack?"}
-              {step === 4 && 'Define your success.'}
-              {step === 5 && 'Connect your store.'}
-            </div>
-            <div style={{ fontSize: '12px', color: '#8896a8', lineHeight: '1.65' }}>{STEP_DESCS[step - 1]}</div>
+            <div style={{ fontSize: 13, color: '#8896a8', lineHeight: 1.7 }}>{STEP_DESCS[step - 1]}</div>
           </div>
 
           {/* ─── STEP 1 ─── */}
