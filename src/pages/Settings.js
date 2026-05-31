@@ -352,15 +352,16 @@ export default function Settings() {
   };
 
   const inputStyle = {
-    width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px',
-    padding: '9px 12px', fontSize: '12px', color: '#0a1628',
-    outline: 'none', background: 'white', boxSizing: 'border-box',
-    fontFamily: 'DM Sans, sans-serif'
+    width: '100%', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '9px',
+    padding: '9px 12px', fontSize: '12px', color: '#f0f4f8',
+    outline: 'none', background: 'rgba(255,255,255,0.05)', boxSizing: 'border-box',
+    fontFamily: 'Inter, sans-serif',
   };
 
   const labelStyle = {
     fontSize: '10px', color: '#8896a8', marginBottom: '6px',
-    fontWeight: 600, display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px'
+    fontWeight: 600, display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px',
+    fontFamily: 'DM Mono, monospace',
   };
 
   const TwilioAreaInput = ({ clientId, provisioning, onProvision }) => {
@@ -387,44 +388,53 @@ export default function Settings() {
 
   const Toggle = ({ value, onChange }) => (
     <div onClick={() => onChange(!value)}
-      style={{ width: '36px', height: '20px', borderRadius: '10px', background: value ? '#10b981' : '#e4e9f0', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}>
-      <div style={{ width: '16px', height: '16px', borderRadius: '50%', background: 'white', position: 'absolute', top: '2px', left: value ? '18px' : '2px', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }}></div>
+      style={{ width: 40, height: 22, borderRadius: 11, background: value ? '#c9a84c' : 'rgba(255,255,255,0.1)', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0, border: `1px solid ${value ? 'rgba(201,168,76,0.4)' : 'rgba(255,255,255,0.1)'}` }}>
+      <div style={{ width: 16, height: 16, borderRadius: '50%', background: 'white', position: 'absolute', top: '2px', left: value ? '20px' : '2px', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
     </div>
   );
 
   return (
     <div>
       {/* HEADER */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Settings</div>
-          <div style={{ fontSize: '13px', color: '#0a1628', fontWeight: 600 }}>Configure your Sales Scales platform</div>
+          <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 4 }}>Platform</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: '#f0f4f8' }}>Settings</div>
         </div>
         <button onClick={handleSave}
-          style={{ background: saved ? '#10b981' : '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', transition: 'background 0.2s' }}>
-          {saved ? '✓ Saved' : 'Save Changes'}
+          style={{ background: saved ? '#10b981' : '#c9a84c', color: saved ? '#fff' : '#0a1628', border: 'none', borderRadius: 10, padding: '10px 24px', fontSize: 13, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s', fontFamily: 'Inter,sans-serif' }}>
+          {saved ? '✓ Saved!' : 'Save Changes'}
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: '16px' }}>
-        {/* TABS */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 16 }}>
+        {/* SIDEBAR NAVIGATION */}
+        <div style={{ background: '#0a1628', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: '12px 10px', height: 'fit-content', position: 'sticky', top: 20 }}>
           {tabs.map(tab => (
             <div key={tab.id} onClick={() => setActiveTab(tab.id)}
-              style={{ padding: '10px 14px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', fontWeight: activeTab === tab.id ? 600 : 400, background: activeTab === tab.id ? '#0a1628' : 'transparent', color: activeTab === tab.id ? 'white' : '#4a5568', transition: 'all 0.15s' }}>
-              <span>{tab.icon}</span>
+              style={{ padding: '10px 14px', borderRadius: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, fontWeight: activeTab === tab.id ? 700 : 400, background: activeTab === tab.id ? 'rgba(201,168,76,0.1)' : 'transparent', color: activeTab === tab.id ? '#c9a84c' : '#4a5568', borderLeft: `3px solid ${activeTab === tab.id ? '#c9a84c' : 'transparent'}`, transition: 'all 0.15s', marginBottom: 2, fontFamily: 'Inter,sans-serif' }}>
+              <span style={{ fontSize: 14 }}>{tab.icon}</span>
               <span>{tab.label}</span>
             </div>
           ))}
+
+          {/* Danger zone in sidebar */}
+          <div style={{ borderTop: '1px solid rgba(239,68,68,0.2)', marginTop: 16, paddingTop: 12 }}>
+            <div style={{ fontSize: 8, color: 'rgba(239,68,68,0.6)', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 8, paddingLeft: 14 }}>Danger Zone</div>
+            <div style={{ padding: '10px 14px', borderRadius: 10, fontSize: 11, color: '#ef4444', cursor: 'default', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 13 }}>⚠</span>
+              <span style={{ fontSize: 10, color: '#4a5568', lineHeight: 1.4 }}>Contact support to cancel subscription or delete account</span>
+            </div>
+          </div>
         </div>
 
-        {/* CONTENT */}
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+        {/* CONTENT PANEL */}
+        <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, padding: '28px 32px' }}>
 
           {/* PROFILE */}
           {activeTab === 'profile' && (
             <div>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628', marginBottom: '20px' }}>Business Profile</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#f0f4f8', marginBottom: 20 }}>Business Profile</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div><label style={labelStyle}>Business Name</label><input type="text" value={profile.businessName} onChange={e => setProfile({ ...profile, businessName: e.target.value })} style={inputStyle} /></div>
                 <div><label style={labelStyle}>Owner Name</label><input type="text" value={profile.ownerName} onChange={e => setProfile({ ...profile, ownerName: e.target.value })} style={inputStyle} /></div>
@@ -447,7 +457,7 @@ export default function Settings() {
           {/* NOTIFICATIONS */}
           {activeTab === 'notifications' && (
             <div>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628', marginBottom: '20px' }}>Notification Preferences</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#f0f4f8', marginBottom: 20 }}>Notification Preferences</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {[
                   { key: 'newApproval', label: 'New Approval Request', sub: 'When AI generates a new action requiring review' },

@@ -101,11 +101,26 @@ export default function Pipeline() {
     setDragging(null);
   };
 
+  const STAGE_GRAD = {
+    'New Lead':      'linear-gradient(135deg,#1d4ed8,#3b82f6)',
+    'Contacted':     'linear-gradient(135deg,#b45309,#f59e0b)',
+    'Nurturing':     'linear-gradient(135deg,#6d28d9,#8b5cf6)',
+    'Hot Lead':      'linear-gradient(135deg,#c2410c,#f97316)',
+    'Proposal Sent': 'linear-gradient(135deg,#065f46,#10b981)',
+    'Converted':     'linear-gradient(135deg,#047857,#34d399)',
+    'Lost':          'linear-gradient(135deg,#991b1b,#ef4444)',
+  };
+
+  const daysSinceCreated = (d) => {
+    const diff = Math.floor((Date.now() - new Date(d)) / 86400000);
+    return diff === 0 ? 'Today' : `${diff}d`;
+  };
+
   const inputStyle = {
-    width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px',
-    padding: '9px 12px', fontSize: '12px', color: '#0a1628',
-    outline: 'none', background: 'white', boxSizing: 'border-box',
-    fontFamily: 'DM Sans, sans-serif'
+    width: '100%', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px',
+    padding: '9px 12px', fontSize: '12px', color: '#f0f4f8',
+    outline: 'none', background: 'rgba(255,255,255,0.05)', boxSizing: 'border-box',
+    fontFamily: 'Inter, sans-serif',
   };
 
   return (
@@ -129,25 +144,25 @@ export default function Pipeline() {
       </div>
 
       {/* STATS */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 20 }}>
         {[
           { label: 'Total Deals', value: filtered.length, sub: 'in pipeline', color: '#c9a84c' },
-          { label: 'Pipeline Value', value: '$' + totalValue.toLocaleString(), sub: 'total value', color: '#c9a84c' },
-          { label: 'Hot Leads', value: hotLeads, sub: 'ready to close', color: '#d97706' },
-          { label: 'Converted', value: convertedDeals, sub: 'this pipeline', color: '#10b981' },
+          { label: 'Pipeline Value', value: '$' + totalValue.toLocaleString(), sub: 'total value', color: '#10b981' },
+          { label: 'Hot Leads', value: hotLeads, sub: 'ready to close', color: '#f97316' },
+          { label: 'Converted', value: convertedDeals, sub: 'this pipeline', color: '#34d399' },
         ].map(stat => (
-          <div key={stat.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '16px 18px', borderTop: `2px solid ${stat.color}`, boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
-            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>{stat.label}</div>
-            <div style={{ fontSize: '24px', fontWeight: 700, color: '#0a1628', letterSpacing: '-0.5px', marginBottom: '4px' }}>{stat.value}</div>
-            <div style={{ fontSize: '11px', color: stat.color, fontWeight: 500 }}>{stat.sub}</div>
+          <div key={stat.label} style={{ background: '#0f1f35', border: `1px solid ${stat.color}20`, borderTop: `2px solid ${stat.color}`, borderRadius: 14, padding: '18px 20px' }}>
+            <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 10 }}>{stat.label}</div>
+            <div style={{ fontSize: 36, fontWeight: 800, color: '#f0f4f8', letterSpacing: '-1px', lineHeight: 1, marginBottom: 6 }}>{stat.value}</div>
+            <div style={{ fontSize: 11, color: stat.color, fontWeight: 600 }}>{stat.sub}</div>
           </div>
         ))}
       </div>
 
       {/* ADD DEAL FORM */}
       {showForm && (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', marginBottom: '20px', boxShadow: '0 4px 6px rgba(10,22,40,0.05)' }}>
-          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '16px' }}>New Deal</div>
+        <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: 20, marginBottom: 20 }}>
+          <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 16 }}>New Deal</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '16px' }}>
             <div>
               <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Deal Title</div>
@@ -197,46 +212,57 @@ export default function Pipeline() {
 
       {/* KANBAN */}
       {loading ? (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '40px', textAlign: 'center', color: '#8896a8' }}>Loading pipeline...</div>
+        <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: 40, textAlign: 'center', color: '#4a5568' }}>Loading pipeline…</div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '10px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${stages.length}, 1fr)`, gap: 10, alignItems: 'start' }}>
           {stages.map(stageObj => {
             const stageDeals = getDealsForStage(stageObj.id);
             const stageValue = getTotalValue(stageObj.id);
+            const grad = STAGE_GRAD[stageObj.id] || `linear-gradient(135deg,${stageObj.color},${stageObj.color}99)`;
             return (
               <div key={stageObj.id}
                 onDragOver={handleDragOver}
                 onDrop={e => handleDrop(e, stageObj.id)}
-                style={{ background: stageObj.light, borderRadius: '10px', padding: '12px', minHeight: '320px', border: `1px solid ${stageObj.color}20` }}>
-                <div style={{ marginBottom: '12px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
-                    <div style={{ fontSize: '9px', fontWeight: 700, color: stageObj.color, letterSpacing: '1px', textTransform: 'uppercase' }}>{stageObj.id}</div>
-                    <div style={{ fontSize: '9px', background: stageObj.color, color: 'white', borderRadius: '10px', padding: '1px 7px', fontWeight: 700 }}>{stageDeals.length}</div>
+                style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 14, overflow: 'hidden', minHeight: 280 }}>
+
+                {/* Gradient column header */}
+                <div style={{ background: grad, padding: '12px 14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: 'rgba(255,255,255,0.9)', letterSpacing: 0.5 }}>{stageObj.id}</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.9)', background: 'rgba(0,0,0,0.2)', borderRadius: 12, padding: '2px 8px' }}>{stageDeals.length}</div>
                   </div>
-                  <div style={{ fontSize: '10px', color: '#8896a8', fontWeight: 500 }}>${stageValue.toLocaleString()}</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.75)' }}>${stageValue.toLocaleString()}</div>
                 </div>
 
-                {stageDeals.map(deal => (
-                  <div key={deal.id}
-                    draggable
-                    onDragStart={e => handleDragStart(e, deal)}
-                    onClick={() => setSelectedDeal(selectedDeal?.id === deal.id ? null : deal)}
-                    style={{ background: 'white', border: `1px solid ${selectedDeal?.id === deal.id ? stageObj.color : '#e4e9f0'}`, borderRadius: '8px', padding: '10px 12px', marginBottom: '8px', cursor: 'grab', boxShadow: '0 1px 3px rgba(10,22,40,0.06)', transition: 'border-color 0.1s' }}>
-                    <div style={{ fontSize: '11px', fontWeight: 600, color: '#0a1628', marginBottom: '4px' }}>{deal.title}</div>
-                    <div style={{ fontSize: '11px', color: '#c9a84c', fontWeight: 600, marginBottom: '4px' }}>
-                      {deal.value > 0 ? '$' + deal.value.toLocaleString() : 'No value'}
+                <div style={{ padding: '10px 8px' }}>
+                  {stageDeals.map(deal => (
+                    <div key={deal.id}
+                      draggable
+                      onDragStart={e => handleDragStart(e, deal)}
+                      onClick={() => setSelectedDeal(selectedDeal?.id === deal.id ? null : deal)}
+                      style={{ background: '#0f1f35', border: `1px solid ${selectedDeal?.id === deal.id ? stageObj.color + '60' : 'rgba(255,255,255,0.07)'}`, borderRadius: 10, padding: '11px 12px', marginBottom: 8, cursor: 'grab', transition: 'border-color 0.15s, background 0.15s' }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = '#0f1f35'; }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#f0f4f8', marginBottom: 6, lineHeight: 1.3 }}>{deal.title}</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: stageObj.color, letterSpacing: '-0.5px', marginBottom: 6 }}>
+                        {deal.value > 0 ? '$' + deal.value.toLocaleString() : '—'}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ fontSize: 9, color: '#4a5568' }}>{getClientName(deal.client_id)}</div>
+                        <div style={{ fontSize: 9, color: '#4a5568', background: 'rgba(255,255,255,0.04)', borderRadius: 6, padding: '2px 6px' }}>{daysSinceCreated(deal.created_at)}</div>
+                      </div>
+                      {deal.contact_id && <div style={{ fontSize: 9, color: '#8896a8', marginTop: 3 }}>{getContactName(deal.contact_id)}</div>}
                     </div>
-                    <div style={{ fontSize: '9px', color: '#8896a8' }}>{getClientName(deal.client_id)}</div>
-                    {deal.contact_id && <div style={{ fontSize: '9px', color: '#8896a8' }}>{getContactName(deal.contact_id)}</div>}
-                    <div style={{ fontSize: '9px', color: '#c4cdd6', marginTop: '6px' }}>{new Date(deal.created_at).toLocaleDateString()}</div>
-                  </div>
-                ))}
+                  ))}
 
-                {stageDeals.length === 0 && (
-                  <div style={{ textAlign: 'center', padding: '20px 8px', color: '#c4cdd6', fontSize: '10px', border: '1px dashed #e4e9f0', borderRadius: '8px' }}>
-                    Drop here
-                  </div>
-                )}
+                  {stageDeals.length === 0 && (
+                    <div onClick={() => setShowForm(true)} style={{ textAlign: 'center', padding: '24px 8px', color: '#4a5568', fontSize: 11, border: '1px dashed rgba(255,255,255,0.08)', borderRadius: 10, cursor: 'pointer', transition: 'border-color 0.15s' }}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(201,168,76,0.3)'}
+                      onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'}>
+                      + Add Deal
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -245,21 +271,21 @@ export default function Pipeline() {
 
       {/* DEAL DETAIL */}
       {selectedDeal && (
-        <div style={{ marginTop: '16px', background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '18px', boxShadow: '0 4px 6px rgba(10,22,40,0.05)' }}>
+        <div style={{ marginTop: 16, background: '#0f1f35', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, padding: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628', marginBottom: '4px' }}>{selectedDeal.title}</div>
-              <div style={{ fontSize: '11px', color: '#8896a8', marginBottom: '8px' }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: '#f0f4f8', marginBottom: 4 }}>{selectedDeal.title}</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: '#c9a84c', marginBottom: 8 }}>${(selectedDeal.value || 0).toLocaleString()}</div>
+              <div style={{ fontSize: 11, color: '#8896a8', marginBottom: 8 }}>
                 {getClientName(selectedDeal.client_id)} · {selectedDeal.source} · {new Date(selectedDeal.created_at).toLocaleDateString()}
               </div>
               {selectedDeal.notes && (
-                <div style={{ fontSize: '11px', color: '#475569', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e4e9f0' }}>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.65)', background: 'rgba(255,255,255,0.04)', padding: '10px 14px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.07)', lineHeight: 1.7 }}>
                   {selectedDeal.notes}
                 </div>
               )}
             </div>
-            <button onClick={() => setSelectedDeal(null)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '20px' }}>×</button>
+            <button onClick={() => setSelectedDeal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4a5568', fontSize: 20 }}>×</button>
           </div>
         </div>
       )}

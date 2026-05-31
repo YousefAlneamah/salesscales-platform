@@ -328,11 +328,24 @@ export default function Contacts() {
     return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
+  const [viewMode, setViewMode] = useState('card');
+
+  const nameColor = (name = '') => {
+    const cols = ['#3b82f6','#10b981','#c9a84c','#8b5cf6','#f59e0b','#ec4899','#0d9488','#ef4444'];
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+    return cols[Math.abs(h) % cols.length];
+  };
+
+  const engagementColor = (score) => score >= 80 ? '#10b981' : score >= 40 ? '#f59e0b' : '#ef4444';
+
+  const channelIcon = (ch) => ({ Email:'✉', SMS:'💬', WhatsApp:'📱', Instagram:'📸', Facebook:'👥' }[ch] || '💌');
+
   const inputStyle = {
-    width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px',
-    padding: '9px 12px', fontSize: '12px', color: '#0a1628',
-    outline: 'none', background: 'white', boxSizing: 'border-box',
-    fontFamily: 'DM Sans, sans-serif'
+    width: '100%', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px',
+    padding: '9px 12px', fontSize: '12px', color: '#f0f4f8',
+    outline: 'none', background: 'rgba(255,255,255,0.05)', boxSizing: 'border-box',
+    fontFamily: 'Inter, sans-serif',
   };
 
   return (
@@ -555,6 +568,30 @@ export default function Contacts() {
         </div>
       )}
 
+      {/* FILTER PILLS + VIEW TOGGLE */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Quick filter pills */}
+        {['All','Hot Leads','Opted Out','Never Enrolled'].map(pill => {
+          const active = pill === 'All' ? (!filterSeqStatus && !filterTag) : pill === 'Hot Leads' ? filterTag === 'hot_lead' : pill === 'Opted Out' ? filterTag === 'opted_out_sms' : filterSeqStatus === 'never_enrolled';
+          return (
+            <button key={pill} onClick={() => {
+              if (pill === 'All') { setFilterTag(''); setFilterSeqStatus(''); }
+              else if (pill === 'Hot Leads') { setFilterTag('hot_lead'); setFilterSeqStatus(''); }
+              else if (pill === 'Opted Out') { setFilterTag('opted_out_sms'); setFilterSeqStatus(''); }
+              else if (pill === 'Never Enrolled') { setFilterTag(''); setFilterSeqStatus('never_enrolled'); }
+            }}
+              style={{ padding: '5px 14px', borderRadius: 20, border: '1px solid', fontSize: 11, cursor: 'pointer', fontWeight: active ? 700 : 400, background: active ? '#c9a84c' : 'rgba(255,255,255,0.04)', color: active ? '#0a1628' : '#8896a8', borderColor: active ? '#c9a84c' : 'rgba(255,255,255,0.1)', fontFamily: 'Inter,sans-serif' }}>
+              {pill}
+            </button>
+          );
+        })}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#f0f4f8' }}>{filtered.length} contacts</span>
+          <button onClick={() => setViewMode('card')} style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid', fontSize: 11, cursor: 'pointer', background: viewMode === 'card' ? 'rgba(201,168,76,0.12)' : 'rgba(255,255,255,0.04)', color: viewMode === 'card' ? '#c9a84c' : '#4a5568', borderColor: viewMode === 'card' ? 'rgba(201,168,76,0.3)' : 'rgba(255,255,255,0.08)' }}>⊞ Cards</button>
+          <button onClick={() => setViewMode('table')} style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid', fontSize: 11, cursor: 'pointer', background: viewMode === 'table' ? 'rgba(201,168,76,0.12)' : 'rgba(255,255,255,0.04)', color: viewMode === 'table' ? '#c9a84c' : '#4a5568', borderColor: viewMode === 'table' ? 'rgba(201,168,76,0.3)' : 'rgba(255,255,255,0.08)' }}>☰ Table</button>
+        </div>
+      </div>
+
       {/* SEARCH + FILTERS */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
         <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or email..."
@@ -694,59 +731,115 @@ export default function Contacts() {
         </div>
       )}
 
-      {/* CONTACTS TABLE */}
+      {/* CONTACTS — CARD GRID or TABLE */}
       {loading ? (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '40px', textAlign: 'center', color: '#8896a8' }}>Loading contacts...</div>
+        <div style={{ padding: 40, textAlign: 'center', color: '#4a5568' }}>Loading contacts…</div>
       ) : filtered.length === 0 ? (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '60px', textAlign: 'center' }}>
-          <div style={{ fontSize: '32px', marginBottom: '12px' }}>👤</div>
-          <div style={{ fontWeight: 600, color: '#0a1628', marginBottom: '6px', fontSize: '14px' }}>No contacts yet</div>
-          <div style={{ fontSize: '12px', color: '#8896a8' }}>Add contacts manually or connect a Shopify store to import automatically</div>
+        <div style={{ background: '#0f1f35', border: '2px dashed rgba(255,255,255,0.07)', borderRadius: 16, padding: 60, textAlign: 'center' }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>👤</div>
+          <div style={{ fontWeight: 700, color: '#f0f4f8', marginBottom: 6, fontSize: 15 }}>No contacts yet</div>
+          <div style={{ fontSize: 12, color: '#4a5568' }}>Add contacts manually or connect a Shopify store to import automatically</div>
+        </div>
+      ) : viewMode === 'card' ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
+          {filtered.map(contact => {
+            const nc = nameColor(`${contact.first_name || ''}${contact.last_name || ''}`);
+            const score = contact.engagement_score || 0;
+            const ec = engagementColor(score);
+            const tags = Array.isArray(contact.tags) ? contact.tags.slice(0, 3) : [];
+            const initials = `${contact.first_name?.[0] || ''}${contact.last_name?.[0] || ''}`.toUpperCase();
+            return (
+              <div key={contact.id}
+                onClick={() => { const c = selectedContact?.id === contact.id ? null : contact; setSelectedContact(c); if (c) loadTimeline(c); }}
+                style={{ background: selectedContact?.id === contact.id ? 'rgba(201,168,76,0.05)' : '#0f1f35', border: `1px solid ${selectedContact?.id === contact.id ? 'rgba(201,168,76,0.35)' : 'rgba(255,255,255,0.07)'}`, borderRadius: 14, padding: 18, cursor: 'pointer', transition: 'all 0.15s', position: 'relative', overflow: 'hidden' }}
+                onMouseEnter={e => { e.currentTarget.querySelector('.qa-btns').style.opacity = '1'; if (selectedContact?.id !== contact.id) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'; }}
+                onMouseLeave={e => { e.currentTarget.querySelector('.qa-btns').style.opacity = '0'; if (selectedContact?.id !== contact.id) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'; }}>
+
+                {/* Avatar + name */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                  <div style={{ width: 44, height: 44, borderRadius: 12, background: nc + '22', border: `1.5px solid ${nc}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 800, color: nc, flexShrink: 0 }}>{initials || '?'}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#f0f4f8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contact.first_name} {contact.last_name}</div>
+                    <div style={{ fontSize: 10, color: '#4a5568', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contact.email || contact.phone || '—'}</div>
+                  </div>
+                  <div style={{ fontSize: 16, flexShrink: 0, marginLeft: 'auto' }}>{channelIcon(contact.channel)}</div>
+                </div>
+
+                {/* Engagement score bar */}
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#4a5568', marginBottom: 4, fontFamily: 'DM Mono,monospace' }}>
+                    <span>ENGAGEMENT</span><span style={{ color: ec, fontWeight: 700 }}>{score}</span>
+                  </div>
+                  <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(100, score)}%`, height: '100%', background: ec, borderRadius: 2, transition: 'width 0.5s' }} />
+                  </div>
+                </div>
+
+                {/* Tags */}
+                {tags.length > 0 && (
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
+                    {tags.map(t => (
+                      <span key={t} style={{ fontSize: 8, padding: '2px 8px', borderRadius: 20, background: 'rgba(201,168,76,0.1)', color: '#c9a84c', border: '1px solid rgba(201,168,76,0.2)', fontWeight: 600 }}>{t}</span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Last activity + stage */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: 10, color: '#4a5568' }}>{contact.last_activity ? new Date(contact.last_activity).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : formatDate(contact.created_at)}</div>
+                  {contact.pipeline_stage && (
+                    <span style={{ fontSize: 8, padding: '2px 8px', borderRadius: 20, background: 'rgba(255,255,255,0.05)', color: '#8896a8', border: '1px solid rgba(255,255,255,0.07)', fontWeight: 600 }}>{contact.pipeline_stage}</span>
+                  )}
+                </div>
+
+                {/* Hover quick actions */}
+                <div className="qa-btns" style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', gap: 4, opacity: 0, transition: 'opacity 0.15s', background: 'rgba(15,31,53,0.95)', borderRadius: 8, padding: '6px 8px' }}>
+                  <button onClick={e => { e.stopPropagation(); enrollContact(contact); }} style={{ flex: 1, fontSize: 9, fontWeight: 700, borderRadius: 6, border: '1px solid rgba(201,168,76,0.25)', background: 'rgba(201,168,76,0.1)', color: '#c9a84c', cursor: 'pointer', padding: '4px 0', fontFamily: 'Inter,sans-serif' }}>Enroll</button>
+                  <button onClick={e => { e.stopPropagation(); const c = selectedContact?.id === contact.id ? null : contact; setSelectedContact(c); if (c) loadTimeline(c); }} style={{ flex: 1, fontSize: 9, fontWeight: 700, borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.05)', color: '#8896a8', cursor: 'pointer', padding: '4px 0', fontFamily: 'Inter,sans-serif' }}>Timeline</button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '32px 2.2fr 1.1fr 0.9fr 0.9fr 70px 0.9fr', padding: '12px 18px', background: '#0a1628' }}>
-            <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0} onChange={toggleSelectAll}
-              style={{ accentColor: '#c9a84c', cursor: 'pointer', width: '14px', height: '14px', margin: 'auto 0' }} />
+        /* TABLE VIEW */
+        <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, overflow: 'hidden' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '32px 2.2fr 1.1fr 0.9fr 0.9fr 70px 0.9fr', padding: '12px 18px', background: '#142840', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0} onChange={toggleSelectAll} style={{ accentColor: '#c9a84c', cursor: 'pointer', width: 14, height: 14, margin: 'auto 0' }} />
             {['CONTACT', 'STORE', 'SOURCE', 'STAGE', 'SCORE', 'ADDED'].map(h => (
-              <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px', fontWeight: 700 }}>{h}</div>
+              <div key={h} style={{ fontSize: 8, color: '#4a5568', letterSpacing: 2, fontWeight: 700, fontFamily: 'DM Mono,monospace' }}>{h}</div>
             ))}
           </div>
           {filtered.map(contact => {
+            const nc = nameColor(`${contact.first_name || ''}${contact.last_name || ''}`);
             const s = stageColor(contact.pipeline_stage);
             const score = contact.engagement_score || 0;
-            const scoreColor = score >= 80 ? '#059669' : score >= 40 ? '#d97706' : '#8896a8';
-            const scoreBg = score >= 80 ? '#ecfdf5' : score >= 40 ? '#fffbeb' : '#f8fafc';
+            const ec = engagementColor(score);
             return (
               <div key={contact.id}
-                style={{ display: 'grid', gridTemplateColumns: '32px 2.2fr 1.1fr 0.9fr 0.9fr 70px 0.9fr', padding: '13px 18px', borderBottom: '1px solid #f4f6fa', cursor: 'pointer', background: selectedContact?.id === contact.id || selectedIds.has(contact.id) ? '#fafbfd' : 'white', transition: 'background 0.1s', alignItems: 'center' }}
+                style={{ display: 'grid', gridTemplateColumns: '32px 2.2fr 1.1fr 0.9fr 0.9fr 70px 0.9fr', padding: '12px 18px', borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'pointer', background: selectedContact?.id === contact.id || selectedIds.has(contact.id) ? 'rgba(201,168,76,0.04)' : 'transparent', alignItems: 'center', transition: 'background 0.1s' }}
                 onClick={() => { const c = selectedContact?.id === contact.id ? null : contact; setSelectedContact(c); if (c) loadTimeline(c); }}>
                 <div onClick={e => { e.stopPropagation(); toggleSelect(contact.id); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <input type="checkbox" checked={selectedIds.has(contact.id)} onChange={() => toggleSelect(contact.id)}
-                    style={{ accentColor: '#c9a84c', cursor: 'pointer', width: '14px', height: '14px' }} />
+                  <input type="checkbox" checked={selectedIds.has(contact.id)} onChange={() => toggleSelect(contact.id)} style={{ accentColor: '#c9a84c', cursor: 'pointer', width: 14, height: 14 }} />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ width: '30px', height: '30px', borderRadius: '8px', background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', color: '#c9a84c', fontWeight: 700, flexShrink: 0 }}>
-                    {contact.first_name?.[0]}{contact.last_name?.[0]}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 30, height: 30, borderRadius: 8, background: nc + '22', border: `1px solid ${nc}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800, color: nc, flexShrink: 0 }}>
+                    {(contact.first_name?.[0] || '')(contact.last_name?.[0] || '')}
                   </div>
                   <div>
-                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628' }}>{contact.first_name} {contact.last_name}</div>
-                    <div style={{ fontSize: '10px', color: '#8896a8' }}>{contact.email}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#f0f4f8' }}>{contact.first_name} {contact.last_name}</div>
+                    <div style={{ fontSize: 10, color: '#4a5568' }}>{contact.email}</div>
                   </div>
                 </div>
-                <div style={{ fontSize: '11px', color: '#4a5568', display: 'flex', alignItems: 'center' }}>{getClientName(contact.client_id)}</div>
-                <div style={{ fontSize: '11px', color: '#4a5568', display: 'flex', alignItems: 'center' }}>{contact.source}</div>
+                <div style={{ fontSize: 11, color: '#8896a8', display: 'flex', alignItems: 'center' }}>{getClientName(contact.client_id)}</div>
+                <div style={{ fontSize: 11, color: '#8896a8', display: 'flex', alignItems: 'center' }}>{contact.source}</div>
                 <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', background: s.bg, color: s.color, border: `1px solid ${s.border}`, fontWeight: 600 }}>
-                    {contact.pipeline_stage}
-                  </span>
+                  <span style={{ fontSize: 9, padding: '3px 9px', borderRadius: 20, background: s.bg, color: s.color, border: `1px solid ${s.border}`, fontWeight: 600 }}>{contact.pipeline_stage}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <span title={`Engagement score: ${score} pts`} style={{ fontSize: '9px', padding: '3px 8px', borderRadius: '20px', background: scoreBg, color: scoreColor, border: `1px solid ${score >= 80 ? '#a7f3d0' : score >= 40 ? '#fde68a' : '#e4e9f0'}`, fontWeight: 700 }}>
-                    {score > 0 ? `${score}` : '—'}
-                  </span>
+                  <span style={{ fontSize: 9, padding: '2px 8px', borderRadius: 20, background: `${ec}15`, color: ec, border: `1px solid ${ec}30`, fontWeight: 700 }}>{score || '—'}</span>
                 </div>
-                <div style={{ fontSize: '10px', color: '#8896a8', display: 'flex', alignItems: 'center' }}>{formatDate(contact.created_at)}</div>
+                <div style={{ fontSize: 10, color: '#4a5568', display: 'flex', alignItems: 'center' }}>{formatDate(contact.created_at)}</div>
               </div>
             );
           })}

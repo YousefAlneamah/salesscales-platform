@@ -21,7 +21,7 @@ export default function Inbox() {
   const [bcSending, setBcSending] = useState(false);
   const [bcResult, setBcResult] = useState(null);
 
-  const channels = ['All', 'Email', 'SMS', 'WhatsApp', 'Instagram', 'Facebook'];
+  // channels list used in filter tabs below
 
   useEffect(() => {
     fetchMessages();
@@ -211,121 +211,140 @@ export default function Inbox() {
         </div>
       )}
 
-      {/* CHANNEL FILTERS */}
-      <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-        {channels.map(ch => (
-          <button key={ch} onClick={() => setFilterChannel(ch)}
-            style={{ padding: '6px 14px', borderRadius: '20px', border: '1px solid', fontSize: '11px', cursor: 'pointer', fontWeight: filterChannel === ch ? 600 : 400, background: filterChannel === ch ? '#0a1628' : 'white', color: filterChannel === ch ? 'white' : '#8896a8', borderColor: filterChannel === ch ? '#0a1628' : '#e4e9f0', transition: 'all 0.15s' }}>
-            {ch}
-          </button>
-        ))}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
-          <select value={filterClient} onChange={e => setFilterClient(e.target.value)} style={{ ...inputStyle, width: '150px' }}>
+      {/* FILTER TABS */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        {['All','Unread','Email','SMS','WhatsApp','Instagram','Facebook'].map(tab => {
+          const active = tab === 'All' ? filterChannel === 'All' && filterStatus === 'All' : tab === 'Unread' ? filterStatus === 'unread' : filterChannel === tab;
+          return (
+            <button key={tab} onClick={() => {
+              if (tab === 'All') { setFilterChannel('All'); setFilterStatus('All'); }
+              else if (tab === 'Unread') { setFilterChannel('All'); setFilterStatus('unread'); }
+              else { setFilterChannel(tab); setFilterStatus('All'); }
+            }}
+              style={{ padding: '6px 14px', borderRadius: 20, border: '1px solid', fontSize: 11, cursor: 'pointer', fontWeight: active ? 700 : 400, background: active ? '#c9a84c' : 'rgba(255,255,255,0.04)', color: active ? '#0a1628' : '#8896a8', borderColor: active ? '#c9a84c' : 'rgba(255,255,255,0.09)', fontFamily: 'Inter,sans-serif' }}>
+              {tab === 'Unread' ? `Unread${unreadCount > 0 ? ` (${unreadCount})` : ''}` : tab}
+            </button>
+          );
+        })}
+        <div style={{ marginLeft: 'auto' }}>
+          <select value={filterClient} onChange={e => setFilterClient(e.target.value)} style={{ ...inputStyle, width: 150 }}>
             <option value="All">All Stores</option>
             {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ ...inputStyle, width: '120px' }}>
-            <option value="All">All Status</option>
-            <option value="unread">Unread</option>
-            <option value="read">Read</option>
-            <option value="replied">Replied</option>
-            <option value="sent">Sent</option>
           </select>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: selectedMessage ? '1fr 1fr' : '1fr', gap: '16px' }}>
-        {/* MESSAGE LIST */}
-        <div>
-          {loading ? (
-            <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '40px', textAlign: 'center', color: '#8896a8' }}>Loading messages...</div>
-          ) : filtered.length === 0 ? (
-            <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '60px', textAlign: 'center' }}>
-              <div style={{ fontSize: '32px', marginBottom: '12px' }}>📬</div>
-              <div style={{ fontWeight: 600, color: '#0a1628', marginBottom: '6px', fontSize: '14px' }}>No messages yet</div>
-              <div style={{ fontSize: '12px', color: '#8896a8' }}>Click Test Message to add a sample</div>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {filtered.map(message => {
-                const cs = channelStyle(message.channel);
-                return (
-                  <div key={message.id}
-                    onClick={() => { setSelectedMessage(message); setReply(message.ai_reply || ''); markAsRead(message.id); }}
-                    style={{
-                      background: 'white',
-                      border: `1px solid ${selectedMessage?.id === message.id ? '#c9a84c' : '#e4e9f0'}`,
-                      borderLeft: `3px solid ${message.status === 'unread' ? '#c9a84c' : 'transparent'}`,
-                      borderRadius: '10px',
-                      padding: '14px 16px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      gap: '12px',
-                      alignItems: 'flex-start',
-                      transition: 'all 0.1s',
-                      boxShadow: '0 1px 3px rgba(10,22,40,0.04)'
-                    }}>
-                    <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: cs.bg, border: `1px solid ${cs.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', flexShrink: 0 }}>
-                      {cs.icon}
+      {/* SPLIT PANEL: LEFT = LIST, RIGHT = THREAD */}
+      <div style={{ display: 'grid', gridTemplateColumns: selectedMessage ? '340px 1fr' : '1fr', gap: 12, height: 'calc(100vh - 280px)', minHeight: 400 }}>
+
+        {/* LEFT: CONVERSATION LIST */}
+        <div style={{ background: '#0a1628', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', fontSize: 9, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace' }}>{filtered.length} messages</div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {loading ? (
+              <div style={{ padding: 40, textAlign: 'center', color: '#4a5568', fontSize: 12 }}>Loading…</div>
+            ) : filtered.length === 0 ? (
+              <div style={{ padding: 40, textAlign: 'center' }}>
+                <div style={{ fontSize: 32, marginBottom: 10 }}>📬</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#f0f4f8', marginBottom: 6 }}>No messages</div>
+                <div style={{ fontSize: 11, color: '#4a5568' }}>Click Test Message to add a sample</div>
+              </div>
+            ) : filtered.map(message => {
+              const cs = channelStyle(message.channel);
+              const isSelected = selectedMessage?.id === message.id;
+              return (
+                <div key={message.id}
+                  onClick={() => { setSelectedMessage(message); setReply(message.ai_reply || ''); markAsRead(message.id); }}
+                  style={{ padding: '13px 16px', borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'pointer', display: 'flex', gap: 10, alignItems: 'flex-start', background: isSelected ? 'rgba(201,168,76,0.06)' : message.status === 'unread' ? 'rgba(201,168,76,0.02)' : 'transparent', borderLeft: `3px solid ${isSelected ? '#c9a84c' : message.status === 'unread' ? 'rgba(201,168,76,0.5)' : 'transparent'}`, transition: 'all 0.1s' }}
+                  onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
+                  onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = message.status === 'unread' ? 'rgba(201,168,76,0.02)' : 'transparent'; }}>
+
+                  {/* Avatar */}
+                  <div style={{ width: 38, height: 38, borderRadius: 10, background: cs.bg.replace('#','').startsWith('e') ? '#0f1f35' : '#0f1f35', border: `1px solid ${cs.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0, color: cs.color }}>{cs.icon}</div>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                      <div style={{ fontSize: 12, fontWeight: message.status === 'unread' ? 700 : 500, color: '#f0f4f8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{message.sender_name || 'Unknown'}</div>
+                      <div style={{ fontSize: 9, color: '#4a5568', flexShrink: 0 }}>{formatTime(message.created_at)}</div>
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
-                        <div style={{ fontSize: '12px', fontWeight: message.status === 'unread' ? 700 : 500, color: '#0a1628' }}>{message.sender_name || 'Unknown'}</div>
-                        <div style={{ fontSize: '9px', color: '#8896a8' }}>{formatTime(message.created_at)}</div>
-                      </div>
-                      <div style={{ display: 'flex', gap: '6px', marginBottom: '4px' }}>
-                        <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', background: cs.bg, color: cs.color, border: `1px solid ${cs.border}`, fontWeight: 600 }}>{message.channel}</span>
-                        <span style={{ fontSize: '9px', color: '#8896a8' }}>{getClientName(message.client_id)}</span>
-                        {message.direction === 'outbound' && <span style={{ fontSize: '9px', color: '#10b981', fontWeight: 500 }}>↑ Sent</span>}
-                      </div>
-                      {message.subject && <div style={{ fontSize: '11px', fontWeight: 600, color: '#0a1628', marginBottom: '2px' }}>{message.subject}</div>}
-                      <div style={{ fontSize: '11px', color: '#8896a8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{message.content}</div>
+                    <div style={{ fontSize: 10, color: '#8896a8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 4 }}>{message.content}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 8, padding: '1px 7px', borderRadius: 20, background: 'rgba(255,255,255,0.05)', color: cs.color, border: `1px solid ${cs.border}`, fontWeight: 600 }}>{message.channel}</span>
+                      {message.direction === 'outbound' && <span style={{ fontSize: 8, color: '#10b981', fontWeight: 700 }}>↑ Sent</span>}
                     </div>
-                    {message.status === 'unread' && (
-                      <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#c9a84c', flexShrink: 0, marginTop: '4px' }}></div>
-                    )}
                   </div>
-                );
-              })}
-            </div>
-          )}
+                  {message.status === 'unread' && <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#c9a84c', boxShadow: '0 0 5px #c9a84c', flexShrink: 0, marginTop: 4 }} />}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
-        {/* MESSAGE DETAIL */}
+        {/* RIGHT: THREAD VIEW */}
         {selectedMessage && (
-          <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', height: 'fit-content', position: 'sticky', top: 0, boxShadow: '0 4px 6px rgba(10,22,40,0.05)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+          <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Thread header */}
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628', marginBottom: '3px' }}>{selectedMessage.sender_name}</div>
-                <div style={{ fontSize: '10px', color: '#8896a8' }}>
-                  {selectedMessage.sender_email || selectedMessage.sender_phone || selectedMessage.channel} · {getClientName(selectedMessage.client_id)} · {formatTime(selectedMessage.created_at)}
-                </div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#f0f4f8', marginBottom: 2 }}>{selectedMessage.sender_name || 'Unknown'}</div>
+                <div style={{ fontSize: 10, color: '#4a5568' }}>{selectedMessage.sender_email || selectedMessage.sender_phone || '—'} · {getClientName(selectedMessage.client_id)} · {channelStyle(selectedMessage.channel).icon} {selectedMessage.channel}</div>
               </div>
-              <button onClick={() => setSelectedMessage(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '20px', lineHeight: 1 }}>×</button>
+              <button onClick={() => setSelectedMessage(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4a5568', fontSize: 20 }}>×</button>
             </div>
 
-            {selectedMessage.subject && (
-              <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', marginBottom: '10px' }}>{selectedMessage.subject}</div>
-            )}
-
-            <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '14px', marginBottom: '16px', fontSize: '12px', color: '#475569', lineHeight: '1.7', border: '1px solid #f0f3f8' }}>
-              {selectedMessage.content}
+            {/* Message bubble */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* Inbound bubble */}
+              {selectedMessage.direction === 'inbound' && (
+                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', maxWidth: '75%' }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: '#142840', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#8896a8', fontWeight: 700, flexShrink: 0 }}>
+                    {(selectedMessage.sender_name || '?')[0]}
+                  </div>
+                  <div>
+                    <div style={{ background: '#142840', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '14px 14px 14px 2px', padding: '12px 16px', fontSize: 13, color: 'rgba(255,255,255,0.85)', lineHeight: 1.6, maxWidth: '100%' }}>
+                      {selectedMessage.subject && <div style={{ fontWeight: 700, marginBottom: 6 }}>{selectedMessage.subject}</div>}
+                      {selectedMessage.content}
+                    </div>
+                    <div style={{ fontSize: 9, color: '#4a5568', marginTop: 4, marginLeft: 4 }}>{formatTime(selectedMessage.created_at)}</div>
+                  </div>
+                </div>
+              )}
+              {/* Outbound bubble */}
+              {selectedMessage.direction === 'outbound' && (
+                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', maxWidth: '75%', marginLeft: 'auto', flexDirection: 'row-reverse' }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#c9a84c', fontWeight: 700, flexShrink: 0 }}>AI</div>
+                  <div>
+                    <div style={{ background: '#0a1628', border: '1px solid rgba(201,168,76,0.15)', borderRadius: '14px 14px 2px 14px', padding: '12px 16px', fontSize: 13, color: 'rgba(255,255,255,0.85)', lineHeight: 1.6 }}>
+                      {selectedMessage.content}
+                    </div>
+                    <div style={{ fontSize: 9, color: '#4a5568', marginTop: 4, textAlign: 'right', marginRight: 4 }}>{formatTime(selectedMessage.created_at)} · ✓ Sent</div>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>Reply</div>
-            <textarea value={reply} onChange={e => setReply(e.target.value)}
-              placeholder="Write your reply or generate with AI..."
-              rows={4} style={{ ...inputStyle, resize: 'none', marginBottom: '10px' }} />
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={() => generateAIReply(selectedMessage)} disabled={generating}
-                style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', flex: 1 }}>
-                {generating ? 'Generating...' : '⚡ AI Reply'}
-              </button>
-              <button onClick={sendReply} disabled={!reply}
-                style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '8px', padding: '9px 14px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', flex: 1 }}>
-                Send ↑
-              </button>
+            {/* Reply bar */}
+            <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(255,255,255,0.06)', background: '#0a1628' }}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
+                <span style={{ fontSize: 10, color: '#4a5568' }}>Via:</span>
+                {[selectedMessage.channel].map(ch => {
+                  const cs = channelStyle(ch);
+                  return <span key={ch} style={{ fontSize: 10, padding: '3px 10px', borderRadius: 20, background: 'rgba(255,255,255,0.05)', color: cs.color, border: `1px solid ${cs.border}`, fontWeight: 600 }}>{cs.icon} {ch}</span>;
+                })}
+              </div>
+              <textarea value={reply} onChange={e => setReply(e.target.value)}
+                placeholder="Write your reply…" rows={3}
+                style={{ ...inputStyle, resize: 'none', marginBottom: 8, borderRadius: 10 }} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => generateAIReply(selectedMessage)} disabled={generating}
+                  style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f4f8', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 14px', fontSize: 11, fontWeight: 600, cursor: 'pointer', flex: 1, fontFamily: 'Inter,sans-serif' }}>
+                  {generating ? 'Generating…' : '⚡ AI Reply'}
+                </button>
+                <button onClick={sendReply} disabled={!reply}
+                  style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer', flex: 2, fontFamily: 'Inter,sans-serif' }}>
+                  Send →
+                </button>
+              </div>
             </div>
           </div>
         )}
