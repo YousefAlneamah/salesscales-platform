@@ -52,6 +52,7 @@ export default function TeamBriefings() {
   const [errorMsg, setErrorMsg] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   const fetchBriefings = async () => {
     setLoading(true);
@@ -90,6 +91,15 @@ export default function TeamBriefings() {
   };
 
   const getMemberName = (id) => MEMBERS.find(m => m.id === id)?.name || id;
+
+  const archiveBriefing = async (id) => {
+    try {
+      await axios.post(`${API_BASE}/briefings/archive`, { briefing_id: id });
+      setBriefings(prev => prev.map(b => b.id === id ? { ...b, is_archived: true } : b));
+    } catch (e) {
+      console.error('Archive failed:', e.message);
+    }
+  };
 
   const copyBriefing = (b) => {
     const text = `From: ${getMemberName(b.from_member)}\nTo: ${getMemberName(b.to_member)}\nSubject: ${b.subject}\nPriority: ${b.priority}\nDate: ${formatDate(b.created_at)}\n\n${b.content}`;
@@ -211,6 +221,10 @@ export default function TeamBriefings() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text)' }}>All Briefings</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button onClick={() => setShowArchived(v => !v)}
+              style={{ background: showArchived ? 'rgba(201,168,76,0.1)' : 'var(--bg)', color: showArchived ? 'var(--gold)' : 'var(--muted)', border: `1px solid ${showArchived ? 'var(--gold)' : 'var(--border)'}`, borderRadius: '7px', padding: '5px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+              {showArchived ? 'Hide Archived' : 'Show Archived'}
+            </button>
             <div className="section-label" style={{ marginRight: '4px' }}>Filter by recipient:</div>
             <select
               style={{ ...selectStyle, width: 'auto', padding: '6px 10px', fontSize: '12px' }}
@@ -239,8 +253,9 @@ export default function TeamBriefings() {
               <div className="th" style={{ flex: '0 0 80px' }}>Priority</div>
               <div className="th" style={{ flex: '0 0 72px' }}>Status</div>
               <div className="th" style={{ flex: '0 0 130px' }}>Date</div>
+              <div className="th" style={{ flex: '0 0 80px' }}></div>
             </div>
-            {briefings.map(b => {
+            {briefings.filter(b => showArchived ? b.is_archived : !b.is_archived).map(b => {
               const isExpanded = expandedId === b.id;
               const isCopied = copiedId === b.id;
               return (
@@ -309,6 +324,14 @@ export default function TeamBriefings() {
                   </div>
                   <div className="td" style={{ flex: '0 0 130px', fontSize: '11px', color: 'var(--muted)' }}>
                     {formatDate(b.created_at)}
+                  </div>
+                  <div className="td" style={{ flex: '0 0 80px' }}>
+                    {!b.is_archived && (
+                      <button onClick={() => archiveBriefing(b.id)}
+                        style={{ background: 'var(--bg)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: '6px', padding: '4px 8px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+                        Archive
+                      </button>
+                    )}
                   </div>
                 </div>
               );

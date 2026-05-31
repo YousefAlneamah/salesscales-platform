@@ -17,6 +17,35 @@ const bcrypt = require('bcryptjs');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'salesscales-jwt-secret-change-in-production';
 
+// Fix 4: country→timezone mapping for contact send-window enforcement
+const COUNTRY_TIMEZONE = {
+  US:'America/New_York', CA:'America/Toronto', GB:'Europe/London', AU:'Australia/Sydney',
+  NZ:'Pacific/Auckland', DE:'Europe/Berlin', FR:'Europe/Paris', NL:'Europe/Amsterdam',
+  ES:'Europe/Madrid', IT:'Europe/Rome', SE:'Europe/Stockholm', NO:'Europe/Oslo',
+  DK:'Europe/Copenhagen', CH:'Europe/Zurich', AT:'Europe/Vienna', BE:'Europe/Brussels',
+  PT:'Europe/Lisbon', IE:'Europe/Dublin', PL:'Europe/Warsaw', CZ:'Europe/Prague',
+  JP:'Asia/Tokyo', KR:'Asia/Seoul', CN:'Asia/Shanghai', HK:'Asia/Hong_Kong',
+  TW:'Asia/Taipei', SG:'Asia/Singapore', MY:'Asia/Kuala_Lumpur', PH:'Asia/Manila',
+  TH:'Asia/Bangkok', ID:'Asia/Jakarta', IN:'Asia/Kolkata', PK:'Asia/Karachi',
+  AE:'Asia/Dubai', SA:'Asia/Riyadh', IL:'Asia/Jerusalem', TR:'Europe/Istanbul',
+  ZA:'Africa/Johannesburg', NG:'Africa/Lagos', EG:'Africa/Cairo', KE:'Africa/Nairobi',
+  BR:'America/Sao_Paulo', MX:'America/Mexico_City', AR:'America/Argentina/Buenos_Aires',
+  CO:'America/Bogota', CL:'America/Santiago',
+};
+
+const localHourInTz = (timezone) => {
+  try {
+    return parseInt(new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour: 'numeric', hour12: false }).format(new Date()), 10);
+  } catch { return null; }
+};
+
+const nextSendWindowAt = (timezone) => {
+  const hour = localHourInTz(timezone);
+  if (hour === null) return null;
+  const hoursUntil9 = hour < 9 ? 9 - hour : 24 - hour + 9;
+  return new Date(Date.now() + hoursUntil9 * 3600_000).toISOString();
+};
+
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 const supabase = createClient(
@@ -631,6 +660,11 @@ const processWebhookEvent = async (topic, shop, payload) => {
     .select('*').eq('email', customerData.email).eq('client_id', clientId).maybeSingle();
 
   if (!contact) {
+    // Fix 4: detect timezone from shipping country
+    const countryCode = payload.shipping_address?.country_code
+      || payload.billing_address?.country_code
+      || customerData.default_address?.country_code || null;
+    const detectedTz = countryCode ? (COUNTRY_TIMEZONE[countryCode] || null) : null;
     const { data: newContact } = await supabase.from('contacts').insert([{
       first_name: customerData.first_name || '',
       last_name: customerData.last_name || '',
@@ -640,6 +674,7 @@ const processWebhookEvent = async (topic, shop, payload) => {
       pipeline_stage: 'New Lead',
       client_id: clientId,
       shopify_customer_id: customerData.id?.toString() || null,
+      timezone: detectedTz,
       last_activity: new Date().toISOString()
     }]).select().single();
     contact = newContact;
@@ -671,6 +706,50 @@ const processWebhookEvent = async (topic, shop, payload) => {
         created_at: now,
       }]);
       console.log(`Purchase unenroll: ${contact.email} removed from ${unenrolledCount} sequence(s)`);
+    }
+
+    // Fix 6: VIP detection — 3+ orders → tag contact + generate VIP sequence
+    const orderCount = payload.customer?.orders_count || 0;
+    if (orderCount >= 3) {
+      const existingTags = contact.tags || [];
+      if (!existingTags.includes('vip')) {
+        await supabase.from('contacts').update({ tags: [...existingTags, 'vip'] }).eq('id', contact.id);
+        const { data: shopClient } = await supabase.from('clients').select('name, niche').eq('id', clientId).maybeSingle();
+        const vipSeqJson = await aiCall(
+          `You are Mahdi, Marketing & Content AI at Sales Scales. Return ONLY valid JSON, no markdown.`,
+          `Write a 2-email VIP appreciation sequence for a loyal customer of ${shopClient?.name || 'the store'} (${shopClient?.niche || 'ecommerce'}) who has just placed their ${orderCount}th order.\n\nEmail 1: Thank you + exclusive offer just for them\nEmail 2: Loyalty reward — early access, bonus, or gift\n\nReturn JSON: {"steps":[{"step_type":"email","subject":"...","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":72},{"step_type":"email","subject":"...","content":"...","wait_hours":0}]}`
+        );
+        let vipParsed = { steps: [] };
+        try { const v = vipSeqJson.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim(); const vm = v.match(/\{[\s\S]*\}/); vipParsed = JSON.parse(vm ? vm[0] : v); } catch {}
+        await supabase.from('approvals').insert([{
+          type: 'email_sequence', title: `VIP Sequence — ${contact.first_name || contact.email} (${orderCount} orders)`,
+          content: `Customer has placed ${orderCount} orders and has been tagged as VIP. Approve to send VIP appreciation sequence.`,
+          metadata: { steps: vipParsed.steps || [], trigger_type: 'manual', contact_id: contact.id, vip: true },
+          from_member: 'mahdi', client_id: clientId, priority: 'high', status: 'pending', created_at: now,
+        }]);
+        console.log(`VIP: ${contact.email} tagged + VIP sequence submitted (${orderCount} orders)`);
+      }
+    }
+
+    // Fix 7: Post-purchase upsell — 3-day delayed sequence based on what they bought
+    try {
+      const productNames = (payload.line_items || []).slice(0, 3).map(li => li.title || li.name).filter(Boolean).join(', ');
+      const { data: shopClient7 } = await supabase.from('clients').select('name, niche').eq('id', clientId).maybeSingle();
+      const upsellJson = await aiCall(
+        `You are Mahdi, Marketing & Content AI at Sales Scales. Return ONLY valid JSON, no markdown.`,
+        `Write a 2-email post-purchase upsell sequence for a customer who just bought: ${productNames || 'a product'} from ${shopClient7?.name || 'the store'} (${shopClient7?.niche || 'ecommerce'}).\n\nEmail 1 (sent 3 days after purchase): Product care tips + how to get the most from their purchase. Warm, helpful tone.\nEmail 2 (5 days after purchase): Recommend a complementary product that pairs well with what they bought.\n\nReturn JSON: {"steps":[{"step_type":"wait","content":"","wait_hours":72},{"step_type":"email","subject":"...","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":48},{"step_type":"email","subject":"...","content":"...","wait_hours":0}]}`
+      );
+      let upsellParsed = { steps: [] };
+      try { const u = upsellJson.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim(); const um = u.match(/\{[\s\S]*\}/); upsellParsed = JSON.parse(um ? um[0] : u); } catch {}
+      await supabase.from('approvals').insert([{
+        type: 'email_sequence', title: `Post-Purchase Upsell — ${contact.first_name || contact.email}`,
+        content: `Purchased: ${productNames || 'product'}. Approve to start a 2-email post-purchase upsell — starts with a 3-day wait then product care + complementary product emails.`,
+        metadata: { steps: upsellParsed.steps || [], trigger_type: 'order_placed', contact_id: contact.id, products: productNames },
+        from_member: 'mahdi', client_id: clientId, priority: 'normal', status: 'pending', created_at: now,
+      }]);
+      console.log(`Post-purchase upsell submitted for ${contact.email}`);
+    } catch (upsellErr) {
+      console.error('Post-purchase upsell failed:', upsellErr.message);
     }
   }
 
@@ -765,6 +844,17 @@ cron.schedule('*/15 * * * *', async () => {
       }
 
       const cartLink = await getClientCartLink(enrollment.client_id);
+
+      // Fix 4: timezone-aware send window (9am–8pm contact local time)
+      if (contact.timezone && ['sms', 'whatsapp', 'email'].includes(currentStep.step_type)) {
+        const hour = localHourInTz(contact.timezone);
+        if (hour !== null && (hour < 9 || hour >= 20)) {
+          const delayUntil = nextSendWindowAt(contact.timezone);
+          await supabase.from('workflow_enrollments').update({ next_step_at: delayUntil }).eq('id', enrollment.id);
+          console.log(`Send delayed for ${contact.first_name} (${contact.timezone}, hour ${hour}) — next window: ${delayUntil}`);
+          continue;
+        }
+      }
 
       if (currentStep.step_type === 'wait') {
         const nextStepAt = new Date();
@@ -3863,39 +3953,54 @@ app.post('/clients/onboard', async (req, res) => {
 });
 
 // ─── CREATE CONTACT (with dedup) ─────────────────────────
+const upsertContact = async ({ first_name, last_name, email, phone, source, channel, pipeline_stage, notes, client_id }) => {
+  const { data: existing } = await supabase.from('contacts')
+    .select('*').eq('email', email).eq('client_id', client_id).maybeSingle();
+  if (existing) {
+    const updates = {
+      first_name: first_name || existing.first_name,
+      last_name: last_name ?? existing.last_name,
+      phone: phone || existing.phone,
+      source: source || existing.source,
+      channel: channel || existing.channel,
+      pipeline_stage: pipeline_stage || existing.pipeline_stage,
+      notes: notes ?? existing.notes,
+      last_activity: new Date().toISOString(),
+    };
+    await supabase.from('contacts').update(updates).eq('id', existing.id);
+    return { contact: { ...existing, ...updates }, duplicate_found: true };
+  }
+  const { data: contact, error } = await supabase.from('contacts').insert([{
+    first_name, last_name, email, phone: phone || null,
+    source: source || 'Manual', channel: channel || 'Email',
+    pipeline_stage: pipeline_stage || 'New Lead',
+    notes: notes || null, client_id: client_id || null,
+    last_activity: new Date().toISOString(),
+  }]).select().single();
+  if (error) throw error;
+  return { contact, duplicate_found: false };
+};
+
 app.post('/contacts', async (req, res) => {
-  const { first_name, last_name, email, phone, source, channel, pipeline_stage, notes, client_id } = req.body;
+  const { first_name, email } = req.body;
   if (!first_name || !email) return res.status(400).json({ error: 'first_name and email required' });
   try {
-    const { data: existing } = await supabase.from('contacts')
-      .select('*').eq('email', email).eq('client_id', client_id).maybeSingle();
-    if (existing) {
-      await supabase.from('contacts').update({
-        first_name: first_name || existing.first_name,
-        last_name: last_name ?? existing.last_name,
-        phone: phone || existing.phone,
-        source: source || existing.source,
-        channel: channel || existing.channel,
-        pipeline_stage: pipeline_stage || existing.pipeline_stage,
-        notes: notes ?? existing.notes,
-        last_activity: new Date().toISOString(),
-      }).eq('id', existing.id);
-      return res.json({ contact: { ...existing, first_name, last_name, phone }, duplicate: true });
-    }
-    const { data: contact, error } = await supabase.from('contacts').insert([{
-      first_name, last_name, email, phone,
-      source: source || 'Manual',
-      channel: channel || 'Email',
-      pipeline_stage: pipeline_stage || 'New Lead',
-      notes: notes || null,
-      client_id: client_id || null,
-      last_activity: new Date().toISOString(),
-    }]).select().single();
-    if (error) throw error;
-    res.json({ contact, duplicate: false });
+    const result = await upsertContact(req.body);
+    res.json(result);
   } catch (e) {
     console.error('Create contact error:', e.message);
     res.status(500).json({ error: 'Failed to create contact', details: e.message });
+  }
+});
+
+app.post('/contacts/create', async (req, res) => {
+  const { first_name, email } = req.body;
+  if (!first_name || !email) return res.status(400).json({ error: 'first_name and email required' });
+  try {
+    const result = await upsertContact(req.body);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -3987,6 +4092,222 @@ cron.schedule('0 3 * * *', async () => {
   } catch (e) {
     console.error('[AUTO] Data retention error:', e.message);
   }
+});
+
+// ─── FIX 5: RE-ENGAGEMENT SEQUENCE CRON — DAILY 3PM ──────
+cron.schedule('0 15 * * *', async () => {
+  console.log('[AUTO] Re-engagement scan starting...');
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    // Contacts who opened an email, had an enrollment 30+ days ago, not currently active, not converted
+    const { data: candidates } = await supabase
+      .from('contacts')
+      .select('id, first_name, last_name, email, client_id')
+      .not('pipeline_stage', 'eq', 'Converted')
+      .not('email', 'is', null);
+
+    if (!candidates || candidates.length === 0) return;
+
+    for (const c of candidates) {
+      try {
+        const [openedRes, oldEnrollRes, activeRes] = await Promise.all([
+          supabase.from('messages').select('id', { count: 'exact', head: true })
+            .eq('contact_id', c.id).eq('direction', 'outbound').not('opened_at', 'is', null),
+          supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true })
+            .eq('contact_id', c.id).lte('enrolled_at', thirtyDaysAgo),
+          supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true })
+            .eq('contact_id', c.id).eq('status', 'active'),
+        ]);
+        if ((openedRes.count || 0) === 0) continue;
+        if ((oldEnrollRes.count || 0) === 0) continue;
+        if ((activeRes.count || 0) > 0) continue;
+
+        const { data: client } = await supabase.from('clients').select('name, niche').eq('id', c.client_id).maybeSingle();
+        const seqJson = await aiCall(
+          `You are Mahdi, Marketing & Content AI at Sales Scales. Return ONLY valid JSON, no markdown.`,
+          `Write a 3-email re-engagement sequence for ${c.first_name || 'a contact'} of ${client?.name || 'the store'} (${client?.niche || 'ecommerce'}). They engaged before but haven't purchased.\n\nEmail 1 (day 1): What you missed — highlight best products/offers since their last visit\nEmail 2 (day 4): New arrivals — show fresh inventory relevant to them\nEmail 3 (day 7): Final offer — time-sensitive deal to drive action\n\nReturn JSON: {"steps":[{"step_type":"email","subject":"...","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":72},{"step_type":"email","subject":"...","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":72},{"step_type":"email","subject":"...","content":"...","wait_hours":0}]}`
+        );
+        let parsed = { steps: [] };
+        try { const s = seqJson.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim(); const m = s.match(/\{[\s\S]*\}/); parsed = JSON.parse(m ? m[0] : s); } catch {}
+        await supabase.from('approvals').insert([{
+          type: 'email_sequence',
+          title: `Re-engagement Sequence — ${c.first_name || c.email}`,
+          content: `${c.first_name || c.email} opened emails but has not purchased in 30+ days. Approve to send a 3-email re-engagement campaign.`,
+          metadata: { steps: parsed.steps || [], trigger_type: 'manual', contact_id: c.id },
+          from_member: 'mahdi', client_id: c.client_id, priority: 'normal', status: 'pending',
+          created_at: new Date().toISOString(),
+        }]);
+        console.log(`[AUTO] Re-engagement queued for ${c.email}`);
+      } catch (contactErr) {
+        console.error(`[AUTO] Re-engagement failed for ${c.email}:`, contactErr.message);
+      }
+    }
+  } catch (e) {
+    console.error('[AUTO] Re-engagement cron error:', e.message);
+  }
+});
+
+// ─── FIX 8: BROWSE ABANDONMENT WEBHOOK ────────────────────
+app.post('/shopify/browse-abandon', async (req, res) => {
+  res.sendStatus(200);
+  const { email, product_title, product_id, client_id } = req.body;
+  if (!email || !client_id) return;
+  try {
+    const { data: contact } = await supabase.from('contacts').select('*').eq('email', email).eq('client_id', client_id).maybeSingle();
+    if (!contact) { console.log('[browse-abandon] Unknown contact:', email); return; }
+
+    const { data: client } = await supabase.from('clients').select('name, niche').eq('id', client_id).maybeSingle();
+    const seqJson = await aiCall(
+      `You are Mahdi, Marketing & Content AI at Sales Scales. Return ONLY valid JSON, no markdown.`,
+      `Write a 2-email browse abandonment sequence. A customer of ${client?.name || 'the store'} (${client?.niche || 'ecommerce'}) viewed "${product_title || 'a product'}" but did not add to cart.\n\nEmail 1 (1 hour after browse): Warm, curious opener — "noticed you were looking at something" — reference the product by name, highlight one key benefit\nEmail 2 (24 hours later): "Still thinking about it?" — social proof, nudge, soft CTA\n\nReturn JSON: {"steps":[{"step_type":"wait","content":"","wait_hours":1},{"step_type":"email","subject":"...","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":23},{"step_type":"email","subject":"...","content":"...","wait_hours":0}]}`
+    );
+    let parsed = { steps: [] };
+    try { const s = seqJson.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim(); const m = s.match(/\{[\s\S]*\}/); parsed = JSON.parse(m ? m[0] : s); } catch {}
+
+    const { data: workflow } = await supabase.from('workflows').insert([{
+      name: `Browse Abandonment — ${product_title || 'Product'}`,
+      client_id, trigger_type: 'browse_abandonment', status: 'active', enrolled_count: 0,
+    }]).select().single();
+    if (workflow && parsed.steps?.length) {
+      await supabase.from('workflow_steps').insert(parsed.steps.map((s, i) => ({ workflow_id: workflow.id, step_order: i, step_type: s.step_type, content: s.content || '', subject: s.subject || null, wait_hours: s.wait_hours || 0 })));
+      await enrollContactInWorkflow(workflow.id, contact.id, client_id, contact.email, contact.phone, contact.first_name);
+    }
+    console.log(`[browse-abandon] Enrolled ${email} in browse abandonment for "${product_title}"`);
+  } catch (e) {
+    console.error('[browse-abandon] Error:', e.message);
+  }
+});
+
+// ─── FIX 9: NPS SURVEY — MONTHLY CRON + SUBMIT ────────────
+// SQL: create table nps_responses (id uuid default gen_random_uuid() primary key, client_id uuid, score integer, comment text, created_at timestamptz default now());
+cron.schedule('0 10 28 * *', async () => {
+  console.log('[AUTO] NPS survey sending...');
+  try {
+    const { data: clients } = await supabase.from('clients').select('id, name').eq('status', 'active');
+    if (!clients || clients.length === 0) return;
+    for (const client of clients) {
+      try {
+        const { data: users } = await supabase.from('client_users').select('email, name').eq('client_id', client.id);
+        if (!users || users.length === 0) continue;
+        const scores = [0,1,2,3,4,5,6,7,8,9,10].map(n =>
+          `<a href="${process.env.REACT_APP_API_URL || 'https://api.aisalesscales.com'}/nps/submit?client_id=${client.id}&score=${n}" style="display:inline-block;width:40px;height:40px;line-height:40px;text-align:center;border:1px solid #e4e9f0;border-radius:8px;color:#0a1628;font-size:14px;font-weight:700;text-decoration:none;margin:2px">${n}</a>`
+        ).join('');
+        for (const u of users) {
+          await sgMail.send({
+            to: u.email,
+            from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+            subject: 'Quick question — how are we doing?',
+            html: `<div style="font-family:Arial,sans-serif;max-width:580px;margin:0 auto">
+              <div style="background:#0a1628;padding:24px;border-radius:8px 8px 0 0">
+                <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase">Sales Scales</div>
+              </div>
+              <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 8px 8px;padding:28px">
+                <p style="font-size:16px;font-weight:700;color:#0a1628;margin:0 0 8px">Hi ${u.name || 'there'} 👋</p>
+                <p style="font-size:13px;color:#4a5568;line-height:1.7;margin:0 0 24px">How likely are you to recommend Sales Scales to another ecommerce brand?</p>
+                <div style="text-align:center;margin-bottom:12px">${scores}</div>
+                <div style="display:flex;justify-content:space-between;font-size:10px;color:#8896a8;margin-bottom:24px"><span>Not at all likely</span><span>Extremely likely</span></div>
+                <p style="font-size:11px;color:#8896a8;text-align:center;margin:0">Your feedback helps us improve. This takes 5 seconds.</p>
+              </div>
+            </div>`,
+          });
+        }
+        console.log(`[AUTO] NPS sent to ${users.length} user(s) for ${client.name}`);
+      } catch (clientErr) {
+        console.error(`[AUTO] NPS failed for ${client.name}:`, clientErr.message);
+      }
+    }
+  } catch (e) {
+    console.error('[AUTO] NPS cron error:', e.message);
+  }
+});
+
+app.get('/nps/submit', async (req, res) => {
+  const { client_id, score, comment } = req.query;
+  if (!client_id || score === undefined) return res.status(400).send('Missing parameters');
+  const scoreInt = parseInt(score, 10);
+  if (isNaN(scoreInt) || scoreInt < 0 || scoreInt > 10) return res.status(400).send('Invalid score');
+  try {
+    await supabase.from('nps_responses').insert([{ client_id, score: scoreInt, comment: comment || null }]);
+    if (scoreInt < 7) {
+      const { data: client } = await supabase.from('clients').select('name').eq('id', client_id).maybeSingle();
+      await sgMail.send({
+        to: 'yousef@aisalesscales.com',
+        from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+        subject: `⚠️ Low NPS Score — ${client?.name || client_id} gave ${scoreInt}/10`,
+        html: `<p><strong>${client?.name || client_id}</strong> submitted an NPS score of <strong>${scoreInt}/10</strong>.</p>${comment ? `<p>Comment: "${comment}"</p>` : ''}<p>Follow up promptly to resolve their concern.</p>`,
+      }).catch(e => console.error('NPS alert email failed:', e.message));
+    }
+    res.send(`<html><body style="font-family:Arial;text-align:center;padding:60px"><h2 style="color:#0a1628">Thank you for your feedback!</h2><p style="color:#8896a8">We appreciate you taking the time to share your thoughts.</p></body></html>`);
+  } catch (e) {
+    console.error('NPS submit error:', e.message);
+    res.status(500).send('Error saving response');
+  }
+});
+
+// ─── FIX 10: BRIEFINGS ARCHIVE ────────────────────────────
+// SQL: alter table team_briefings add column if not exists is_archived boolean default false;
+app.post('/briefings/archive', async (req, res) => {
+  const { briefing_id } = req.body;
+  if (!briefing_id) return res.status(400).json({ error: 'briefing_id required' });
+  try {
+    const { error } = await supabase.from('team_briefings').update({ is_archived: true }).eq('id', briefing_id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 3: TASKS CRUD ────────────────────────────────────
+// SQL: create table tasks (id uuid default gen_random_uuid() primary key, title text not null, description text, due_date date, priority text default 'normal', status text default 'open', client_id uuid, created_at timestamptz default now());
+app.post('/tasks', async (req, res) => {
+  const { title, description, due_date, priority, client_id } = req.body;
+  if (!title) return res.status(400).json({ error: 'title required' });
+  try {
+    const { data, error } = await supabase.from('tasks').insert([{
+      title, description: description || null, due_date: due_date || null,
+      priority: priority || 'normal', status: 'open',
+      client_id: client_id || null, created_at: new Date().toISOString(),
+    }]).select().single();
+    if (error) throw error;
+    res.json({ task: data });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/tasks', async (req, res) => {
+  const { client_id, status } = req.query;
+  try {
+    let q = supabase.from('tasks').select('*, clients(name)').order('due_date', { ascending: true, nullsFirst: false });
+    if (client_id) q = q.eq('client_id', client_id);
+    if (status) q = q.eq('status', status);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json({ tasks: data || [] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/tasks/:id', async (req, res) => {
+  const { title, description, due_date, priority, status, client_id } = req.body;
+  try {
+    const updates = {};
+    if (title !== undefined) updates.title = title;
+    if (description !== undefined) updates.description = description;
+    if (due_date !== undefined) updates.due_date = due_date;
+    if (priority !== undefined) updates.priority = priority;
+    if (status !== undefined) updates.status = status;
+    if (client_id !== undefined) updates.client_id = client_id;
+    const { data, error } = await supabase.from('tasks').update(updates).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ task: data });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/tasks/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('tasks').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── ROUTE MODULES ────────────────────────────────────────

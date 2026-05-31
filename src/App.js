@@ -54,6 +54,7 @@ import Mahdi from "./pages/Mahdi";
 import Fatima from "./pages/Fatima";
 import Zainab from "./pages/Zainab";
 import TeamBriefings from "./pages/TeamBriefings";
+import Tasks from "./pages/Tasks";
 import TeamPerformance from "./pages/TeamPerformance";
 import LandingPage from "./pages/LandingPage";
 
@@ -61,6 +62,7 @@ const navItems = [
   { group: "MAIN", items: [
     { id: "dashboard", label: "Dashboard", icon: "ti-layout-dashboard" },
     { id: "clients", label: "Clients", icon: "ti-users" },
+    { id: "tasks", label: "Tasks", icon: "ti-checkbox" },
     { id: "contacts", label: "Contacts", icon: "ti-user" },
     { id: "analytics", label: "Analytics", icon: "ti-chart-bar" },
     { id: "retention", label: "Retention", icon: "ti-heart-rate-monitor" },
@@ -121,6 +123,7 @@ const navItems = [
 const pageTitles = {
   dashboard: "Owner Dashboard",
   clients: "Ecommerce Clients",
+  tasks: "Tasks",
   contacts: "Contacts",
   analytics: "Analytics",
   retention: "Retention Dashboard",
@@ -320,6 +323,7 @@ function App() {
     switch(currentPage) {
       case "dashboard": return <Dashboard />;
       case "clients": return <Clients />;
+      case "tasks": return <Tasks />;
       case "contacts": return <Contacts />;
       case "analytics": return <Analytics />;
       case "retention": return <Retention />;

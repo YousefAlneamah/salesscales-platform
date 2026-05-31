@@ -7,6 +7,9 @@ export default function Clients() {
   const [showForm, setShowForm] = useState(false);
   const [selectedClient, setSelectedClient] = useState(null);
   const [healthScores, setHealthScores] = useState({});
+  const [clientNotes, setClientNotes] = useState({});
+  const [notesSaving, setNotesSaving] = useState({});
+  const [notesUpdatedAt, setNotesUpdatedAt] = useState({});
   const [form, setForm] = useState({
     name: "", email: "", niche: "", tier: "starter", status: "onboarding"
   });
@@ -108,6 +111,14 @@ export default function Clients() {
       setShowForm(false);
       setForm({ name: "", email: "", niche: "", tier: "starter", status: "onboarding" });
     }
+  };
+
+  const saveNotes = async (clientId, notes) => {
+    setNotesSaving(prev => ({ ...prev, [clientId]: true }));
+    const now = new Date().toISOString();
+    await supabase.from('clients').update({ notes, notes_updated_at: now }).eq('id', clientId);
+    setNotesUpdatedAt(prev => ({ ...prev, [clientId]: now }));
+    setNotesSaving(prev => ({ ...prev, [clientId]: false }));
   };
 
   const toggleFeature = async (client, feature) => {
@@ -222,7 +233,7 @@ export default function Clients() {
             <button onClick={() => setSelectedClient(null)}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '20px', lineHeight: 1 }}>×</button>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '20px' }}>
             {Object.keys(featureLabels).map(feature => {
               const features = selectedClient.features || defaultFeatures;
               const isOn = features[feature] !== undefined ? features[feature] : defaultFeatures[feature];
@@ -236,6 +247,24 @@ export default function Clients() {
                 </div>
               );
             })}
+          </div>
+
+          {/* Fix 2: Private owner notes */}
+          <div style={{ borderTop: '1px solid #f0f3f8', paddingTop: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase' }}>Private Notes</div>
+              <div style={{ fontSize: '10px', color: '#8896a8' }}>
+                {notesSaving[selectedClient.id] ? 'Saving…' : notesUpdatedAt[selectedClient.id] ? `Saved ${new Date(notesUpdatedAt[selectedClient.id]).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}` : selectedClient.notes_updated_at ? `Last updated ${new Date(selectedClient.notes_updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : 'Auto-saves on blur'}
+              </div>
+            </div>
+            <textarea
+              rows={3}
+              placeholder="Add private notes about this client — visible only to you, never to the client…"
+              defaultValue={clientNotes[selectedClient.id] ?? (selectedClient.notes || '')}
+              onChange={e => setClientNotes(prev => ({ ...prev, [selectedClient.id]: e.target.value }))}
+              onBlur={e => saveNotes(selectedClient.id, e.target.value)}
+              style={{ width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: '#0a1628', outline: 'none', resize: 'vertical', fontFamily: 'DM Sans, sans-serif', boxSizing: 'border-box', lineHeight: 1.6 }}
+            />
           </div>
         </div>
       )}
