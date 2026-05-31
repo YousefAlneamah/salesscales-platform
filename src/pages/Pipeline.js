@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabase';
+import axios from 'axios';
+import { API_BASE } from '../config';
 
 export default function Pipeline() {
   const [deals, setDeals] = useState([]);
@@ -18,7 +20,7 @@ export default function Pipeline() {
   const [dragging, setDragging] = useState(null);
   const [selectedDeal, setSelectedDeal] = useState(null);
 
-  const stages = [
+  const DEFAULT_STAGES = [
     { id: 'New Lead', color: '#8896a8', light: '#f8fafc' },
     { id: 'Contacted', color: '#3b82f6', light: '#eff6ff' },
     { id: 'Nurturing', color: '#7c3aed', light: '#f5f3ff' },
@@ -26,12 +28,24 @@ export default function Pipeline() {
     { id: 'Proposal Sent', color: '#10b981', light: '#ecfdf5' },
     { id: 'Converted', color: '#059669', light: '#d1fae5' },
   ];
+  const STAGE_COLORS = ['#8896a8','#3b82f6','#7c3aed','#d97706','#10b981','#059669','#dc2626','#c9a84c'];
+  const [customStages, setCustomStages] = useState(null);
+  const stages = customStages
+    ? customStages.map((name, i) => ({ id: name, color: STAGE_COLORS[i % STAGE_COLORS.length], light: '#f8fafc' }))
+    : DEFAULT_STAGES;
 
   useEffect(() => {
     fetchDeals();
     fetchContacts();
     fetchClients();
   }, []);
+
+  useEffect(() => {
+    if (filterClient === 'All') { setCustomStages(null); return; }
+    axios.get(`${API_BASE}/pipeline/stages`, { params: { client_id: filterClient } })
+      .then(r => setCustomStages(r.data.stages || null))
+      .catch(() => setCustomStages(null));
+  }, [filterClient]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchDeals = async () => {
     setLoading(true);

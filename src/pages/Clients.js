@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../supabase";
+import { API_BASE } from "../config";
 
 export default function Clients() {
   const [clients, setClients] = useState([]);
@@ -169,6 +170,10 @@ export default function Clients() {
           <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Ecommerce Clients</div>
           <div style={{ fontSize: '13px', color: '#0a1628', fontWeight: 600 }}>{clients.length} client{clients.length !== 1 ? 's' : ''} on the platform</div>
         </div>
+        <button onClick={() => window.open(`${API_BASE}/clients/export`, '_blank')}
+          style={{ background: 'white', color: '#0a1628', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+          ↓ Export CSV
+        </button>
         <button onClick={() => setShowForm(!showForm)}
           style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
           + Add Client

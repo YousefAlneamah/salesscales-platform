@@ -48,6 +48,14 @@ const nextSendWindowAt = (timezone) => {
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
+// Fix 4: Slack alert helper — reads SLACK_WEBHOOK_URL from env (set in Vercel/Railway env vars)
+const sendSlackAlert = async (text) => {
+  const url = process.env.SLACK_WEBHOOK_URL;
+  if (!url) return;
+  try { await axios.post(url, { text }); }
+  catch (e) { console.error('Slack alert failed:', e.message); }
+};
+
 const supabase = createClient(
   process.env.REACT_APP_SUPABASE_URL,
   process.env.REACT_APP_SUPABASE_ANON_KEY
@@ -92,6 +100,7 @@ const onUrgentApproval = (approval) => {
       </div>
     </div>`,
   }).catch(e => console.error('Urgent approval email failed:', e.message));
+  sendSlackAlert(`🚨 *Urgent Approval* — ${approval.title}\n${(approval.content || '').slice(0, 200)}`);
 };
 
 const app = express();
@@ -404,9 +413,13 @@ const getClientBranding = async (clientId) => {
 
 // ─── HELPER: WHITE-LABEL HTML EMAIL TEMPLATE ─────────────
 // Renders the client's own branded email — no Sales Scales branding is shown to the end customer.
-const buildEmailHtml = ({ content, subject, clientName, cartLink, contactName, brandColor = '#0a1628', logoText }) => {
+const buildEmailHtml = ({ content, subject, clientName, cartLink, contactName, brandColor = '#0a1628', logoText, contactId, clientId }) => {
   const store = logoText || clientName || 'Your Store';
   const year = new Date().getFullYear();
+  const apiBase = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+  const unsubUrl = contactId && clientId
+    ? `${apiBase}/email/unsubscribe?contact_id=${contactId}&client_id=${clientId}`
+    : `${apiBase}/email/unsubscribe`;
   const safe = (content || '').trim();
 
   const bodyHtml = safe
@@ -445,7 +458,7 @@ const buildEmailHtml = ({ content, subject, clientName, cartLink, contactName, b
         <tr><td style="background:#f8fafc;border-top:1px solid #e4e9f0;padding:22px 32px;text-align:center;">
           <div style="color:#8896a8;font-size:12px;line-height:1.7;">You're receiving this email because you shopped with ${store}.</div>
           <div style="color:#aab4c0;font-size:11px;margin-top:8px;">© ${year} ${store}. All rights reserved.</div>
-          <div style="color:#aab4c0;font-size:11px;margin-top:10px;"><a href="<%asm_group_unsubscribe_raw_url%>" style="color:#8896a8;text-decoration:underline;">Unsubscribe</a> from these emails.</div>
+          <div style="color:#aab4c0;font-size:11px;margin-top:10px;"><a href="${unsubUrl}" style="color:#8896a8;text-decoration:underline;">Unsubscribe</a> from these emails.</div>
         </td></tr>
       </table>
     </td></tr>
@@ -708,6 +721,14 @@ const processWebhookEvent = async (topic, shop, payload) => {
       console.log(`Purchase unenroll: ${contact.email} removed from ${unenrolledCount} sequence(s)`);
     }
 
+    // Fix 9: tag as converted on purchase
+    try {
+      const purchaseTags = contact.tags || [];
+      if (!purchaseTags.includes('converted')) {
+        await supabase.from('contacts').update({ tags: [...purchaseTags.filter(t => t !== 'did_not_convert'), 'converted'] }).eq('id', contact.id);
+      }
+    } catch (tagErr) { console.error('Purchase tag error:', tagErr.message); }
+
     // Fix 6: VIP detection — 3+ orders → tag contact + generate VIP sequence
     const orderCount = payload.customer?.orders_count || 0;
     if (orderCount >= 3) {
@@ -771,6 +792,7 @@ const processWebhookEvent = async (topic, shop, payload) => {
     created_at: new Date().toISOString()
   }]);
 
+  sendSlackAlert(`🛒 *Shopify webhook* — ${topic.replace('/', ': ')} | ${contact.email} → "${workflow.name}"`);
   console.log(`Webhook processed: ${contact.email} → ${triggerType} → ${workflow.name}`);
 };
 
@@ -977,7 +999,9 @@ cron.schedule('*/15 * * * *', async () => {
               cartLink,
               contactName: contact.first_name,
               brandColor: branding.brandColor,
-              logoText: branding.storeName
+              logoText: branding.storeName,
+              contactId: contact.id,
+              clientId: enrollment.client_id,
             })
           });
           console.log(`Email sent to ${contact.first_name} — step ${enrollment.current_step}`);
@@ -1041,6 +1065,15 @@ cron.schedule('*/15 * * * *', async () => {
           .eq('id', enrollment.id);
         console.log(`Enrollment completed for ${contact.first_name}`);
         await advancePipelineStage(contact.id);
+        // Fix 9: tag contact based on conversion status
+        try {
+          const existingTags = contact.tags || [];
+          const converted = contact.pipeline_stage === 'Converted' || existingTags.includes('vip') || existingTags.includes('converted');
+          const newTag = converted ? 'converted' : 'did_not_convert';
+          if (!existingTags.includes(newTag)) {
+            await supabase.from('contacts').update({ tags: [...existingTags, newTag] }).eq('id', contact.id);
+          }
+        } catch (tagErr) { console.error('Completion tag error:', tagErr.message); }
         const contactLabel = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || contact.email || 'a contact';
         await notifyClientUser(
           enrollment.client_id,
@@ -2559,6 +2592,12 @@ app.post('/email/tracking', async (req, res) => {
           await supabase.from('contacts').update({
             last_activity: new Date(timestamp * 1000).toISOString()
           }).eq('id', contact.id);
+          // Fix 9: auto-tag based on behaviour
+          const behavTag = eventType === 'open' ? 'email_opener' : 'link_clicker';
+          const existTags = contact.tags || [];
+          if (!existTags.includes(behavTag)) {
+            await supabase.from('contacts').update({ tags: [...existTags, behavTag] }).eq('id', contact.id);
+          }
         }
         if (eventType === 'click') {
           await supabase.from('workflow_enrollments')
@@ -4027,6 +4066,7 @@ app.post('/onboarding/complete', async (req, res) => {
         </div>
       </div>`,
     });
+    sendSlackAlert(`✅ *New client onboarded* — ${name}${shopify_connected ? ' (Shopify connected)' : ''}`);
     console.log('Onboarding completion email sent for client:', client_id);
     res.json({ ok: true });
   } catch (e) {
@@ -4310,6 +4350,161 @@ app.delete('/tasks/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── FIX 1: EXPORT ENDPOINTS ──────────────────────────────
+const toCSVRow = (fields, obj) => fields.map(f => {
+  const v = obj[f];
+  if (v === null || v === undefined) return '';
+  const s = Array.isArray(v) ? v.join('; ') : String(v);
+  return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+}).join(',');
+
+app.get('/contacts/export', async (req, res) => {
+  const { client_id } = req.query;
+  try {
+    let q = supabase.from('contacts').select('first_name, last_name, email, phone, tags, pipeline_stage, source, channel, created_at').order('created_at', { ascending: false });
+    if (client_id) q = q.eq('client_id', client_id);
+    const { data, error } = await q;
+    if (error) throw error;
+    const fields = ['first_name', 'last_name', 'email', 'phone', 'tags', 'pipeline_stage', 'source', 'channel', 'created_at'];
+    const csv = [fields.join(','), ...(data || []).map(r => toCSVRow(fields, r))].join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="contacts.csv"');
+    res.send(csv);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/clients/export', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('clients').select('name, niche, tier, status, health_score, created_at').order('created_at', { ascending: false });
+    if (error) throw error;
+    const fields = ['name', 'niche', 'tier', 'status', 'health_score', 'created_at'];
+    const csv = [fields.join(','), ...(data || []).map(r => toCSVRow(fields, r))].join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="clients.csv"');
+    res.send(csv);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── FIX 3: PIPELINE STAGE CUSTOMIZATION ──────────────────
+// SQL: create table if not exists pipeline_stages (id uuid default gen_random_uuid() primary key, client_id uuid not null unique, stages text[] not null, updated_at timestamptz default now());
+app.put('/pipeline/stages', async (req, res) => {
+  const { client_id, stages } = req.body;
+  if (!client_id || !Array.isArray(stages) || stages.length === 0) return res.status(400).json({ error: 'client_id and stages[] required' });
+  try {
+    const { data, error } = await supabase.from('pipeline_stages').upsert([{ client_id, stages, updated_at: new Date().toISOString() }], { onConflict: 'client_id' }).select().single();
+    if (error) throw error;
+    res.json({ pipeline_stages: data });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/pipeline/stages', async (req, res) => {
+  const { client_id } = req.query;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+  try {
+    const { data } = await supabase.from('pipeline_stages').select('stages').eq('client_id', client_id).maybeSingle();
+    res.json({ stages: data?.stages || null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── FIX 5: CLIENT DATA EXPORT (GDPR) ─────────────────────
+app.get('/client/export-data', async (req, res) => {
+  const { client_id } = req.query;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+  try {
+    const [contactsRes, messagesRes, enrollmentsRes, reportsRes] = await Promise.all([
+      supabase.from('contacts').select('first_name, last_name, email, phone, source, pipeline_stage, created_at').eq('client_id', client_id),
+      supabase.from('messages').select('channel, direction, content, created_at').eq('client_id', client_id).order('created_at', { ascending: false }).limit(500),
+      supabase.from('workflow_enrollments').select('workflow_id, status, enrolled_at, completed_at').eq('client_id', client_id).order('enrolled_at', { ascending: false }).limit(200),
+      supabase.from('reports').select('period, emails_sent, sms_sent, contacts_added, summary').eq('client_id', client_id).order('created_at', { ascending: false }),
+    ]);
+    res.json({
+      exported_at: new Date().toISOString(),
+      client_id,
+      contacts: contactsRes.data || [],
+      messages: messagesRes.data || [],
+      enrollments: enrollmentsRes.data || [],
+      reports: reportsRes.data || [],
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── FIX 6: EMAIL UNSUBSCRIBE ──────────────────────────────
+// SQL: alter table contacts add column if not exists email_opted_out boolean default false;
+app.get('/email/unsubscribe', async (req, res) => {
+  const { contact_id, client_id } = req.query;
+  if (!contact_id) return res.status(400).send('Missing contact_id');
+  try {
+    await supabase.from('contacts').update({ email_opted_out: true, status: 'unsubscribed' }).eq('id', contact_id);
+    await supabase.from('workflow_enrollments').update({ status: 'cancelled' }).eq('contact_id', contact_id).eq('status', 'active');
+    const { data: c } = await supabase.from('contacts').select('email, first_name').eq('id', contact_id).maybeSingle();
+    if (c?.email && process.env.SENDGRID_FROM_EMAIL) {
+      await sgMail.send({
+        to: c.email,
+        from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+        subject: 'You\'ve been unsubscribed',
+        html: `<p>Hi ${c.first_name || 'there'},</p><p>You have been successfully unsubscribed from all email sequences. You won't receive any further marketing emails from us.</p><p>If this was a mistake, please contact our support team.</p>`,
+      }).catch(e => console.error('Unsubscribe confirm email failed:', e.message));
+    }
+    res.send('<html><body style="font-family:Arial;text-align:center;padding:60px"><h2>Unsubscribed</h2><p style="color:#666">You have been successfully unsubscribed from all emails.</p></body></html>');
+  } catch (e) { res.status(500).send('Error processing unsubscribe request'); }
+});
+
+app.post('/email/unsubscribe', async (req, res) => {
+  const { contact_id, client_id } = req.body;
+  if (!contact_id) return res.status(400).json({ error: 'contact_id required' });
+  try {
+    await supabase.from('contacts').update({ email_opted_out: true, status: 'unsubscribed' }).eq('id', contact_id);
+    await supabase.from('workflow_enrollments').update({ status: 'cancelled' }).eq('contact_id', contact_id).eq('status', 'active');
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── FIX 4: SLACK on onboarding/complete ──────────────────
+// (Patched into existing endpoint — see /onboarding/complete handler above)
+// Shopify webhook Slack alert added in processWebhookEvent below
+
+// ─── FIX 8: SEQUENCE PERFORMANCE ALERTS — MONDAY 8AM ──────
+cron.schedule('0 8 * * 1', async () => {
+  console.log('[AUTO] Sequence performance alert scan starting...');
+  try {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: workflows } = await supabase.from('workflows').select('id, name, client_id').eq('status', 'active');
+    if (!workflows || workflows.length === 0) return;
+    for (const wf of workflows) {
+      try {
+        const [totalMsgRes, openedMsgRes, totalEnrollRes, completedEnrollRes] = await Promise.all([
+          supabase.from('messages').select('id', { count: 'exact', head: true }).eq('channel', 'email').eq('direction', 'outbound').gte('created_at', sevenDaysAgo),
+          supabase.from('messages').select('id', { count: 'exact', head: true }).eq('channel', 'email').eq('direction', 'outbound').gte('created_at', sevenDaysAgo).not('opened_at', 'is', null),
+          supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('workflow_id', wf.id),
+          supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('workflow_id', wf.id).eq('status', 'completed'),
+        ]);
+        const totalMsg = totalMsgRes.count || 0;
+        const openedMsg = openedMsgRes.count || 0;
+        const totalEnroll = totalEnrollRes.count || 0;
+        const completedEnroll = completedEnrollRes.count || 0;
+        const openRate = totalMsg > 0 ? Math.round((openedMsg / totalMsg) * 100) : null;
+        const completionRate = totalEnroll > 0 ? Math.round((completedEnroll / totalEnroll) * 100) : null;
+        if (openRate !== null && openRate < 15) {
+          await storeBriefing('mahdi', 'yousef',
+            `Low Open Rate Alert — "${wf.name}" (${openRate}%)`,
+            `Sequence "${wf.name}" has an open rate of ${openRate}% over the last 7 days (${openedMsg}/${totalMsg} emails opened). This is below the 15% threshold.\n\n3 Suggestions to improve:\n1. Rewrite subject lines — try curiosity-based or personal openers instead of promotional ones\n2. Test sending at a different time of day (try 9–11am or 6–8pm local time)\n3. Add the recipient's first name to the subject line using {{first_name}}\n\nConsider A/B testing two subject line styles on the next send.`,
+            'high', wf.client_id
+          );
+          console.log(`[AUTO] Low open rate alert: ${wf.name} (${openRate}%)`);
+        }
+        if (completionRate !== null && completionRate < 10 && totalEnroll >= 5) {
+          await storeBriefing('mahdi', 'yousef',
+            `Low Completion Rate — "${wf.name}" needs rewrite (${completionRate}%)`,
+            `Sequence "${wf.name}" has a ${completionRate}% completion rate (${completedEnroll}/${totalEnroll} enrolled). This is below the 10% threshold.\n\nRecommended action: Full sequence rewrite.\n\nCommon causes:\n1. Emails are too long — aim for under 120 words per email\n2. The offer isn't compelling enough in email 2 or 3\n3. The send timing is off — contacts are losing interest by step 3\n\nSuggest reviewing and rewriting the weakest performing steps first.`,
+            'high', wf.client_id
+          );
+          console.log(`[AUTO] Low completion rate alert: ${wf.name} (${completionRate}%)`);
+        }
+      } catch (wfErr) { console.error(`[AUTO] Sequence alert failed for ${wf.name}:`, wfErr.message); }
+    }
+  } catch (e) { console.error('[AUTO] Sequence performance cron error:', e.message); }
+});
+
 // ─── ROUTE MODULES ────────────────────────────────────────
 app.use('/auth',    require('./routes/auth')({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }));
 app.use('/',        require('./routes/ai-team')({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, getClientProfile, getKlaviyoContext, verifyToken, aiLimiter }));
@@ -4337,6 +4532,7 @@ const logError = (err, endpoint = 'unknown') => {
 
   supabase.from('errors').insert([{ message: msg, stack, endpoint, created_at: ts }])
     .catch(dbErr => console.error('Failed to log error to DB:', dbErr.message));
+  sendSlackAlert(`🔴 *Server Error* | ${endpoint}\n${msg}`);
 
   if (process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM_EMAIL) {
     sgMail.send({

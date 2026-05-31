@@ -1835,22 +1835,49 @@ export default function ClientDashboard({ user, onLogout }) {
           <div style={{ color: '#8896a8', fontSize: '13px', padding: '20px 0' }}>Loading...</div>
         ) : (
           <>
-            {KB_FIELDS.map(f => (
-              <div key={f.key} style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '7px' }}>{f.label}</label>
-                <textarea
-                  value={profile[f.key]}
-                  onChange={e => setProfile(p => ({ ...p, [f.key]: e.target.value }))}
-                  placeholder={f.placeholder}
-                  style={{ width: '100%', minHeight: '72px', border: '1.5px solid #e4e9f0', borderRadius: '10px', padding: '11px 14px', fontSize: '13px', color: '#0a1628', fontFamily: 'DM Sans, sans-serif', resize: 'vertical', boxSizing: 'border-box', background: '#fafbfc', outline: 'none' }} />
-              </div>
-            ))}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            {KB_FIELDS.map(f => {
+              const len = (profile[f.key] || '').length;
+              const isWarn = len >= 2000 && len < 3000;
+              const isError = len >= 3000;
+              return (
+                <div key={f.key} style={{ marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '7px' }}>
+                    <label style={{ display: 'block', fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase' }}>{f.label}</label>
+                    <span style={{ fontSize: '10px', fontWeight: 600, color: isError ? '#dc2626' : isWarn ? '#d97706' : '#8896a8' }}>
+                      {len.toLocaleString()} / 3,000
+                    </span>
+                  </div>
+                  <textarea
+                    value={profile[f.key]}
+                    onChange={e => setProfile(p => ({ ...p, [f.key]: e.target.value.slice(0, 3000) }))}
+                    placeholder={f.placeholder}
+                    style={{ width: '100%', minHeight: '72px', border: `1.5px solid ${isError ? '#dc2626' : isWarn ? '#d97706' : '#e4e9f0'}`, borderRadius: '10px', padding: '11px 14px', fontSize: '13px', color: '#0a1628', fontFamily: 'DM Sans, sans-serif', resize: 'vertical', boxSizing: 'border-box', background: '#fafbfc', outline: 'none' }} />
+                  {isWarn && !isError && <div style={{ fontSize: '10px', color: '#d97706', marginTop: '4px' }}>⚠ Approaching limit — keep under 3,000 characters for best AI results.</div>}
+                  {isError && <div style={{ fontSize: '10px', color: '#dc2626', marginTop: '4px' }}>✕ Maximum 3,000 characters — text has been trimmed.</div>}
+                </div>
+              );
+            })}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
               <button onClick={saveProfile} disabled={savingP}
                 style={{ background: savingP ? '#e4e9f0' : '#c9a84c', color: savingP ? '#8896a8' : '#0a1628', border: 'none', borderRadius: '10px', padding: '11px 28px', fontSize: '13px', fontWeight: 700, cursor: savingP ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
                 {savingP ? 'Saving...' : 'Save Knowledge Base'}
               </button>
               {savedP && <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 600 }}>✓ Saved — your AI team is now using this</span>}
+            </div>
+            <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid #f0f3f8' }}>
+              <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>Data Portability (GDPR)</div>
+              <div style={{ fontSize: '12px', color: '#8896a8', marginBottom: '12px', lineHeight: 1.6 }}>Download a copy of all your data stored on Sales Scales including contacts, messages, reports, and enrollments.</div>
+              <button onClick={async () => {
+                try {
+                  const res = await axios.get(`${API_BASE}/client/export-data`, { params: { client_id: user.clientId } });
+                  const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a'); a.href = url; a.download = `salesscales-data-${user.clientId}.json`; a.click();
+                  URL.revokeObjectURL(url);
+                } catch (e) { alert('Export failed: ' + (e.response?.data?.error || e.message)); }
+              }} style={{ background: 'white', color: '#0a1628', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '10px 22px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+                ↓ Download My Data
+              </button>
             </div>
           </>
         )}

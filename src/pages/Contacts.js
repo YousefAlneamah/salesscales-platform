@@ -10,6 +10,13 @@ export default function Contacts() {
   const [showForm, setShowForm] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [filterTag, setFilterTag] = useState('');
+  const [filterSeqStatus, setFilterSeqStatus] = useState('');
+  const [filterChannel, setFilterChannel] = useState('');
+  const [filterDateAdded, setFilterDateAdded] = useState('');
+  const [enrollmentMap, setEnrollmentMap] = useState({});
+  const [timeline, setTimeline] = useState([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
   const [selectedContact, setSelectedContact] = useState(null);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -26,6 +33,19 @@ export default function Contacts() {
     fetchContacts();
     fetchClients();
   }, []);
+
+  useEffect(() => {
+    if (contacts.length === 0) return;
+    supabase.from('workflow_enrollments').select('contact_id, status').then(({ data }) => {
+      const map = {};
+      (data || []).forEach(e => {
+        if (!map[e.contact_id]) map[e.contact_id] = { active: 0, completed: 0 };
+        if (e.status === 'active') map[e.contact_id].active++;
+        if (e.status === 'completed') map[e.contact_id].completed++;
+      });
+      setEnrollmentMap(map);
+    });
+  }, [contacts]);
 
   const fetchContacts = async () => {
     setLoading(true);
@@ -162,9 +182,36 @@ export default function Contacts() {
     }
   };
 
+  const loadTimeline = async (contact) => {
+    setTimelineLoading(true);
+    setTimeline([]);
+    try {
+      const [msgsRes, activityRes, enrollRes] = await Promise.all([
+        supabase.from('messages').select('id, channel, direction, content, status, opened_at, clicked_at, created_at').eq('contact_id', contact.id).order('created_at', { ascending: false }).limit(50),
+        supabase.from('activity').select('type, description, created_at').eq('contact_id', contact.id).order('created_at', { ascending: false }).limit(30),
+        supabase.from('workflow_enrollments').select('workflow_id, status, enrolled_at, completed_at, workflows(name)').eq('contact_id', contact.id).order('enrolled_at', { ascending: false }),
+      ]);
+      const events = [
+        ...(msgsRes.data || []).map(m => ({ ts: m.created_at, kind: 'message', label: `${m.direction === 'outbound' ? '→' : '←'} ${m.channel}`, sub: (m.content || '').slice(0, 80), meta: m.opened_at ? '✉ Opened' : m.clicked_at ? '🔗 Clicked' : '', id: m.id })),
+        ...(activityRes.data || []).map(a => ({ ts: a.created_at, kind: 'activity', label: a.type?.replace(/_/g, ' '), sub: a.description, id: a.created_at + a.type })),
+        ...(enrollRes.data || []).map(e => ({ ts: e.enrolled_at, kind: 'enrollment', label: `Enrolled: ${e.workflows?.name || e.workflow_id}`, sub: `Status: ${e.status}${e.completed_at ? ` · Completed ${new Date(e.completed_at).toLocaleDateString()}` : ''}`, id: e.workflow_id + e.enrolled_at })),
+      ].sort((a, b) => new Date(b.ts) - new Date(a.ts));
+      setTimeline(events);
+    } catch (e) { console.error('Timeline error:', e.message); }
+    setTimelineLoading(false);
+  };
+
   const filtered = contacts.filter(c => {
-    if (!search) return true;
-    return `${c.first_name} ${c.last_name} ${c.email}`.toLowerCase().includes(search.toLowerCase());
+    const searchMatch = !search || `${c.first_name} ${c.last_name} ${c.email}`.toLowerCase().includes(search.toLowerCase());
+    const tagMatch = !filterTag || (Array.isArray(c.tags) && c.tags.includes(filterTag));
+    const channelMatch = !filterChannel || c.channel === filterChannel;
+    const dateMatch = !filterDateAdded || new Date(c.created_at) >= new Date(filterDateAdded);
+    const enroll = enrollmentMap[c.id];
+    const seqMatch = !filterSeqStatus ||
+      (filterSeqStatus === 'enrolled' && enroll?.active > 0) ||
+      (filterSeqStatus === 'completed' && enroll?.completed > 0) ||
+      (filterSeqStatus === 'never_enrolled' && !enroll);
+    return searchMatch && tagMatch && channelMatch && dateMatch && seqMatch;
   });
 
   const stageColor = (stage) => {
@@ -208,6 +255,10 @@ export default function Contacts() {
           <button onClick={() => csvInputRef.current?.click()} disabled={importing}
             style={{ background: 'white', color: '#0a1628', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
             {importing ? 'Importing…' : '↑ Import CSV'}
+          </button>
+          <button onClick={() => { const url = `${API_BASE}/contacts/export${clients[0] ? `?client_id=${clients[0].id}` : ''}`; window.open(url, '_blank'); }}
+            style={{ background: 'white', color: '#0a1628', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+            ↓ Export CSV
           </button>
           <button onClick={() => setShowForm(!showForm)}
             style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
@@ -304,15 +355,32 @@ export default function Contacts() {
         </div>
       )}
 
-      {/* SEARCH */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center' }}>
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search by name or email..."
-          style={{ ...inputStyle, width: '280px' }}
-        />
+      {/* SEARCH + FILTERS */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or email..."
+          style={{ ...inputStyle, width: '240px' }} />
+        <input type="text" value={filterTag} onChange={e => setFilterTag(e.target.value)} placeholder="Filter by tag…"
+          style={{ ...inputStyle, width: '140px' }} />
+        <select value={filterSeqStatus} onChange={e => setFilterSeqStatus(e.target.value)} style={{ ...inputStyle, width: '160px', cursor: 'pointer' }}>
+          <option value="">All statuses</option>
+          <option value="enrolled">Currently enrolled</option>
+          <option value="completed">Completed sequence</option>
+          <option value="never_enrolled">Never enrolled</option>
+        </select>
+        <select value={filterChannel} onChange={e => setFilterChannel(e.target.value)} style={{ ...inputStyle, width: '130px', cursor: 'pointer' }}>
+          <option value="">All channels</option>
+          <option value="Email">Email</option>
+          <option value="SMS">SMS</option>
+          <option value="WhatsApp">WhatsApp</option>
+        </select>
+        <input type="date" value={filterDateAdded} onChange={e => setFilterDateAdded(e.target.value)}
+          title="Added on or after" style={{ ...inputStyle, width: '150px' }} />
+        {(filterTag || filterSeqStatus || filterChannel || filterDateAdded) && (
+          <button onClick={() => { setFilterTag(''); setFilterSeqStatus(''); setFilterChannel(''); setFilterDateAdded(''); }}
+            style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '8px', padding: '9px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+            Clear filters
+          </button>
+        )}
         <div style={{ marginLeft: 'auto', fontSize: '11px', color: '#8896a8' }}>{filtered.length} contacts</div>
       </div>
 
@@ -363,6 +431,35 @@ export default function Contacts() {
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '20px', lineHeight: 1 }}>×</button>
             </div>
           </div>
+
+          {/* Fix 7: Activity timeline */}
+          <div style={{ borderTop: '1px solid #f0f3f8', paddingTop: '16px', marginTop: '14px' }}>
+            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '12px' }}>Activity Timeline</div>
+            {timelineLoading ? (
+              <div style={{ fontSize: '11px', color: '#8896a8', padding: '8px 0' }}>Loading…</div>
+            ) : timeline.length === 0 ? (
+              <div style={{ fontSize: '11px', color: '#8896a8' }}>No activity recorded yet</div>
+            ) : (
+              <div style={{ maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0' }}>
+                {timeline.map((ev, i) => (
+                  <div key={ev.id || i} style={{ display: 'flex', gap: '10px', paddingBottom: '10px', alignItems: 'flex-start' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                      <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: ev.kind === 'message' ? '#3b82f6' : ev.kind === 'enrollment' ? '#c9a84c' : '#10b981', marginTop: '4px', flexShrink: 0 }} />
+                      {i < timeline.length - 1 && <div style={{ width: '1px', flex: 1, minHeight: '14px', background: '#e4e9f0', margin: '2px 0' }} />}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: '#0a1628', textTransform: 'capitalize' }}>{ev.label}</span>
+                        <span style={{ fontSize: '9px', color: '#8896a8', flexShrink: 0 }}>{new Date(ev.ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                      </div>
+                      {ev.sub && <div style={{ fontSize: '10px', color: '#64748b', marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.sub}</div>}
+                      {ev.meta && <div style={{ fontSize: '10px', color: '#10b981', marginTop: '1px', fontWeight: 500 }}>{ev.meta}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -386,7 +483,7 @@ export default function Contacts() {
             const s = stageColor(contact.pipeline_stage);
             return (
               <div key={contact.id}
-                onClick={() => setSelectedContact(selectedContact?.id === contact.id ? null : contact)}
+                onClick={() => { const c = selectedContact?.id === contact.id ? null : contact; setSelectedContact(c); if (c) loadTimeline(c); }}
                 style={{ display: 'grid', gridTemplateColumns: '2.5fr 1.2fr 1fr 1fr 1fr', padding: '13px 18px', borderBottom: '1px solid #f4f6fa', cursor: 'pointer', background: selectedContact?.id === contact.id ? '#fafbfd' : 'white', transition: 'background 0.1s' }}
                 onMouseEnter={e => { if (selectedContact?.id !== contact.id) e.currentTarget.style.background = '#fafbfd'; }}
                 onMouseLeave={e => { if (selectedContact?.id !== contact.id) e.currentTarget.style.background = 'white'; }}>
