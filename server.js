@@ -609,6 +609,17 @@ const getShopifyContext = async (clientId) => {
 
 // ─── HELPER: ENROLL CONTACT IN WORKFLOW ──────────────────
 const enrollContactInWorkflow = async (workflowId, contactId, clientId, contactEmail, contactPhone, contactName) => {
+  // Fix 6: check contact blacklist before enrolling
+  if (contactEmail) {
+    const { data: blacklisted } = await supabase.from('contact_blacklist')
+      .select('id').eq('email', contactEmail.toLowerCase().trim())
+      .or(`client_id.eq.${clientId},client_id.is.null`).maybeSingle();
+    if (blacklisted) {
+      console.log(`[Blacklist] Skipping enrollment: ${contactEmail} is blacklisted`);
+      return null;
+    }
+  }
+
   const { data: steps } = await supabase.from('workflow_steps')
     .select('*').eq('workflow_id', workflowId).order('step_order');
   if (!steps || steps.length === 0) return null;
@@ -851,6 +862,17 @@ cron.schedule('*/15 * * * *', async () => {
   console.log('Scheduler running — checking pending workflow steps...');
   try {
     const now = new Date().toISOString();
+
+    // Fix 7: activate scheduled workflows whose scheduled_start has arrived
+    // SQL: ALTER TABLE workflows ADD COLUMN IF NOT EXISTS scheduled_start timestamptz;
+    const { data: scheduledWfs } = await supabase.from('workflows')
+      .select('id, name').eq('status', 'scheduled').lte('scheduled_start', now);
+    if (scheduledWfs && scheduledWfs.length > 0) {
+      for (const wf of scheduledWfs) {
+        await supabase.from('workflows').update({ status: 'active' }).eq('id', wf.id);
+        console.log(`[Scheduler] Activated scheduled workflow: ${wf.name}`);
+      }
+    }
     const { data: enrollments } = await supabase
       .from('workflow_enrollments')
       .select('*')
@@ -5373,6 +5395,196 @@ app.post('/mobile/register-device', async (req, res) => {
   try {
     await supabase.from('device_tokens').upsert([{ client_id, device_token, platform }], { onConflict: 'device_token' });
     res.json({ ok: true, registered: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 1: ZAPIER WEBHOOK INTEGRATION ───────────────────
+// SQL: ALTER TABLE clients ADD COLUMN IF NOT EXISTS zapier_webhook_url text;
+app.get('/zapier/events', (req, res) => {
+  res.json({ events: [
+    { type: 'new_contact', description: 'Fires when a new contact is added or synced from Shopify' },
+    { type: 'sequence_completed', description: 'Fires when a contact finishes all steps in a sequence' },
+    { type: 'purchase_made', description: 'Fires when an order is created via Shopify webhook' },
+    { type: 'approval_created', description: 'Fires when the AI team creates a new approval item' },
+  ]});
+});
+
+app.post('/zapier/trigger', async (req, res) => {
+  const { event_type, data, client_id } = req.body;
+  if (!event_type || !data) return res.status(400).json({ error: 'event_type and data required' });
+  try {
+    const { data: client } = await supabase.from('clients').select('zapier_webhook_url, name').eq('id', client_id).maybeSingle();
+    const webhookUrl = client?.zapier_webhook_url;
+    if (!webhookUrl) return res.status(400).json({ error: 'No Zapier webhook URL configured for this client. Add it in Settings → Integrations.' });
+    const response = await axios.post(webhookUrl, {
+      event_type, data, client_id, client_name: client?.name, timestamp: new Date().toISOString(),
+    }, { timeout: 10000 });
+    res.json({ ok: true, status: response.status });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch('/clients/:id/zapier-url', async (req, res) => {
+  const { zapier_webhook_url } = req.body;
+  try {
+    const { data, error } = await supabase.from('clients').update({ zapier_webhook_url: zapier_webhook_url || null }).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ ok: true, client: data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 5: SEQUENCE DUPLICATION ─────────────────────────
+app.post('/workflows/duplicate', async (req, res) => {
+  const { workflow_id, client_id } = req.body;
+  if (!workflow_id) return res.status(400).json({ error: 'workflow_id required' });
+  try {
+    const { data: original } = await supabase.from('workflows').select('*').eq('id', workflow_id).single();
+    if (!original) return res.status(404).json({ error: 'Workflow not found' });
+    const { data: newWf, error } = await supabase.from('workflows').insert([{
+      name: `${original.name} (Copy)`,
+      client_id: client_id || original.client_id,
+      trigger_type: original.trigger_type,
+      status: 'draft',
+    }]).select().single();
+    if (error) throw error;
+    const { data: steps } = await supabase.from('workflow_steps').select('*').eq('workflow_id', workflow_id).order('step_order');
+    if (steps && steps.length > 0) {
+      const newSteps = steps.map(({ id, workflow_id: _wid, ...rest }) => ({ ...rest, workflow_id: newWf.id }));
+      await supabase.from('workflow_steps').insert(newSteps);
+    }
+    res.json({ workflow: newWf, steps_copied: steps?.length || 0 });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 6: CONTACT BLACKLIST ─────────────────────────────
+// SQL: CREATE TABLE IF NOT EXISTS contact_blacklist (id uuid default gen_random_uuid() primary key, email text not null, client_id uuid, reason text, created_at timestamptz default now(), UNIQUE(email, client_id));
+app.post('/contacts/blacklist', async (req, res) => {
+  const { email, client_id, reason } = req.body;
+  if (!email) return res.status(400).json({ error: 'email required' });
+  try {
+    const { data, error } = await supabase.from('contact_blacklist').upsert([{
+      email: email.toLowerCase().trim(), client_id: client_id || null, reason: reason || null,
+    }], { onConflict: 'email,client_id' }).select().single();
+    if (error) throw error;
+    res.json({ blacklisted: data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/contacts/blacklist', async (req, res) => {
+  const { client_id } = req.query;
+  try {
+    let q = supabase.from('contact_blacklist').select('*').order('created_at', { ascending: false });
+    if (client_id) q = q.or(`client_id.eq.${client_id},client_id.is.null`);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json({ blacklist: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/contacts/blacklist/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('contact_blacklist').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 7: SEQUENCE SCHEDULE START ──────────────────────
+app.patch('/workflows/:id/schedule', async (req, res) => {
+  const { scheduled_start } = req.body;
+  if (!scheduled_start) return res.status(400).json({ error: 'scheduled_start required (ISO date string)' });
+  try {
+    const ts = new Date(scheduled_start);
+    if (isNaN(ts)) return res.status(400).json({ error: 'Invalid date format' });
+    const status = ts > new Date() ? 'scheduled' : 'active';
+    const { data, error } = await supabase.from('workflows').update({ scheduled_start: ts.toISOString(), status }).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ workflow: data, status });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 8: CLIENT TIER MANAGEMENT ───────────────────────
+app.put('/clients/:id/tier', async (req, res) => {
+  const { tier } = req.body;
+  const valid = ['starter', 'growth', 'elite'];
+  if (!tier || !valid.includes(tier.toLowerCase())) return res.status(400).json({ error: 'tier must be starter, growth, or elite' });
+  const tierFormatted = tier.charAt(0).toUpperCase() + tier.slice(1).toLowerCase();
+  const TIER_PRICES = { Starter: 997, Growth: 1997, Elite: 2997 };
+  try {
+    const { data: client, error } = await supabase.from('clients').update({ tier: tierFormatted }).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    if (process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM_EMAIL) {
+      const { data: users } = await supabase.from('client_users').select('email, name').eq('client_id', req.params.id);
+      for (const u of (users || [])) {
+        sgMail.send({
+          to: u.email,
+          from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+          subject: `Your plan has been updated to ${tierFormatted}`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:580px;margin:0 auto;background:#f0f3f8;padding:24px">
+            <div style="background:#0a1628;padding:22px 28px;border-radius:10px 10px 0 0">
+              <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase">Sales Scales</div>
+            </div>
+            <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 10px 10px;padding:28px">
+              <p style="font-size:16px;font-weight:700;color:#0a1628;margin:0 0 12px">Hi ${u.name?.split(' ')[0] || 'there'}, your plan has been updated</p>
+              <p style="color:#4a5568;line-height:1.7;margin:0 0 20px">Your Sales Scales plan for <strong>${client.name}</strong> has been updated to the <strong>${tierFormatted} Plan</strong> at <strong>$${TIER_PRICES[tierFormatted].toLocaleString()}/month</strong>.</p>
+              <div style="background:#f8fafc;border-radius:8px;padding:16px;margin-bottom:20px;border-left:3px solid #c9a84c">
+                <div style="font-size:13px;font-weight:700;color:#0a1628">${tierFormatted} Plan</div>
+                <div style="font-size:13px;color:#c9a84c;font-weight:700">$${TIER_PRICES[tierFormatted].toLocaleString()}/month</div>
+              </div>
+              <p style="color:#4a5568;margin:0">Questions? Reply to this email and we'll help immediately.</p>
+            </div>
+          </div>`,
+        }).catch(e => console.error('Tier change email failed:', e.message));
+      }
+    }
+    res.json({ client });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 9: BULK EMAIL BROADCAST ─────────────────────────
+app.post('/email/broadcast', async (req, res) => {
+  const { client_id, subject, content, tag } = req.body;
+  if (!client_id || !subject || !content) return res.status(400).json({ error: 'client_id, subject, and content required' });
+  try {
+    let query = supabase.from('contacts').select('id, email, first_name, last_name, tags').eq('client_id', client_id).not('email', 'is', null);
+    const { data: contacts } = await query;
+    if (!contacts || contacts.length === 0) return res.json({ sent: 0, skipped: 0, total: 0 });
+    const filtered = tag ? contacts.filter(c => Array.isArray(c.tags) && c.tags.includes(tag)) : contacts;
+    const sender = await getClientSender(client_id);
+    let sent = 0;
+    for (const contact of filtered) {
+      if (!contact.email) continue;
+      try {
+        const personalised = content.replace(/{{first_name}}/g, contact.first_name || 'there');
+        await sgMail.send({
+          to: contact.email, from: sender, subject,
+          html: buildEmailHtml({ content: personalised, subject, clientName: sender.name, contactName: contact.first_name, contactId: contact.id, clientId: client_id }),
+        });
+        await supabase.from('messages').insert([{
+          client_id, contact_id: contact.id, channel: 'email', direction: 'outbound',
+          sender_name: sender.name, content: content.slice(0, 250), status: 'sent',
+        }]);
+        sent++;
+      } catch (err) { console.error(`Broadcast failed for ${contact.email}:`, err.message); }
+    }
+    res.json({ sent, skipped: filtered.length - sent, total: filtered.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

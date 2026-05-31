@@ -23,6 +23,9 @@ export default function Sequences() {
   const [expandedSteps, setExpandedSteps] = useState([]);
   const [stepsLoading, setStepsLoading] = useState(false);
   const [editingStep, setEditingStep] = useState(null);
+  const [schedulingId, setSchedulingId] = useState(null);
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [duplicating, setDuplicating] = useState(null);
   const [editSaving, setEditSaving] = useState(false);
 
   const triggers = [
@@ -139,6 +142,26 @@ export default function Sequences() {
 
   const getClientName = (id) => clients.find(c => c.id === id)?.name || '—';
   const filtered = filterClient === 'All' ? workflows : workflows.filter(w => w.client_id === filterClient);
+
+  const duplicateWorkflow = async (workflow) => {
+    setDuplicating(workflow.id);
+    try {
+      await axios.post(`${API_BASE}/workflows/duplicate`, { workflow_id: workflow.id, client_id: workflow.client_id });
+      fetchWorkflows();
+    } catch (e) { alert(e.response?.data?.error || 'Duplicate failed'); }
+    setDuplicating(null);
+  };
+
+  const scheduleWorkflow = async (workflowId) => {
+    if (!scheduleDate) return;
+    try {
+      const res = await axios.patch(`${API_BASE}/workflows/${workflowId}/schedule`, { scheduled_start: scheduleDate });
+      setSchedulingId(null);
+      setScheduleDate('');
+      fetchWorkflows();
+      alert(`Workflow will activate on ${new Date(scheduleDate).toLocaleDateString()} (${res.data.status})`);
+    } catch (e) { alert(e.response?.data?.error || 'Schedule failed'); }
+  };
 
   const toggleExpand = async (workflow) => {
     if (expandedWorkflowId === workflow.id) {
@@ -449,8 +472,30 @@ export default function Sequences() {
                   style={{ background: feedbackId === workflow.id ? 'rgba(201,168,76,0.1)' : '#f8fafc', color: feedbackId === workflow.id ? '#c9a84c' : '#8896a8', border: `1px solid ${feedbackId === workflow.id ? '#c9a84c' : '#e4e9f0'}`, borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
                   Feedback
                 </button>
+                <button onClick={() => duplicateWorkflow(workflow)} disabled={duplicating === workflow.id}
+                  style={{ background: '#f8fafc', color: '#8896a8', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+                  {duplicating === workflow.id ? '...' : '⊕ Duplicate'}
+                </button>
+                <button onClick={() => { setSchedulingId(schedulingId === workflow.id ? null : workflow.id); setScheduleDate(''); }}
+                  style={{ background: workflow.status === 'scheduled' ? 'rgba(201,168,76,0.1)' : '#f8fafc', color: workflow.status === 'scheduled' ? '#c9a84c' : '#8896a8', border: `1px solid ${workflow.status === 'scheduled' ? '#c9a84c' : '#e4e9f0'}`, borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+                  {workflow.status === 'scheduled' ? '🕐 Scheduled' : '📅 Schedule'}
+                </button>
               </div>
             </div>
+
+            {/* SCHEDULE DATE PICKER */}
+            {schedulingId === workflow.id && (
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderTop: 'none', borderRadius: '0 0 12px 12px', padding: '12px 20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '11px', color: '#d97706', fontWeight: 600 }}>Schedule start date:</span>
+                <input type="datetime-local" value={scheduleDate} onChange={e => setScheduleDate(e.target.value)}
+                  style={{ border: '1px solid #fde68a', borderRadius: '7px', padding: '6px 10px', fontSize: '11px', color: '#0a1628', outline: 'none', background: 'white' }} />
+                <button onClick={() => scheduleWorkflow(workflow.id)} disabled={!scheduleDate}
+                  style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '7px', padding: '6px 14px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+                  Set Schedule
+                </button>
+                <button onClick={() => setSchedulingId(null)} style={{ background: 'none', border: 'none', color: '#d97706', cursor: 'pointer', fontSize: '14px' }}>×</button>
+              </div>
+            )}
 
             {/* INLINE STEPS PANEL */}
             {expandedWorkflowId === workflow.id && (

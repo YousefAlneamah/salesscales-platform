@@ -28,7 +28,21 @@
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css" />
 
-    <!-- Fix 7: Google Analytics 4 — REPLACE_WITH_YOUR_GA4_MEASUREMENT_ID -->
+    <!-- Fix 3: Hotjar — session recordings and heatmaps                         -->
+    <!-- To activate: replace HOTJAR_SITE_ID with your real Hotjar Site ID       -->
+    <!-- Get your Site ID from https://insights.hotjar.com/settings/sites        -->
+    <script>
+      (function(h,o,t,j,a,r){
+        h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
+        h._hjSettings={hjid:'HOTJAR_SITE_ID',hjsv:6}; /* REPLACE: set hjid to your Hotjar Site ID */
+        a=o.getElementsByTagName('head')[0];
+        r=o.createElement('script');r.async=1;
+        r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;
+        a.appendChild(r);
+      })(window,document,'https://static.hotjar.com/c/hotjar-','.js?sv=');
+    </script>
+
+    <!-- Fix 2: Google Analytics 4 — REPLACE_WITH_YOUR_GA4_MEASUREMENT_ID -->
     <!-- To activate: replace G-XXXXXXXXXX with your real Measurement ID from Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
     <script>

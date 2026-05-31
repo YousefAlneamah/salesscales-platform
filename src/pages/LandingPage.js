@@ -129,8 +129,19 @@ const JSON_LD = JSON.stringify({
   },
 });
 
+// Fix 2: GA4 pageview helper — fires when the landing page loads
+// Replace 'G-XXXXXXXXXX' in public/index.html with your real Measurement ID
+const trackPageview = (path) => {
+  if (typeof window.gtag === 'function') {
+    window.gtag('event', 'page_view', { page_path: path });
+  }
+};
+
 export default function LandingPage({ onLoginClick }) {
   const [openFaq, setOpenFaq] = useState(null);
+
+  // Track landing page view on mount — useEffect is imported at top via React, useState above
+  React.useEffect(() => { trackPageview('/'); }, []);
 
   const scrollTo = (id) => {
     const el = document.getElementById(id);

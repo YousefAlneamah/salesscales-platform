@@ -13,6 +13,7 @@ export default function Clients() {
   const [tooltipClientId, setTooltipClientId] = useState(null);
   const [ltvData, setLtvData] = useState({});
   const [comms, setComms] = useState({});
+  const [tierChanging, setTierChanging] = useState(null);
   const [commForm, setCommForm] = useState({ type: 'call', date: new Date().toISOString().slice(0,10), summary: '', next_action: '' });
   const [commSaving, setCommSaving] = useState(false);
   const [clientNotes, setClientNotes] = useState({});
@@ -131,6 +132,19 @@ export default function Clients() {
       setShowForm(false);
       setForm({ name: "", email: "", niche: "", tier: "starter", status: "onboarding" });
     }
+  };
+
+  const changeTier = async (clientId, newTier) => {
+    if (!window.confirm(`Change tier to ${newTier}? The client will receive a notification email.`)) return;
+    setTierChanging(clientId);
+    try {
+      await fetch(`${API_BASE}/clients/${clientId}/tier`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier: newTier }),
+      });
+      fetchClients();
+    } catch {}
+    setTierChanging(null);
   };
 
   const loadComms = async (clientId) => {
@@ -300,6 +314,24 @@ export default function Clients() {
             <button onClick={() => setSelectedClient(null)}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '20px', lineHeight: 1 }}>×</button>
           </div>
+          {/* Fix 8: Change Tier */}
+          <div style={{ background: '#f8fafc', border: '1px solid #f0f3f8', borderRadius: '8px', padding: '12px 14px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '2px' }}>Current Tier</div>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628' }}>{selectedClient.tier?.charAt(0).toUpperCase() + selectedClient.tier?.slice(1)}</div>
+            </div>
+            <select
+              defaultValue={selectedClient.tier?.toLowerCase()}
+              onChange={e => changeTier(selectedClient.id, e.target.value)}
+              disabled={tierChanging === selectedClient.id}
+              style={{ border: '1px solid #e4e9f0', borderRadius: '8px', padding: '7px 12px', fontSize: '12px', color: '#0a1628', outline: 'none', background: 'white', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+              <option value="starter">Starter — $997/mo</option>
+              <option value="growth">Growth — $1,997/mo</option>
+              <option value="elite">Elite — $2,997/mo</option>
+            </select>
+            {tierChanging === selectedClient.id && <span style={{ fontSize: '11px', color: '#8896a8' }}>Updating…</span>}
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '20px' }}>
             {Object.keys(featureLabels).map(feature => {
               const features = selectedClient.features || defaultFeatures;

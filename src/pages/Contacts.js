@@ -34,6 +34,11 @@ export default function Contacts() {
   const [clientId, setClientId] = useState('');
   const [unenrolling, setUnenrolling] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
+  const [showBlacklist, setShowBlacklist] = useState(false);
+  const [blacklist, setBlacklist] = useState([]);
+  const [blacklistEmail, setBlacklistEmail] = useState('');
+  const [blacklistReason, setBlacklistReason] = useState('');
+  const [blacklistSaving, setBlacklistSaving] = useState(false);
   const [mergePrimary, setMergePrimary] = useState('');
   const [mergeDuplicate, setMergeDuplicate] = useState('');
   const [merging, setMerging] = useState(false);
@@ -253,6 +258,33 @@ export default function Contacts() {
     URL.revokeObjectURL(url);
   };
 
+  const loadBlacklist = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/contacts/blacklist`);
+      const data = await res.json();
+      setBlacklist(data.blacklist || []);
+    } catch {}
+  };
+
+  const addToBlacklist = async () => {
+    if (!blacklistEmail.trim()) return;
+    setBlacklistSaving(true);
+    try {
+      await fetch(`${API_BASE}/contacts/blacklist`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: blacklistEmail.trim(), reason: blacklistReason.trim() || null }),
+      });
+      setBlacklistEmail(''); setBlacklistReason('');
+      loadBlacklist();
+    } catch {}
+    setBlacklistSaving(false);
+  };
+
+  const removeFromBlacklist = async (id) => {
+    await fetch(`${API_BASE}/contacts/blacklist/${id}`, { method: 'DELETE' });
+    setBlacklist(prev => prev.filter(b => b.id !== id));
+  };
+
   const bulkDelete = async () => {
     if (!window.confirm(`Delete ${selectedIds.size} selected contact(s)? This cannot be undone.`)) return;
     setBulkWorking(true);
@@ -325,6 +357,10 @@ export default function Contacts() {
             style={{ background: 'white', color: '#8896a8', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
             ⇄ Merge Duplicates
           </button>
+          <button onClick={() => { setShowBlacklist(v => !v); if (!blacklist.length) loadBlacklist(); }}
+            style={{ background: showBlacklist ? '#fef2f2' : 'white', color: showBlacklist ? '#dc2626' : '#8896a8', border: `1px solid ${showBlacklist ? '#fecaca' : '#e4e9f0'}`, borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+            🚫 Blacklist
+          </button>
           <button onClick={() => setShowForm(!showForm)}
             style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
             + Add Contact
@@ -395,6 +431,46 @@ export default function Contacts() {
           </div>
         );
       })()}
+
+      {/* BLACKLIST PANEL */}
+      {showBlacklist && (
+        <div style={{ background: 'white', border: '1px solid #fecaca', borderRadius: '12px', padding: '20px', marginBottom: '20px', boxShadow: '0 4px 6px rgba(10,22,40,0.05)' }}>
+          <div style={{ fontSize: '9px', color: '#dc2626', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '12px' }}>Contact Blacklist</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '8px', marginBottom: '12px', alignItems: 'end' }}>
+            <div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '4px', fontWeight: 600, textTransform: 'uppercase' }}>Email to Block</div>
+              <input type="email" value={blacklistEmail} onChange={e => setBlacklistEmail(e.target.value)}
+                placeholder="customer@example.com" style={{ width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', color: '#0a1628', outline: 'none', boxSizing: 'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '4px', fontWeight: 600, textTransform: 'uppercase' }}>Reason (optional)</div>
+              <input type="text" value={blacklistReason} onChange={e => setBlacklistReason(e.target.value)}
+                placeholder="Spam complaint, unsubscribed..." style={{ width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', color: '#0a1628', outline: 'none', boxSizing: 'border-box' }} />
+            </div>
+            <button onClick={addToBlacklist} disabled={blacklistSaving || !blacklistEmail.trim()}
+              style={{ background: '#dc2626', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              {blacklistSaving ? '...' : 'Block Email'}
+            </button>
+          </div>
+          {blacklist.length === 0 ? (
+            <div style={{ fontSize: '11px', color: '#8896a8' }}>No blacklisted emails. Blacklisted contacts are automatically skipped when enrolling in sequences.</div>
+          ) : (
+            <div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px' }}>{blacklist.length} blocked email{blacklist.length !== 1 ? 's' : ''} — these contacts will be skipped in all sequence enrollments</div>
+              {blacklist.map(b => (
+                <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#fef2f2', borderRadius: '7px', marginBottom: '5px', border: '1px solid #fecaca' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', fontFamily: 'DM Mono, monospace' }}>{b.email}</div>
+                    {b.reason && <div style={{ fontSize: '10px', color: '#8896a8' }}>{b.reason}</div>}
+                  </div>
+                  <button onClick={() => removeFromBlacklist(b.id)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontSize: '14px', fontWeight: 700 }}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ADD CONTACT FORM */}
       {showForm && (

@@ -60,10 +60,25 @@ export default function ClientDashboard({ user, onLogout }) {
   const [lang, setLang] = useState(() => localStorage.getItem('cd_lang') || 'en');
   const [helpOpen, setHelpOpen] = useState(false);
   const helpRef = useRef(null);
+  // Fix 4: product tour
+  const TOUR_KEY = `tour_done_${user.email}`;
+  const [tourStep, setTourStep] = useState(-1); // -1 = not started
 
   // persist dark mode + lang preferences
   useEffect(() => { localStorage.setItem('cd_dark', darkMode ? '1' : '0'); }, [darkMode]);
   useEffect(() => { localStorage.setItem('cd_lang', lang); }, [lang]);
+
+  // Fix 4: start tour after onboarding completes and walkthrough was shown, if not done yet
+  useEffect(() => {
+    if (onboardingSteps && Object.values(onboardingSteps).every(Boolean) && localStorage.getItem(TOUR_KEY) !== 'done') {
+      setTimeout(() => setTourStep(0), 1200);
+    }
+  }, [onboardingSteps]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const skipTour = () => { setTourStep(-1); localStorage.setItem(TOUR_KEY, 'done'); };
+  const nextTour = (total) => {
+    if (tourStep >= total - 1) { skipTour(); } else { setTourStep(s => s + 1); }
+  };
 
   useEffect(() => { fetchData(); }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2175,6 +2190,51 @@ export default function ClientDashboard({ user, onLogout }) {
           </div>
         </div>
       )}
+
+      {/* Fix 4: PRODUCT TOUR TOOLTIPS */}
+      {tourStep >= 0 && (() => {
+        const TOUR = [
+          { title: 'Dashboard Overview', body: 'This is your Revenue Dashboard. Watch your recovered revenue, active sequences, emails sent, and customer replies — all in one place.', nav: 'dashboard' },
+          { title: 'My Sequences', body: 'Your AI-powered email and SMS sequences run here. Each one fires automatically based on customer behaviour — like abandoning a cart or placing an order.', nav: 'sequences' },
+          { title: 'My Approvals', body: 'Before sequences go live, they appear here for your review. Read through the content, request changes, or approve and activate with one click.', nav: 'approvals' },
+          { title: 'Zainab AI', body: 'Zainab is your dedicated AI Client Partner. Ask her anything about your results, sequences, or next steps — she has full context on your store.', nav: 'zainab' },
+          { title: 'Settings', body: 'Update your store details, brand voice, and contact preferences here. The more Mahdi knows about your brand, the better your sequences will perform.', nav: 'settings' },
+        ];
+        const step = TOUR[tourStep];
+        const isLast = tourStep === TOUR.length - 1;
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 2000, pointerEvents: 'none' }}>
+            {/* backdrop */}
+            <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,22,40,0.6)', pointerEvents: 'auto' }} onClick={skipTour} />
+            {/* tooltip card - centred */}
+            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: '380px', background: 'white', borderRadius: '14px', overflow: 'hidden', boxShadow: '0 24px 60px rgba(10,22,40,0.3)', pointerEvents: 'auto' }}>
+              <div style={{ background: '#0a1628', padding: '18px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: '9px', color: '#c9a84c', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '3px' }}>Tour — step {tourStep + 1} of {TOUR.length}</div>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'white' }}>{step.title}</div>
+                </div>
+                <button onClick={skipTour} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: '20px', lineHeight: 1 }}>×</button>
+              </div>
+              <div style={{ height: '3px', background: '#f0f3f8' }}>
+                <div style={{ height: '100%', background: '#c9a84c', borderRadius: '2px', transition: 'width 0.4s', width: `${((tourStep + 1) / TOUR.length) * 100}%` }} />
+              </div>
+              <div style={{ padding: '20px 22px' }}>
+                <p style={{ fontSize: '13px', color: '#4a5568', lineHeight: 1.8, margin: '0 0 20px' }}>{step.body}</p>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button onClick={() => { setCurrentPage(step.nav); nextTour(TOUR.length); }}
+                    style={{ flex: 1, background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '9px', padding: '11px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
+                    {isLast ? 'Finish Tour ✓' : 'Next →'}
+                  </button>
+                  <button onClick={skipTour}
+                    style={{ background: 'white', border: '1px solid #e4e9f0', color: '#8896a8', borderRadius: '9px', padding: '11px 16px', fontSize: '11px', cursor: 'pointer' }}>
+                    Skip Tour
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── ONBOARDING WALKTHROUGH MODAL ───────────────────── */}
       {showWalkthrough && (() => {

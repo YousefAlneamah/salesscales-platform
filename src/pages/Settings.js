@@ -3,6 +3,71 @@ import axios from 'axios';
 import { supabase } from '../supabase';
 import { API_BASE } from '../config';
 
+// Fix 1: Zapier integration section
+function ZapierSection({ inputStyle, labelStyle, apiBase, clients }) {
+  const [selectedClientId, setSelectedClientId] = React.useState('');
+  const [webhookUrl, setWebhookUrl] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const [msg, setMsg] = React.useState('');
+  const [events, setEvents] = React.useState([]);
+
+  React.useEffect(() => {
+    axios.get(`${apiBase}/zapier/events`).then(r => setEvents(r.data.events || [])).catch(() => {});
+  }, [apiBase]);
+
+  const save = async () => {
+    if (!selectedClientId) { setMsg('Select a client first.'); return; }
+    setSaving(true); setMsg('');
+    try {
+      await axios.patch(`${apiBase}/clients/${selectedClientId}/zapier-url`, { zapier_webhook_url: webhookUrl });
+      setMsg('✓ Zapier webhook URL saved');
+      setTimeout(() => setMsg(''), 3000);
+    } catch (e) { setMsg(e.response?.data?.error || 'Save failed'); }
+    setSaving(false);
+  };
+
+  const test = async () => {
+    if (!selectedClientId || !webhookUrl) { setMsg('Save webhook URL first'); return; }
+    try {
+      await axios.post(`${apiBase}/zapier/trigger`, { event_type: 'test', data: { message: 'Sales Scales Zapier test event' }, client_id: selectedClientId });
+      setMsg('✓ Test event sent to Zapier');
+      setTimeout(() => setMsg(''), 3000);
+    } catch (e) { setMsg(e.response?.data?.error || 'Test failed'); }
+  };
+
+  return (
+    <div>
+      <div style={{ marginBottom: '10px' }}>
+        <label style={labelStyle}>Client</label>
+        <select value={selectedClientId} onChange={e => setSelectedClientId(e.target.value)} style={inputStyle}>
+          <option value="">Select client...</option>
+          {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </div>
+      <div style={{ marginBottom: '10px' }}>
+        <label style={labelStyle}>Zapier Webhook URL (from your Zap's Catch Hook trigger)</label>
+        <input type="text" value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)}
+          placeholder="https://hooks.zapier.com/hooks/catch/..." style={inputStyle} />
+      </div>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+        <button onClick={save} disabled={saving} style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>{saving ? 'Saving…' : 'Save URL'}</button>
+        <button onClick={test} style={{ background: 'white', border: '1px solid #e4e9f0', color: '#4a5568', borderRadius: '8px', padding: '8px 16px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>Send Test Event</button>
+      </div>
+      {msg && <div style={{ fontSize: '11px', color: msg.startsWith('✓') ? '#059669' : '#dc2626', marginBottom: '8px' }}>{msg}</div>}
+      {events.length > 0 && (
+        <div>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '6px' }}>Supported Events</div>
+          {events.map(ev => (
+            <div key={ev.type} style={{ fontSize: '11px', color: '#4a5568', padding: '4px 0', borderBottom: '1px solid #f8fafc' }}>
+              <span style={{ fontFamily: 'DM Mono, monospace', color: '#8b5cf6', fontWeight: 600, marginRight: '8px' }}>{ev.type}</span>{ev.description}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Fix 1: 2FA component for the Security tab
 function TwoFASection({ inputStyle, labelStyle, handleSave }) {
   const [twoFAEnabled, setTwoFAEnabled] = useState(false);
@@ -408,6 +473,19 @@ export default function Settings() {
           {activeTab === 'integrations' && (
             <div>
               <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628', marginBottom: '20px' }}>API Integrations</div>
+
+              {/* Fix 1: Zapier Integration */}
+              <div style={{ background: '#fdf4ff', border: '1px solid #e9d5ff', borderRadius: '10px', padding: '18px 20px', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                  <span style={{ fontSize: '20px' }}>⚡</span>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628' }}>Zapier Integration</div>
+                    <div style={{ fontSize: '10px', color: '#8896a8', marginTop: '2px' }}>Connect Sales Scales events to 6,000+ apps via Zapier</div>
+                  </div>
+                </div>
+                <ZapierSection inputStyle={inputStyle} labelStyle={labelStyle} apiBase={API_BASE} clients={clients} />
+              </div>
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {[
                   { key: 'anthropicKey', label: 'Anthropic API Key', placeholder: 'sk-ant-...', sub: 'Powers all AI features — Zainab, Ali, Fatima, Mahdi, Hassan, Hussain' },

@@ -61,6 +61,7 @@ import LandingPage from "./pages/LandingPage";
 import SequenceTemplates from "./pages/SequenceTemplates";
 import SequenceAnalytics from "./pages/SequenceAnalytics";
 import Changelog from "./pages/Changelog";
+import ApiDocs from "./pages/ApiDocs";
 
 const navItems = [
   { group: "MAIN", items: [
@@ -125,6 +126,7 @@ const navItems = [
     { id: "platform-settings", label: "Platform Settings", icon: "ti-adjustments" },
     { id: "settings", label: "Settings", icon: "ti-settings" },
     { id: "changelog", label: "Changelog", icon: "ti-clipboard-list" },
+    { id: "api-docs", label: "API Docs", icon: "ti-code" },
   ]},
 ];
 
@@ -175,6 +177,7 @@ const pageTitles = {
   "sequence-templates": "Sequence Templates",
   "sequence-analytics": "Sequence Analytics",
   "changelog": "Platform Changelog",
+  "api-docs": "API Documentation",
   transcribe: "Call Transcription",
   onboarding: "Onboarding",
   marketplace: "Marketplace",
@@ -186,6 +189,15 @@ const pageTitles = {
 function App() {
   const [user, setUser] = useState(null);
   const [currentPage, setCurrentPage] = useState("dashboard");
+
+  // Fix 2: GA4 page-change tracking
+  // Replace 'G-XXXXXXXXXX' in public/index.html with your real GA4 Measurement ID
+  // Then every owner page navigation will be tracked automatically
+  useEffect(() => {
+    if (typeof window.gtag === 'function') {
+      window.gtag('event', 'page_view', { page_path: '/' + currentPage, page_title: currentPage });
+    }
+  }, [currentPage]);
   const [clientOnboarded, setClientOnboarded] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState(0);
@@ -418,6 +430,7 @@ function App() {
       case "sequence-templates": return <SequenceTemplates />;
       case "sequence-analytics": return <SequenceAnalytics />;
       case "changelog": return <Changelog />;
+      case "api-docs": return <ApiDocs />;
       case "transcribe": return <Transcribe />;
       case "onboarding": return <Onboarding />;
       case "marketplace": return <Marketplace />;

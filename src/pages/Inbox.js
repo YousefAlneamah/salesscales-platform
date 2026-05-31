@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { API_BASE } from '../config';
 import { supabase } from '../supabase';
 
@@ -12,6 +13,13 @@ export default function Inbox() {
   const [filterClient, setFilterClient] = useState('All');
   const [reply, setReply] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [showBroadcast, setShowBroadcast] = useState(false);
+  const [bcClient, setBcClient] = useState('');
+  const [bcSubject, setBcSubject] = useState('');
+  const [bcContent, setBcContent] = useState('');
+  const [bcTag, setBcTag] = useState('');
+  const [bcSending, setBcSending] = useState(false);
+  const [bcResult, setBcResult] = useState(null);
 
   const channels = ['All', 'Email', 'SMS', 'WhatsApp', 'Instagram', 'Facebook'];
 
@@ -91,6 +99,17 @@ export default function Inbox() {
     fetchMessages();
   };
 
+  const sendBroadcast = async () => {
+    if (!bcClient || !bcSubject || !bcContent) { alert('Client, subject, and content are required'); return; }
+    if (!window.confirm(`Send broadcast email to all contacts for this client${bcTag ? ` tagged "${bcTag}"` : ''}? This cannot be undone.`)) return;
+    setBcSending(true); setBcResult(null);
+    try {
+      const { data } = await axios.post(`${API_BASE}/email/broadcast`, { client_id: bcClient, subject: bcSubject, content: bcContent, tag: bcTag || undefined });
+      setBcResult(data);
+    } catch (e) { setBcResult({ error: e.response?.data?.error || 'Broadcast failed' }); }
+    setBcSending(false);
+  };
+
   const getClientName = (id) => clients.find(c => c.id === id)?.name || '—';
 
   const formatTime = (dateString) => {
@@ -140,11 +159,57 @@ export default function Inbox() {
             {unreadCount > 0 ? <span><span style={{ color: '#c9a84c' }}>{unreadCount} unread</span> · {messages.length} total</span> : `${messages.length} messages`}
           </div>
         </div>
-        <button onClick={addTestMessage}
-          style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
-          + Test Message
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button onClick={() => { setShowBroadcast(v => !v); setBcResult(null); }}
+            style={{ background: showBroadcast ? '#3b82f6' : 'white', color: showBroadcast ? 'white' : '#3b82f6', border: '1px solid #3b82f6', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+            📣 Broadcast Email
+          </button>
+          <button onClick={addTestMessage}
+            style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+            + Test Message
+          </button>
+        </div>
       </div>
+
+      {/* BROADCAST PANEL */}
+      {showBroadcast && (
+        <div style={{ background: 'white', border: '1px solid #bfdbfe', borderRadius: '12px', padding: '20px', marginBottom: '20px', boxShadow: '0 4px 6px rgba(10,22,40,0.05)' }}>
+          <div style={{ fontSize: '9px', color: '#3b82f6', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '14px' }}>📣 Broadcast Email — Send to All Contacts</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+            <div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '4px', fontWeight: 600, textTransform: 'uppercase' }}>Client Store</div>
+              <select value={bcClient} onChange={e => setBcClient(e.target.value)} style={inputStyle}>
+                <option value="">Select client...</option>
+                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '4px', fontWeight: 600, textTransform: 'uppercase' }}>Subject Line</div>
+              <input type="text" value={bcSubject} onChange={e => setBcSubject(e.target.value)} placeholder="Email subject..." style={inputStyle} />
+            </div>
+            <div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '4px', fontWeight: 600, textTransform: 'uppercase' }}>Tag Filter (optional)</div>
+              <input type="text" value={bcTag} onChange={e => setBcTag(e.target.value)} placeholder="e.g. vip — leave blank for all" style={inputStyle} />
+            </div>
+          </div>
+          <div style={{ marginBottom: '10px' }}>
+            <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '4px', fontWeight: 600, textTransform: 'uppercase' }}>Email Content (use &#123;&#123;first_name&#125;&#125; for personalisation)</div>
+            <textarea rows={4} value={bcContent} onChange={e => setBcContent(e.target.value)}
+              placeholder="Write your broadcast email content here..." style={{ ...inputStyle, resize: 'none' }} />
+          </div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button onClick={sendBroadcast} disabled={bcSending}
+              style={{ background: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', opacity: bcSending ? 0.7 : 1 }}>
+              {bcSending ? 'Sending…' : '📣 Send Broadcast'}
+            </button>
+            {bcResult && (
+              bcResult.error
+                ? <span style={{ fontSize: '11px', color: '#dc2626' }}>✗ {bcResult.error}</span>
+                : <span style={{ fontSize: '11px', color: '#059669' }}>✓ Sent to {bcResult.sent} of {bcResult.total} contacts{bcResult.skipped > 0 ? ` (${bcResult.skipped} skipped)` : ''}</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* CHANNEL FILTERS */}
       <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
