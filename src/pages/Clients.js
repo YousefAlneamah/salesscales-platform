@@ -112,12 +112,6 @@ export default function Clients() {
     setHealthBreakdowns(breakdowns);
   };
 
-  const healthColor = (s) => {
-    if (s >= 80) return { bg: "#ecfdf5", color: "#059669", border: "#a7f3d0" };
-    if (s >= 50) return { bg: "#fffbeb", color: "#d97706", border: "#fde68a" };
-    return { bg: "#fef2f2", color: "#dc2626", border: "#fecaca" };
-  };
-
   const addClient = async () => {
     if (!form.name) return;
     const { error } = await supabase.from("clients").insert([{
@@ -206,29 +200,52 @@ export default function Clients() {
     setSelectedClient({ ...client, features: updatedFeatures });
   };
 
-  const tierColor = (tier) => {
-    if (tier === "elite") return { background: "#fdf4ff", color: "#a855f7", border: "1px solid #e9d5ff" };
-    if (tier === "growth") return { background: "#eff6ff", color: "#3b82f6", border: "1px solid #bfdbfe" };
-    return { background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0" };
+  const nameColor = (name = '') => {
+    const cols = ['#3b82f6','#10b981','#c9a84c','#8b5cf6','#f59e0b','#ec4899','#0d9488','#ef4444'];
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+    return cols[Math.abs(h) % cols.length];
+  };
+
+  const TIER_GRAD = {
+    starter: 'linear-gradient(135deg,#059669,#10b981)',
+    growth:  'linear-gradient(135deg,#2563eb,#3b82f6)',
+    elite:   'linear-gradient(135deg,#7c3aed,#a855f7)',
+    scale:   'linear-gradient(135deg,#c9a84c,#f59e0b)',
+  };
+
+  const HealthRing = ({ score }) => {
+    const R = 18, sw = 3, circ = 2 * Math.PI * R;
+    const col = score >= 70 ? '#10b981' : score >= 40 ? '#c9a84c' : '#ef4444';
+    const offset = circ * (1 - (score || 0) / 100);
+    return (
+      <svg width="44" height="44" viewBox="0 0 44 44" style={{ flexShrink:0 }}>
+        <circle cx="22" cy="22" r={R} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={sw} />
+        <circle cx="22" cy="22" r={R} fill="none" stroke={col} strokeWidth={sw}
+          strokeDasharray={circ} strokeDashoffset={offset}
+          transform="rotate(-90 22 22)" strokeLinecap="round" style={{ transition:'stroke-dashoffset 0.6s' }} />
+        <text x="22" y="26" textAnchor="middle" fontSize="9" fontWeight="700" fill={col}>{score}</text>
+      </svg>
+    );
   };
 
   const statusColor = (status) => {
-    if (status === "live") return { bg: "#ecfdf5", color: "#059669", border: "#a7f3d0" };
-    if (status === "paused") return { bg: "#fef2f2", color: "#dc2626", border: "#fecaca" };
-    return { bg: "#fffbeb", color: "#d97706", border: "#fde68a" };
+    if (status === "live") return { bg: "rgba(16,185,129,0.1)", color: "#34d399", border: "rgba(16,185,129,0.25)" };
+    if (status === "paused") return { bg: "rgba(239,68,68,0.1)", color: "#f87171", border: "rgba(239,68,68,0.25)" };
+    return { bg: "rgba(217,119,6,0.1)", color: "#f59e0b", border: "rgba(217,119,6,0.25)" };
   };
 
   const inputStyle = {
     width: '100%',
-    border: '1px solid #e4e9f0',
+    border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: '8px',
     padding: '9px 12px',
     fontSize: '12px',
-    color: '#0a1628',
+    color: '#f0f4f8',
     outline: 'none',
-    background: 'white',
+    background: 'rgba(255,255,255,0.05)',
     boxSizing: 'border-box',
-    fontFamily: 'DM Sans, sans-serif'
+    fontFamily: 'Inter, sans-serif',
   };
 
   const Toggle = ({ value, onChange }) => (
@@ -258,8 +275,8 @@ export default function Clients() {
 
       {/* ADD CLIENT FORM */}
       {showForm && (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', marginBottom: '20px', boxShadow: '0 4px 6px rgba(10,22,40,0.05)' }}>
-          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '16px' }}>New Ecommerce Client</div>
+        <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '14px', padding: '20px', marginBottom: '20px' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '16px', fontFamily:'DM Mono,monospace' }}>New Ecommerce Client</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px", marginBottom: "16px" }}>
             <div>
               <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Store Name</div>
@@ -437,103 +454,112 @@ export default function Clients() {
 
       {/* CLIENTS TABLE */}
       {loading ? (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '40px', textAlign: 'center', color: '#8896a8' }}>Loading clients...</div>
+        <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '14px', padding: '40px', textAlign: 'center', color: '#4a5568' }}>Loading clients…</div>
       ) : clients.length === 0 ? (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '60px', textAlign: 'center' }}>
+        <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '14px', padding: '60px', textAlign: 'center' }}>
           <div style={{ fontSize: '32px', marginBottom: '12px' }}>🏪</div>
-          <div style={{ fontWeight: 600, color: '#0a1628', marginBottom: '6px', fontSize: '14px' }}>No clients yet</div>
-          <div style={{ fontSize: '12px', color: '#8896a8' }}>Add your first ecommerce client to get started</div>
+          <div style={{ fontWeight: 700, color: '#f0f4f8', marginBottom: '6px', fontSize: '14px' }}>No clients yet</div>
+          <div style={{ fontSize: '12px', color: '#4a5568' }}>Add your first ecommerce client to get started</div>
         </div>
       ) : (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1fr 1fr', padding: '12px 18px', background: '#0a1628' }}>
+        <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '16px', overflow: 'hidden' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.1fr 1fr 1fr 1fr 1fr', padding: '12px 20px', background: '#142840', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
             {['CLIENT', 'NICHE', 'TIER', 'HEALTH', 'LTV', 'STATUS'].map(h => (
-              <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px', fontWeight: 700 }}>{h}</div>
+              <div key={h} style={{ fontSize: '8px', color: '#4a5568', letterSpacing: '2px', fontWeight: 700, fontFamily: 'DM Mono,monospace' }}>{h}</div>
             ))}
           </div>
           {clients.map(client => {
+            const nc = nameColor(client.name || '');
             const sc = statusColor(client.status);
+            const tierGrad = TIER_GRAD[client.tier?.toLowerCase()] || TIER_GRAD.starter;
             return (
               <div key={client.id}
                 onClick={() => { const c = selectedClient?.id === client.id ? null : client; setSelectedClient(c); if (c) { loadChecklist(c.id); loadComms(c.id); } }}
-                style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1fr 1fr', padding: '14px 18px', borderBottom: '1px solid #f4f6fa', cursor: 'pointer', background: selectedClient?.id === client.id ? '#fafbfd' : 'white', transition: 'background 0.1s' }}
-                onMouseEnter={e => { if (selectedClient?.id !== client.id) e.currentTarget.style.background = '#fafbfd'; }}
-                onMouseLeave={e => { if (selectedClient?.id !== client.id) e.currentTarget.style.background = 'white'; }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color: '#c9a84c', fontWeight: 700, flexShrink: 0 }}>
-                    {client.name?.[0]}
+                style={{ display: 'grid', gridTemplateColumns: '2fr 1.1fr 1fr 1fr 1fr 1fr', padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'pointer', background: selectedClient?.id === client.id ? 'rgba(201,168,76,0.05)' : 'transparent', transition: 'background 0.15s', position: 'relative' }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; const acts = e.currentTarget.querySelector('.hover-actions'); if (acts) acts.style.opacity = '1'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = selectedClient?.id === client.id ? 'rgba(201,168,76,0.05)' : 'transparent'; const acts = e.currentTarget.querySelector('.hover-actions'); if (acts) acts.style.opacity = '0'; }}>
+
+                {/* Avatar + name */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 38, height: 38, borderRadius: 10, background: nc + '22', border: `1px solid ${nc}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 800, color: nc, flexShrink: 0 }}>
+                    {(client.name || '?')[0]}
                   </div>
-                  <div>
-                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628' }}>{client.name}</div>
-                    <div style={{ fontSize: '10px', color: '#8896a8' }}>{client.email}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#f0f4f8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client.name}</div>
+                    <div style={{ fontSize: 10, color: '#4a5568', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client.email}</div>
                   </div>
                 </div>
-                <div style={{ fontSize: '12px', color: '#4a5568', display: 'flex', alignItems: 'center' }}>{client.niche || '—'}</div>
+
+                <div style={{ fontSize: 12, color: '#8896a8', display: 'flex', alignItems: 'center' }}>{client.niche || '—'}</div>
+
+                {/* Gradient tier badge */}
                 <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, ...tierColor(client.tier) }}>
+                  <span style={{ fontSize: 9, padding: '4px 10px', borderRadius: 20, fontWeight: 700, background: tierGrad, color: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>
                     {client.tier?.charAt(0).toUpperCase() + client.tier?.slice(1)}
                   </span>
                 </div>
+
+                {/* Circular health ring */}
                 <div style={{ display: 'flex', alignItems: 'center' }}>
                   {(() => {
                     const s = healthScores[client.id] ?? client.health_score ?? 0;
-                    const hc = healthColor(s);
                     const bd = healthBreakdowns[client.id];
                     const isOpen = tooltipClientId === client.id;
                     return (
                       <div style={{ position: 'relative' }}
                         onMouseEnter={() => setTooltipClientId(client.id)}
                         onMouseLeave={() => setTooltipClientId(null)}>
-                        <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: hc.bg, color: hc.color, border: `1px solid ${hc.border}`, cursor: 'default' }}>
-                          {s}/100
-                        </span>
+                        <HealthRing score={s} />
                         {isOpen && bd && (
-                          <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', marginTop: '6px', background: '#0a1628', borderRadius: '10px', padding: '12px 14px', width: '200px', zIndex: 100, boxShadow: '0 8px 24px rgba(10,22,40,0.25)', pointerEvents: 'none' }}>
-                            <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '10px' }}>Score Breakdown</div>
+                          <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', marginTop: 6, background: '#0a1628', borderRadius: 10, padding: '12px 14px', width: 200, zIndex: 100, boxShadow: '0 8px 24px rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.08)', pointerEvents: 'none' }}>
+                            <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.3)', letterSpacing: 1.5, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 10 }}>Score Breakdown</div>
                             {[
-                              { label: 'Enrollments this week', val: bd.enroll, pts: bd.enrollPts, max: 30 },
-                              { label: 'Messages this month', val: bd.msgs, pts: bd.msgPts, max: 30 },
+                              { label: 'Enrollments/wk', val: bd.enroll, pts: bd.enrollPts, max: 30 },
+                              { label: 'Messages/mo', val: bd.msgs, pts: bd.msgPts, max: 30 },
                               { label: 'Active sequences', val: bd.seqs, pts: bd.seqPts, max: 20 },
-                              { label: 'Recent contact activity', val: bd.hasAct ? 'Yes' : 'No', pts: bd.actPts, max: 20 },
+                              { label: 'Recent activity', val: bd.hasAct ? 'Yes' : 'No', pts: bd.actPts, max: 20 },
                             ].map(row => (
-                              <div key={row.label} style={{ marginBottom: '8px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                                  <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)' }}>{row.label}</span>
-                                  <span style={{ fontSize: '10px', color: '#c9a84c', fontWeight: 600 }}>{row.pts}/{row.max}</span>
+                              <div key={row.label} style={{ marginBottom: 8 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.55)' }}>{row.label}</span>
+                                  <span style={{ fontSize: 10, color: '#c9a84c', fontWeight: 600 }}>{row.pts}/{row.max}</span>
                                 </div>
-                                <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.35)' }}>{row.val}</div>
-                                <div style={{ height: '3px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', marginTop: '3px' }}>
-                                  <div style={{ width: `${(row.pts / row.max) * 100}%`, height: '100%', background: '#c9a84c', borderRadius: '2px' }} />
+                                <div style={{ height: 3, background: 'rgba(255,255,255,0.07)', borderRadius: 2 }}>
+                                  <div style={{ width: `${(row.pts / row.max) * 100}%`, height: '100%', background: '#c9a84c', borderRadius: 2 }} />
                                 </div>
                               </div>
                             ))}
-                            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '8px', display: 'flex', justifyContent: 'space-between' }}>
-                              <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)' }}>Total</span>
-                              <span style={{ fontSize: '11px', color: 'white', fontWeight: 700 }}>{s}/100</span>
-                            </div>
                           </div>
                         )}
                       </div>
                     );
                   })()}
                 </div>
+
+                {/* LTV */}
                 <div style={{ display: 'flex', alignItems: 'center' }}>
                   {(() => {
                     const ltv = ltvData[client.id];
-                    if (!ltv) return <span style={{ fontSize: '10px', color: '#8896a8' }}>—</span>;
-                    const roiColor = ltv.roi >= 2 ? '#059669' : ltv.roi >= 1 ? '#d97706' : '#dc2626';
+                    if (!ltv) return <span style={{ fontSize: 10, color: '#4a5568' }}>—</span>;
+                    const roiColor = ltv.roi >= 2 ? '#10b981' : ltv.roi >= 1 ? '#c9a84c' : '#ef4444';
                     return (
                       <div>
-                        <div style={{ fontSize: '11px', fontWeight: 700, color: '#0a1628' }}>${ltv.totalSubscription.toLocaleString()}</div>
-                        <div style={{ fontSize: '9px', color: roiColor, fontWeight: 600 }}>{ltv.roi}× ROI</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#f0f4f8' }}>${ltv.totalSubscription.toLocaleString()}</div>
+                        <div style={{ fontSize: 9, color: roiColor, fontWeight: 700 }}>{ltv.roi}× ROI</div>
                       </div>
                     );
                   })()}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: sc.bg, color: sc.color, border: `1px solid ${sc.border}` }}>
+
+                {/* Status + hover actions */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 9, padding: '4px 10px', borderRadius: 20, fontWeight: 700, background: sc.bg, color: sc.color, border: `1px solid ${sc.border}` }}>
                     {client.status?.charAt(0).toUpperCase() + client.status?.slice(1)}
                   </span>
+                  <div className="hover-actions" style={{ display: 'flex', gap: 4, opacity: 0, transition: 'opacity 0.15s' }}>
+                    <button onClick={e => e.stopPropagation()} style={{ padding: '3px 8px', fontSize: 9, fontWeight: 600, borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.07)', color: '#8896a8', cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>View</button>
+                    <button onClick={e => e.stopPropagation()} style={{ padding: '3px 8px', fontSize: 9, fontWeight: 600, borderRadius: 6, border: '1px solid rgba(201,168,76,0.2)', background: 'rgba(201,168,76,0.07)', color: '#c9a84c', cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Audit</button>
+                  </div>
                 </div>
               </div>
             );

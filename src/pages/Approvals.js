@@ -132,11 +132,22 @@ export default function Approvals() {
 
   const pendingCount = approvals.filter(a => a.status === 'pending').length;
 
+  const [approvedAnim, setApprovedAnim] = useState({});
+
+  const actionWithAnim = async (approvalId, act) => {
+    if (act === 'approve') {
+      setApprovedAnim(prev => ({ ...prev, [approvalId]: true }));
+      await new Promise(r => setTimeout(r, 600));
+    }
+    await action(approvalId, act);
+    setApprovedAnim(prev => { const n = { ...prev }; delete n[approvalId]; return n; });
+  };
+
   const inputStyle = {
-    width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px',
-    padding: '9px 12px', fontSize: '12px', color: '#0a1628',
-    outline: 'none', background: 'white', boxSizing: 'border-box',
-    fontFamily: 'DM Sans, sans-serif'
+    width: '100%', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px',
+    padding: '9px 12px', fontSize: '12px', color: '#f0f4f8',
+    outline: 'none', background: 'rgba(255,255,255,0.05)', boxSizing: 'border-box',
+    fontFamily: 'Inter, sans-serif',
   };
 
   return (
@@ -154,17 +165,17 @@ export default function Approvals() {
       </div>
 
       {/* STATS */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 20 }}>
         {[
-          { label: 'Pending Review', value: approvals.filter(a => a.status === 'pending').length, sub: 'waiting for you', color: '#d97706' },
-          { label: 'Sequences', value: approvals.filter(a => a.status === 'pending' && (a.type === 'email_sequence' || a.type === 'sms_sequence')).length, sub: 'ready to activate', color: '#2563eb' },
-          { label: 'Approved', value: approvals.filter(a => a.status === 'approved').length, sub: 'actions executed', color: '#10b981' },
+          { label: 'Pending Review', value: approvals.filter(a => a.status === 'pending').length, sub: 'waiting for you', color: '#f59e0b' },
+          { label: 'Sequences', value: approvals.filter(a => a.status === 'pending' && (a.type === 'email_sequence' || a.type === 'sms_sequence')).length, sub: 'ready to activate', color: '#60a5fa' },
+          { label: 'Approved', value: approvals.filter(a => a.status === 'approved').length, sub: 'actions executed', color: '#34d399' },
           { label: 'Rejected', value: approvals.filter(a => a.status === 'rejected').length, sub: 'AI feedback logged', color: '#8896a8' },
         ].map(stat => (
-          <div key={stat.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '16px 18px', borderTop: `2px solid ${stat.color}`, boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
-            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>{stat.label}</div>
-            <div style={{ fontSize: '24px', fontWeight: 700, color: '#0a1628', letterSpacing: '-0.5px', marginBottom: '4px' }}>{stat.value}</div>
-            <div style={{ fontSize: '11px', color: stat.color, fontWeight: 500 }}>{stat.sub}</div>
+          <div key={stat.label} style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderTop: `2px solid ${stat.color}`, borderRadius: 14, padding: '18px 20px' }}>
+            <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 10 }}>{stat.label}</div>
+            <div style={{ fontSize: 36, fontWeight: 800, color: '#f0f4f8', letterSpacing: '-1px', lineHeight: 1, marginBottom: 6 }}>{stat.value}</div>
+            <div style={{ fontSize: 11, color: stat.color, fontWeight: 600 }}>{stat.sub}</div>
           </div>
         ))}
       </div>
@@ -219,60 +230,78 @@ export default function Approvals() {
               <div style={{ fontSize: '12px', color: '#8896a8' }}>No approvals in this view</div>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
               {filtered.map(approval => {
-                const ts = typeStyle(approval.type);
                 const memberColor = MEMBER_COLORS[approval.from_member] || '#8896a8';
+                const priorityBorder = approval.priority === 'urgent' ? '#ef4444' : approval.priority === 'high' ? '#c9a84c' : 'rgba(255,255,255,0.12)';
+                const isAnimApproved = approvedAnim[approval.id];
                 return (
                   <div key={approval.id}
                     onClick={() => { setSelected(selected?.id === approval.id ? null : approval); setShowReject(false); setFeedback(''); setEditing(false); setEditContent(''); setEditSteps([]); }}
-                    style={{ background: 'white', border: `1px solid ${selected?.id === approval.id ? '#c9a84c' : '#e4e9f0'}`, borderRadius: '12px', padding: '16px 18px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(10,22,40,0.04)', transition: 'border-color 0.1s' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap' }}>
-                          {(() => { const ps = PRIORITY_STYLES[approval.priority || 'normal'] || PRIORITY_STYLES.normal; return (
-                            <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', fontWeight: 700, background: ps.bg, color: ps.color, border: `1px solid ${ps.border}` }}>
-                              {ps.label}
-                            </span>
-                          );})()}
-                          {approval.type && (
-                            <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', fontWeight: 700, letterSpacing: '0.5px', background: ts.bg, color: ts.color, border: `1px solid ${ts.border}` }}>
-                              {TYPE_LABELS[approval.type] || approval.type}
-                            </span>
-                          )}
-                          {approval.from_member && (
-                            <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', fontWeight: 600, background: memberColor + '18', color: memberColor, border: `1px solid ${memberColor}30` }}>
-                              {MEMBER_LABELS[approval.from_member] || approval.from_member}
-                            </span>
-                          )}
-                          <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', fontWeight: 600, background: approval.status === 'approved' ? '#ecfdf5' : approval.status === 'rejected' ? '#fef2f2' : '#fffbeb', color: approval.status === 'approved' ? '#059669' : approval.status === 'rejected' ? '#dc2626' : '#d97706', border: `1px solid ${approval.status === 'approved' ? '#a7f3d0' : approval.status === 'rejected' ? '#fecaca' : '#fde68a'}` }}>
-                            {approval.status.charAt(0).toUpperCase() + approval.status.slice(1)}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628', marginBottom: '4px' }}>{approval.title}</div>
-                        {approval.content && (
-                          <div style={{ fontSize: '11px', color: '#8896a8', lineHeight: '1.5', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '500px' }}>
-                            {approval.content}
+                    style={{ background: '#0f1f35', border: `1px solid ${selected?.id === approval.id ? 'rgba(201,168,76,0.4)' : 'rgba(255,255,255,0.06)'}`, borderLeft: `4px solid ${priorityBorder}`, borderRadius: 14, padding: '16px 18px', cursor: 'pointer', transition: 'border-color 0.15s', position: 'relative', overflow: 'hidden' }}>
+
+                    {/* Member avatar chip */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {approval.from_member && (
+                          <div style={{ width: 28, height: 28, borderRadius: 8, background: memberColor + '22', border: `1px solid ${memberColor}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: memberColor, flexShrink: 0 }}>
+                            {(approval.from_member || '?')[0].toUpperCase()}
                           </div>
                         )}
-                      </div>
-                      {approval.status === 'pending' && (
-                        <div style={{ display: 'flex', gap: '6px', flexShrink: 0, marginLeft: '12px' }} onClick={e => e.stopPropagation()}>
-                          <button onClick={() => action(approval.id, 'approve')}
-                            style={{ background: '#10b981', color: 'white', border: 'none', borderRadius: '7px', padding: '6px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
-                            ✓
-                          </button>
-                          <button onClick={() => { setSelected(approval); setShowReject(true); }}
-                            style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '7px', padding: '6px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
-                            ✗
-                          </button>
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: memberColor }}>{MEMBER_LABELS[approval.from_member] || 'System'}</div>
+                          <div style={{ fontSize: 9, color: '#4a5568' }}>{formatTime(approval.created_at)}</div>
                         </div>
-                      )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        {approval.priority && approval.priority !== 'normal' && (
+                          <span style={{ fontSize: 8, padding: '2px 7px', borderRadius: 20, fontWeight: 700, background: priorityBorder + '18', color: priorityBorder, border: `1px solid ${priorityBorder}44` }}>
+                            {approval.priority.toUpperCase()}
+                          </span>
+                        )}
+                        {approval.type && (
+                          <span style={{ fontSize: 8, padding: '2px 7px', borderRadius: 20, fontWeight: 700, background: memberColor + '12', color: memberColor, border: `1px solid ${memberColor}25` }}>
+                            {TYPE_LABELS[approval.type] || approval.type}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '10px', color: '#8896a8' }}>
-                      {getClientName(approval.client_id)} · {formatTime(approval.created_at)}
-                      {approval.actioned_at && ` · actioned ${formatTime(approval.actioned_at)}`}
+
+                    {/* Title */}
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#f0f4f8', marginBottom: 6, lineHeight: 1.4 }}>{approval.title}</div>
+
+                    {/* Content preview */}
+                    {approval.content && (
+                      <div style={{ fontSize: 11, color: '#8896a8', lineHeight: 1.6, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', marginBottom: 10 }}>
+                        {approval.content}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ fontSize: 10, color: '#4a5568' }}>{getClientName(approval.client_id)}</div>
+                      {/* Status badge */}
+                      <span style={{ fontSize: 9, padding: '3px 9px', borderRadius: 20, fontWeight: 700,
+                        background: approval.status === 'approved' ? 'rgba(16,185,129,0.12)' : approval.status === 'rejected' ? 'rgba(239,68,68,0.12)' : 'rgba(217,119,6,0.12)',
+                        color: approval.status === 'approved' ? '#34d399' : approval.status === 'rejected' ? '#f87171' : '#f59e0b',
+                        border: `1px solid ${approval.status === 'approved' ? 'rgba(16,185,129,0.25)' : approval.status === 'rejected' ? 'rgba(239,68,68,0.25)' : 'rgba(217,119,6,0.25)'}`,
+                      }}>
+                        {approval.status.charAt(0).toUpperCase() + approval.status.slice(1)}
+                      </span>
                     </div>
+
+                    {/* Approve / Reject buttons */}
+                    {approval.status === 'pending' && (
+                      <div style={{ display: 'flex', gap: 6, marginTop: 12 }} onClick={e => e.stopPropagation()}>
+                        <button onClick={() => actionWithAnim(approval.id, 'approve')}
+                          style={{ flex: 1, padding: '7px 0', fontSize: 11, fontWeight: 700, borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'Inter,sans-serif', transition: 'all 0.3s', background: isAnimApproved ? '#10b981' : 'rgba(16,185,129,0.15)', color: isAnimApproved ? '#fff' : '#34d399' }}>
+                          {isAnimApproved ? '✓ Approved!' : '✓ Approve'}
+                        </button>
+                        <button onClick={() => { setSelected(approval); setShowReject(true); }}
+                          style={{ flex: 1, padding: '7px 0', fontSize: 11, fontWeight: 700, borderRadius: 8, border: '1px solid rgba(239,68,68,0.2)', background: 'rgba(239,68,68,0.07)', color: '#f87171', cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                          ✗ Reject
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}

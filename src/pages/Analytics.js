@@ -16,13 +16,93 @@ const BarChart = ({ data, title, color = '#c9a84c' }) => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {entries.sort(([, a], [, b]) => b - a).map(([key, value]) => (
             <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ fontSize: '11px', color: '#4a5568', width: '110px', flexShrink: 0 }}>{key}</div>
-              <div className="pbar" style={{ flex: 1 }}>
-                <div style={{ height: '100%', borderRadius: '3px', background: color, width: `${(value / max) * 100}%`, transition: 'width 0.5s ease' }} />
+              <div style={{ fontSize: '11px', color: '#8896a8', width: '110px', flexShrink: 0 }}>{key}</div>
+              <div style={{ flex: 1, height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ height: '100%', borderRadius: 3, background: color, width: `${(value / max) * 100}%`, transition: 'width 0.5s ease' }} />
               </div>
-              <div style={{ fontSize: '11px', fontWeight: 700, color: '#0a1628', width: '28px', textAlign: 'right' }}>{value}</div>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: '#f0f4f8', width: '28px', textAlign: 'right' }}>{value}</div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// SVG vertical bar chart for messages by channel
+const SvgBarChart = ({ data, title }) => {
+  const CHART_COLORS = ['#c9a84c','#3b82f6','#10b981','#8b5cf6','#f59e0b','#ec4899'];
+  const entries = Object.entries(data || {}).filter(([k, v]) => k && k !== 'null' && v > 0).sort(([,a],[,b]) => b - a).slice(0, 6);
+  const max = Math.max(...entries.map(([, v]) => v), 1);
+  const barW = 44, gap = 14, H = 100, labH = 20, topPad = 20;
+  const totalW = entries.length * (barW + gap) - gap;
+  return (
+    <div className="card">
+      <div className="section-label" style={{ marginBottom: 16 }}>{title}</div>
+      {entries.length === 0 ? (
+        <div style={{ textAlign: 'center', color: '#4a5568', fontSize: 11, padding: '20px 0' }}>No data yet</div>
+      ) : (
+        <svg width="100%" viewBox={`0 0 ${Math.max(totalW, 100)} ${H + labH + topPad}`} style={{ overflow: 'visible' }}>
+          {entries.map(([key, val], i) => {
+            const bH = (val / max) * H;
+            const x = i * (barW + gap);
+            const y = topPad + H - bH;
+            const col = CHART_COLORS[i % CHART_COLORS.length];
+            return (
+              <g key={key}>
+                <rect x={x} y={topPad + H} width={barW} height={0} rx={0} fill="none" />
+                <rect x={x} y={y} width={barW} height={bH} rx={5} fill={col} opacity={0.85} />
+                <text x={x + barW / 2} y={y - 5} textAnchor="middle" fontSize="10" fontWeight="700" fill="#f0f4f8">{val}</text>
+                <text x={x + barW / 2} y={topPad + H + labH - 2} textAnchor="middle" fontSize="9" fill="#4a5568">{key.length > 8 ? key.slice(0,8) : key}</text>
+              </g>
+            );
+          })}
+        </svg>
+      )}
+    </div>
+  );
+};
+
+// SVG donut chart for distribution
+const DonutChart = ({ data, title, colors = ['#c9a84c','#3b82f6','#10b981','#8b5cf6','#f59e0b','#ec4899'] }) => {
+  const entries = Object.entries(data || {}).filter(([, v]) => v > 0);
+  const total = entries.reduce((s, [, v]) => s + v, 0);
+  const R = 52, cx = 75, cy = 75, sw = 18;
+  const circ = 2 * Math.PI * R;
+  let cumLen = 0;
+  return (
+    <div className="card">
+      <div className="section-label" style={{ marginBottom: 16 }}>{title}</div>
+      {total === 0 ? (
+        <div style={{ textAlign: 'center', color: '#4a5568', fontSize: 11, padding: '20px 0' }}>No data yet</div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <svg width={150} height={150} style={{ flexShrink: 0 }}>
+            <circle cx={cx} cy={cy} r={R} fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth={sw} />
+            {entries.map(([key, val], i) => {
+              const len = (val / total) * circ;
+              const offset = circ - cumLen;
+              cumLen += len;
+              return (
+                <circle key={key} cx={cx} cy={cy} r={R} fill="none"
+                  stroke={colors[i % colors.length]} strokeWidth={sw}
+                  strokeDasharray={`${len} ${circ}`} strokeDashoffset={offset}
+                  transform={`rotate(-90 ${cx} ${cy})`} strokeLinecap="butt" />
+              );
+            })}
+            <text x={cx} y={cy - 6} textAnchor="middle" fontSize="20" fontWeight="800" fill="#f0f4f8">{total}</text>
+            <text x={cx} y={cx + 10} textAnchor="middle" fontSize="9" fill="#4a5568">total</text>
+          </svg>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
+            {entries.map(([key, val], i) => (
+              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 8, height: 8, borderRadius: 2, background: colors[i % colors.length], flexShrink: 0 }} />
+                <div style={{ flex: 1, fontSize: 11, color: '#8896a8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{key}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#f0f4f8' }}>{val}</div>
+                <div style={{ fontSize: 10, color: '#4a5568' }}>{Math.round((val / total) * 100)}%</div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -246,8 +326,8 @@ export default function Analytics() {
       <div className="section-label" style={{ marginBottom: '10px' }}>Breakdowns</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', marginBottom: '20px' }}>
         <BarChart data={byKey(fc, 'source')} title="Contacts by Source" color="#c9a84c" />
-        <BarChart data={byKey(fc, 'pipeline_stage')} title="Contacts by Stage" color="#3b82f6" />
-        <BarChart data={byKey(fm, 'channel')} title="Messages by Channel" color="#10b981" />
+        <SvgBarChart data={byKey(outbound, 'channel')} title="Messages Sent by Channel" />
+        <DonutChart data={byKey(filtered(workflows, 'trigger_type' in (workflows[0] || {}) ? 'trigger_type' : 'client_id'), 'trigger_type')} title="Sequences by Trigger" />
       </div>
 
       {/* WORKFLOW PERFORMANCE */}
