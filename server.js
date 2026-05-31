@@ -1129,6 +1129,24 @@ cron.schedule('*/15 * * * *', async () => {
             })
           });
           console.log(`Email sent to ${contact.first_name} — step ${enrollment.current_step}`);
+          // Fix 5: cross-sell at day 14 of post_purchase workflow — generate approval once
+          const daysSinceEnroll = enrollment.enrolled_at ? Math.floor((Date.now() - new Date(enrollment.enrolled_at)) / 86400000) : 0;
+          if (daysSinceEnroll >= 14) {
+            (async () => {
+              try {
+                const { data: wf } = await supabase.from('workflows').select('trigger_type, name').eq('id', enrollment.workflow_id).maybeSingle();
+                if (wf?.trigger_type === 'post_purchase') {
+                  const { count } = await supabase.from('approvals').select('id', { count: 'exact', head: true })
+                    .eq('client_id', enrollment.client_id)
+                    .contains('metadata', { enrollment_id: enrollment.id });
+                  if (!count || count === 0) {
+                    const { data: cl } = await supabase.from('clients').select('id, name, niche').eq('id', enrollment.client_id).maybeSingle();
+                    if (cl) await generateCrossSellApproval(enrollment, contact, cl);
+                  }
+                }
+              } catch (csErr) { console.error('[cross-sell] Scheduler check error:', csErr.message); }
+            })();
+          }
         } catch (e) {
           console.error('Email step error:', e.message);
           stepFailed = true; failureMsg = e.message;
@@ -2491,6 +2509,13 @@ app.post('/sms/inbound', async (req, res) => {
         .eq('contact_id', contact.id)
         .eq('status', 'active');
       console.log('Inbound SMS saved and workflow paused for:', contact.first_name);
+      // Fix 1: human takeover — skip all automated responses if a human is handling this conversation
+      if (contact.human_takeover) {
+        console.log(`[human-takeover] Skipping automated SMS response for ${contact.first_name} — human is handling`);
+        res.set('Content-Type', 'text/xml');
+        res.send('<Response></Response>');
+        return;
+      }
       const { data: smsClient } = await supabase.from('clients').select('name').eq('id', contact.client_id).maybeSingle();
       const smsAssessment = await assessInboundConfidence('SMS', Body, smsClient?.name);
       if (!smsAssessment.confident) {
@@ -2544,6 +2569,13 @@ app.post('/whatsapp/inbound', async (req, res) => {
       await supabase.from('contacts').update({ engagement_score: waNewScore }).eq('id', contact.id);
       await checkAndTagHotLead(contact.id, contact.client_id, waNewScore);
       console.log('Inbound WhatsApp saved and workflow paused for:', contact.first_name);
+      // Fix 1: human takeover — skip all automated responses if a human is handling this conversation
+      if (contact.human_takeover) {
+        console.log(`[human-takeover] Skipping automated WhatsApp response for ${contact.first_name} — human is handling`);
+        res.set('Content-Type', 'text/xml');
+        res.send('<Response></Response>');
+        return;
+      }
       const { data: waClient } = await supabase.from('clients').select('name').eq('id', contact.client_id).maybeSingle();
       const waAssessment = await assessInboundConfidence('WhatsApp', Body, waClient?.name);
       if (!waAssessment.confident) {
@@ -3901,9 +3933,13 @@ const processSocialEvent = async (platform, payload) => {
             { channel: platform, direction: 'inbound', sender_name: senderId, sender_phone: senderId, content: messageText, status: 'read' },
             { channel: platform, direction: 'outbound', sender_name: 'Sales Scales AI', content: reply, status: 'sent' }
           ]);
-          if (socialConfig.dm.enrollContacts && socialConfig.dm.workflowId) {
-            let { data: contact } = await supabase.from('contacts').select('*').eq('phone', senderId).maybeSingle();
-            if (!contact) {
+          // Fix 6: track contact, enroll in existing workflow if configured, generate DM nurture approval for new contacts
+          let socialContact = null;
+          let isNewContact = false;
+          { const { data: existingC } = await supabase.from('contacts').select('*').eq('phone', senderId).maybeSingle();
+            if (existingC) { socialContact = existingC; }
+            else {
+              isNewContact = true;
               const { data: nc } = await supabase.from('contacts').insert([{
                 first_name: platform === 'instagram' ? 'Instagram' : 'Facebook',
                 last_name: 'User',
@@ -3913,11 +3949,15 @@ const processSocialEvent = async (platform, payload) => {
                 pipeline_stage: 'New Lead',
                 last_activity: new Date().toISOString()
               }]).select().single();
-              contact = nc;
+              socialContact = nc;
             }
-            if (contact) {
-              await enrollContactInWorkflow(socialConfig.dm.workflowId, contact.id, null, contact.email, null, contact.first_name);
-            }
+          }
+          if (socialConfig.dm.enrollContacts && socialConfig.dm.workflowId && socialContact) {
+            await enrollContactInWorkflow(socialConfig.dm.workflowId, socialContact.id, null, socialContact.email, null, socialContact.first_name);
+          }
+          if (isNewContact) {
+            const clientId = socialContact?.client_id || null;
+            generateSocialNurtureApproval(platform, senderId, clientId).catch(e => console.error('[social-nurture]', e.message));
           }
           console.log(`Social DM auto-replied [${platform}]: ${senderId}`);
         } catch (e) {
@@ -5924,6 +5964,224 @@ app.get('/roadmap/votes', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// ─── FIX 1: HUMAN TAKEOVER — CONTACTS ENDPOINT ───────────
+// SQL: ALTER TABLE contacts ADD COLUMN IF NOT EXISTS human_takeover boolean DEFAULT false;
+app.patch('/contacts/:id/takeover', async (req, res) => {
+  const { id } = req.params;
+  const { human_takeover } = req.body;
+  if (typeof human_takeover !== 'boolean') return res.status(400).json({ error: 'human_takeover must be boolean' });
+  try {
+    const { data, error } = await supabase.from('contacts').update({ human_takeover }).eq('id', id).select().single();
+    if (error) throw error;
+    res.json({ ok: true, contact: data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 2: SHOPIFY REFUND ────────────────────────────────
+app.post('/shopify/refund', async (req, res) => {
+  const { client_id, contact_id, contact_email } = req.body;
+  if (!client_id || !contact_email) return res.status(400).json({ error: 'client_id and contact_email required' });
+  try {
+    const { data: conn } = await supabase.from('shopify_connections').select('shop, access_token').eq('client_id', client_id).maybeSingle();
+    if (!conn) return res.status(400).json({ error: 'No Shopify store connected for this client' });
+
+    const { shop, access_token } = conn;
+    const headers = { 'X-Shopify-Access-Token': access_token, 'Content-Type': 'application/json' };
+
+    const ordersRes = await axios.get(
+      `https://${shop}/admin/api/2024-01/orders.json?email=${encodeURIComponent(contact_email)}&status=any&limit=1&order=created_at+desc`,
+      { headers }
+    );
+    const order = ordersRes.data?.orders?.[0];
+    if (!order) return res.status(404).json({ error: 'No orders found for this contact' });
+
+    const lineItems = order.line_items.map(li => ({
+      line_item_id: li.id, quantity: li.quantity,
+      restock_type: 'return',
+    }));
+    const refundCalcRes = await axios.post(
+      `https://${shop}/admin/api/2024-01/orders/${order.id}/refunds/calculate.json`,
+      { refund: { shipping: { full_refund: true }, refund_line_items: lineItems } },
+      { headers }
+    );
+    const transactions = refundCalcRes.data?.refund?.transactions?.map(t => ({
+      parent_id: t.parent_id, amount: t.amount, kind: 'refund', gateway: t.gateway,
+    })) || [];
+
+    await axios.post(
+      `https://${shop}/admin/api/2024-01/orders/${order.id}/refunds.json`,
+      { refund: { notify: true, shipping: { full_refund: true }, refund_line_items: lineItems, transactions } },
+      { headers }
+    );
+
+    const sender = await getClientSender(client_id);
+    await sgMail.send({
+      to: contact_email,
+      from: { email: sender.email, name: sender.name },
+      subject: 'Your refund has been processed',
+      html: `<p>Hi,</p><p>Your refund for order <strong>#${order.order_number}</strong> of <strong>$${order.total_price}</strong> has been processed. It will appear on your original payment method within 5–10 business days.</p><p>Thank you for your patience.</p>`,
+    });
+
+    if (contact_id) {
+      await supabase.from('messages').insert([{
+        client_id, contact_id, channel: 'Refund', direction: 'outbound',
+        sender_name: 'Sales Scales', content: `Refund issued for order #${order.order_number} — $${order.total_price}`,
+        status: 'sent', created_at: new Date().toISOString(),
+      }]);
+    }
+
+    res.json({ ok: true, order_number: order.order_number, amount: order.total_price });
+  } catch (e) {
+    console.error('/shopify/refund error:', e.response?.data || e.message);
+    res.status(500).json({ error: e.response?.data?.errors || e.message });
+  }
+});
+
+// ─── FIX 3: FLASH SALE SEQUENCE ──────────────────────────
+app.post('/workflows/flash-sale', async (req, res) => {
+  const { client_id, offer_percentage, offer_end_date } = req.body;
+  if (!client_id || !offer_percentage || !offer_end_date) return res.status(400).json({ error: 'client_id, offer_percentage, and offer_end_date required' });
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+    const { data: contacts } = await supabase.from('contacts').select('id, email, first_name')
+      .eq('client_id', client_id).not('email', 'is', null)
+      .or(`last_activity.lt.${thirtyDaysAgo},last_activity.is.null`);
+    const eligibleCount = (contacts || []).length;
+
+    const { data: client } = await supabase.from('clients').select('name, niche').eq('id', client_id).maybeSingle();
+    const ctx = await ragSearch(`flash sale ${offer_percentage}% off`, client_id).catch(() => '');
+
+    const seqRaw = await aiCall(
+      `You are Mahdi, Marketing & Content AI at Sales Scales. Return ONLY valid JSON, no markdown. Write urgent, time-limited copy — short sentences, real urgency, no exclamation marks. Never mention Claude.`,
+      `Write a 3-email flash sale sequence for ${client?.name || 'the store'} (${client?.niche || 'ecommerce'}). Offer: ${offer_percentage}% off. Sale ends: ${offer_end_date}. Target: customers who haven't purchased in 30+ days.\n\nEmail 1 (immediate): Announce the sale — urgency, clear offer, deadline\nEmail 2 (24h later): "Sale ends soon" — strongest products, social proof\nEmail 3 (48h later): Final hours warning\n\nReturn JSON: {"trigger_type":"flash_sale","steps":[{"step_type":"email","subject":"...","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":24},{"step_type":"email","subject":"...","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":24},{"step_type":"email","subject":"...","content":"...","wait_hours":0}]}`,
+      ctx
+    );
+    let parsed = { steps: [], trigger_type: 'flash_sale' };
+    try { const s = seqRaw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim(); const m = s.match(/\{[\s\S]*\}/); parsed = JSON.parse(m ? m[0] : s); } catch {}
+
+    const steps = Array.isArray(parsed.steps) && parsed.steps.length ? parsed.steps : [];
+    const emailSteps = steps.filter(s => s.step_type === 'email').length;
+
+    await supabase.from('approvals').insert([{
+      type: 'email_sequence', from_member: 'mahdi', client_id,
+      title: `Flash Sale ${offer_percentage}% Off — ends ${offer_end_date}`,
+      content: `Mahdi generated a ${emailSteps}-email flash sale sequence targeting ${eligibleCount} contacts who haven't purchased in 30+ days.`,
+      metadata: { steps, trigger_type: 'flash_sale', offer_percentage, offer_end_date, eligible_contacts: eligibleCount },
+      priority: 'high', status: 'pending', created_at: new Date().toISOString(),
+    }]);
+
+    res.json({ ok: true, eligible_contacts: eligibleCount, steps: emailSteps, message: 'Flash sale sequence submitted for approval' });
+  } catch (e) {
+    console.error('/workflows/flash-sale error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 4: BACK IN STOCK NOTIFICATION ───────────────────
+app.post('/shopify/back-in-stock', async (req, res) => {
+  const { client_id, product_title } = req.body;
+  if (!client_id || !product_title) return res.status(400).json({ error: 'client_id and product_title required' });
+  try {
+    const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString();
+    const { data: enrollments } = await supabase.from('workflow_enrollments')
+      .select('contact_id').eq('client_id', client_id).gte('enrolled_at', sixtyDaysAgo);
+    const contactIds = [...new Set((enrollments || []).map(e => e.contact_id))];
+
+    let eligibleContacts = [];
+    if (contactIds.length > 0) {
+      const { data: cts } = await supabase.from('contacts').select('id, email, first_name')
+        .in('id', contactIds).not('email', 'is', null);
+      eligibleContacts = cts || [];
+    }
+
+    const { data: client } = await supabase.from('clients').select('name, niche').eq('id', client_id).maybeSingle();
+    const ctx = await ragSearch(`back in stock ${product_title}`, client_id).catch(() => '');
+
+    const emailRaw = await aiCall(
+      `You are Mahdi, Marketing & Content AI at Sales Scales. Return ONLY valid JSON, no markdown. Write warmly and directly — no exclamation marks, no hype. Never mention Claude.`,
+      `Write a back-in-stock notification email for "${product_title}" at ${client?.name || 'the store'} (${client?.niche || 'ecommerce'}). Recipients browsed or were active within 60 days. Write a single warm email announcing the product is available again, what makes it worth buying, and a clear CTA. Return JSON: {"subject":"...","content":"..."}`,
+      ctx
+    );
+    let parsed = { subject: `${product_title} is back in stock`, content: '' };
+    try { const s = emailRaw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim(); const m = s.match(/\{[\s\S]*\}/); parsed = JSON.parse(m ? m[0] : s); } catch {}
+
+    await supabase.from('approvals').insert([{
+      type: 'email_sequence', from_member: 'mahdi', client_id,
+      title: `Back in Stock — ${product_title}`,
+      content: parsed.content || '',
+      metadata: { subject: parsed.subject, product_title, eligible_contacts: eligibleContacts.length, steps: [{ step_type: 'email', subject: parsed.subject, content: parsed.content || '', wait_hours: 0 }] },
+      priority: 'normal', status: 'pending', created_at: new Date().toISOString(),
+    }]);
+
+    res.json({ ok: true, eligible_contacts: eligibleContacts.length, message: 'Back in stock notification submitted for approval' });
+  } catch (e) {
+    console.error('/shopify/back-in-stock error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 5: CROSS-SELL SEQUENCE (day-14 post-purchase) ────
+// Called by the scheduler when current_step hits the cross-sell threshold in a post_purchase workflow
+const generateCrossSellApproval = async (enrollment, contact, client) => {
+  try {
+    const [ctx, shopifyCtx] = await Promise.all([
+      ragSearch(`cross sell products ${client.name}`, client.id).catch(() => ''),
+      getShopifyContext(client.id).catch(() => ''),
+    ]);
+    const combinedCtx = [ctx, shopifyCtx].filter(Boolean).join('\n\n');
+
+    const emailRaw = await aiCall(
+      `You are Mahdi, Marketing & Content AI at Sales Scales. Return ONLY valid JSON, no markdown. Write like a thoughtful friend at the brand — no exclamation marks, no hype. Never mention Claude.`,
+      `Write a cross-sell email for a customer of ${client.name} who completed a purchase 14 days ago. Suggest complementary products based on what's available. Email should feel personal, reference their recent purchase, and naturally introduce 2–3 related products they'd likely love. Return JSON: {"subject":"...","content":"..."}`,
+      combinedCtx
+    );
+    let parsed = { subject: 'You might also like these', content: '' };
+    try { const s = emailRaw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim(); const m = s.match(/\{[\s\S]*\}/); parsed = JSON.parse(m ? m[0] : s); } catch {}
+
+    await supabase.from('approvals').insert([{
+      type: 'email_sequence', from_member: 'mahdi', client_id: client.id,
+      title: `Cross-sell — ${contact.first_name || contact.email} (day 14)`,
+      content: parsed.content || '',
+      metadata: { subject: parsed.subject, contact_id: contact.id, enrollment_id: enrollment.id, steps: [{ step_type: 'email', subject: parsed.subject, content: parsed.content || '', wait_hours: 0 }] },
+      priority: 'normal', status: 'pending', created_at: new Date().toISOString(),
+    }]);
+    console.log(`[cross-sell] Approval submitted for ${contact.first_name} (enrollment ${enrollment.id})`);
+  } catch (e) {
+    console.error('[cross-sell] Error:', e.message);
+  }
+};
+
+// ─── FIX 6: FB/IG DM NURTURE SEQUENCE ────────────────────
+const generateSocialNurtureApproval = async (platform, senderId, clientId) => {
+  try {
+    const platformLabel = platform === 'instagram' ? 'Instagram' : 'Facebook';
+    const ctx = clientId ? await ragSearch(`social media DM welcome ${platformLabel}`, clientId).catch(() => '') : '';
+
+    const seqRaw = await aiCall(
+      `You are Mahdi, Marketing & Content AI at Sales Scales. Return ONLY valid JSON, no markdown. Write DMs that feel personal and genuine — no exclamation marks, no spam language. Never mention Claude.`,
+      `Write a 3-message DM nurture sequence for a new ${platformLabel} follower who just messaged us.\n\nMessage 1 (immediate welcome): Warm greeting, 1–2 sentences, acknowledge they reached out, hint at what we offer\nMessage 2 (day 3): Recommend our bestseller or top product — 2 sentences, natural tone\nMessage 3 (day 7): Special offer or next step — 2–3 sentences, soft CTA, not pushy\n\nReturn JSON: {"steps":[{"step_type":"dm","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":72},{"step_type":"dm","content":"...","wait_hours":0},{"step_type":"wait","content":"","wait_hours":96},{"step_type":"dm","content":"...","wait_hours":0}]}`,
+      ctx
+    );
+    let parsed = { steps: [] };
+    try { const s = seqRaw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim(); const m = s.match(/\{[\s\S]*\}/); parsed = JSON.parse(m ? m[0] : s); } catch {}
+
+    const steps = Array.isArray(parsed.steps) && parsed.steps.length ? parsed.steps : [];
+
+    await supabase.from('approvals').insert([{
+      type: 'dm_sequence', from_member: 'mahdi', client_id: clientId || null,
+      title: `${platformLabel} DM Nurture — new contact ${senderId}`,
+      content: `Mahdi generated a 3-message ${platformLabel} DM nurture sequence for a new contact.`,
+      metadata: { steps, platform, sender_id: senderId, trigger: 'new_dm_contact' },
+      priority: 'normal', status: 'pending', created_at: new Date().toISOString(),
+    }]);
+    console.log(`[social-nurture] Approval submitted for new ${platformLabel} contact ${senderId}`);
+  } catch (e) {
+    console.error('[social-nurture] Error:', e.message);
+  }
+};
 
 // ─── GLOBAL ERROR HANDLER ─────────────────────────────────
 app.use((err, req, res, next) => {

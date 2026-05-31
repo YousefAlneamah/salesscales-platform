@@ -863,8 +863,65 @@ export default function ClientDashboard({ user, onLogout }) {
   // ─── SEQUENCES ────────────────────────────────────────
   const hasWhatsAppPendingSteps = Object.values(workflowStepsMap).some(steps => steps.some(s => s.step_type === 'whatsapp'));
 
-  const ClientSequences = () => (
+  const ClientSequences = () => {
+    const [enrollModal, setEnrollModal] = useState(null); // { workflow }
+    const [enrollContactId, setEnrollContactId] = useState('');
+    const [enrolling, setEnrolling] = useState(false);
+    const [enrollMsg, setEnrollMsg] = useState('');
+
+    const openEnrollModal = (workflow) => {
+      setEnrollModal(workflow);
+      setEnrollContactId(contacts[0]?.id || '');
+      setEnrollMsg('');
+    };
+
+    const doEnroll = async () => {
+      if (!enrollContactId || !enrollModal) return;
+      setEnrolling(true);
+      setEnrollMsg('');
+      try {
+        const res = await axios.post(`${API_BASE}/contacts/enroll`, {
+          contact_id: enrollContactId,
+          workflow_id: enrollModal.id,
+          client_id: user.clientId,
+        });
+        setEnrollMsg(res.data.ok ? '✓ Enrolled successfully' : 'Enrollment failed');
+        if (res.data.ok) setTimeout(() => setEnrollModal(null), 1200);
+      } catch (e) {
+        setEnrollMsg(e.response?.data?.error || 'Enrollment failed');
+      }
+      setEnrolling(false);
+    };
+
+    return (
     <div>
+      {enrollModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,22,40,0.6)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: '14px', padding: '28px', width: '380px', boxShadow: '0 20px 60px rgba(10,22,40,0.25)' }}>
+            <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628', marginBottom: '4px' }}>Enroll a Contact</div>
+            <div style={{ fontSize: '11px', color: '#8896a8', marginBottom: '16px' }}>Sequence: <strong>{enrollModal.name}</strong></div>
+            <div style={{ fontSize: '11px', color: '#4a5568', marginBottom: '6px', fontWeight: 600 }}>Select contact</div>
+            <select value={enrollContactId} onChange={e => setEnrollContactId(e.target.value)}
+              style={{ width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '10px 12px', fontSize: '12px', marginBottom: '16px', outline: 'none' }}>
+              {contacts.map(c => (
+                <option key={c.id} value={c.id}>{c.first_name} {c.last_name} {c.email ? `— ${c.email}` : ''}</option>
+              ))}
+            </select>
+            {enrollMsg && <div style={{ fontSize: '11px', color: enrollMsg.startsWith('✓') ? '#059669' : '#dc2626', marginBottom: '12px' }}>{enrollMsg}</div>}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={doEnroll} disabled={enrolling || !enrollContactId}
+                style={{ flex: 1, background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', opacity: enrolling ? 0.6 : 1 }}>
+                {enrolling ? 'Enrolling…' : 'Enroll'}
+              </button>
+              <button onClick={() => setEnrollModal(null)}
+                style={{ padding: '10px 16px', background: 'white', border: '1px solid #e4e9f0', borderRadius: '8px', fontSize: '12px', cursor: 'pointer', color: '#8896a8' }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ marginBottom: '24px' }}>
         <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Automation</div>
         <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Sequences</div>
@@ -976,11 +1033,22 @@ export default function ClientDashboard({ user, onLogout }) {
                 </div>
               </div>
             )}
+
+            {/* Fix 7: Enroll Contact button */}
+            {workflow.status === 'active' && contacts.length > 0 && (
+              <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f3f8' }}>
+                <button onClick={() => openEnrollModal(workflow)}
+                  style={{ fontSize: '11px', padding: '7px 16px', background: 'rgba(201,168,76,0.08)', color: '#c9a84c', border: '1px solid rgba(201,168,76,0.3)', borderRadius: '7px', cursor: 'pointer', fontWeight: 600 }}>
+                  + Enroll Contact
+                </button>
+              </div>
+            )}
           </div>
         );
       })}
     </div>
-  );
+    );
+  };
 
   // ─── RECENT ACTIVITY ─────────────────────────────────
   const ClientActivity = () => {
@@ -1048,7 +1116,49 @@ export default function ClientDashboard({ user, onLogout }) {
   };
 
   // ─── MESSAGES ────────────────────────────────────────
-  const ClientMessages = () => (
+  const ClientMessages = () => {
+    const [takeoverLoading, setTakeoverLoading] = useState({});
+    const [refundLoading, setRefundLoading] = useState({});
+    const [refundResult, setRefundResult] = useState({});
+
+    const contactMap = {};
+    contacts.forEach(c => { contactMap[c.id] = c; });
+
+    const toggleTakeover = async (contactId, value) => {
+      setTakeoverLoading(prev => ({ ...prev, [contactId]: true }));
+      try {
+        await axios.patch(`${API_BASE}/contacts/${contactId}/takeover`, { human_takeover: value });
+        setContacts(prev => prev.map(c => c.id === contactId ? { ...c, human_takeover: value } : c));
+      } catch (e) {
+        console.error('Takeover toggle error:', e.message);
+      }
+      setTakeoverLoading(prev => ({ ...prev, [contactId]: false }));
+    };
+
+    const processRefund = async (msg) => {
+      const contact = msg.contact_id ? contactMap[msg.contact_id] : null;
+      if (!contact?.email) return;
+      setRefundLoading(prev => ({ ...prev, [msg.id]: true }));
+      setRefundResult(prev => ({ ...prev, [msg.id]: null }));
+      try {
+        const res = await axios.post(`${API_BASE}/shopify/refund`, {
+          client_id: user.clientId,
+          contact_id: contact.id,
+          contact_email: contact.email,
+        });
+        setRefundResult(prev => ({ ...prev, [msg.id]: { ok: true, text: `Refund issued for order #${res.data.order_number} — $${res.data.amount}` } }));
+      } catch (e) {
+        setRefundResult(prev => ({ ...prev, [msg.id]: { ok: false, text: e.response?.data?.error || 'Refund failed' } }));
+      }
+      setRefundLoading(prev => ({ ...prev, [msg.id]: false }));
+    };
+
+    const hasRefundKeyword = (text) => /refund|return|money back/i.test(text || '');
+
+    // Group messages by contact_id to show per-conversation takeover state
+    const seenContacts = new Set();
+
+    return (
     <div>
       <div style={{ marginBottom: '24px' }}>
         <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Communications</div>
@@ -1064,32 +1174,84 @@ export default function ClientDashboard({ user, onLogout }) {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {messages.map(msg => (
-            <div key={msg.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '14px 16px', display: 'flex', gap: '12px', alignItems: 'flex-start', boxShadow: '0 1px 3px rgba(10,22,40,0.04)' }}>
-              <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: msg.direction === 'outbound' ? '#0a1628' : '#f0f3f8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', flexShrink: 0 }}>
-                {channelIcon(msg.channel)}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628' }}>
-                    {msg.direction === 'outbound' ? `AI → ${msg.channel}` : msg.sender_name}
+          {messages.map(msg => {
+            const contact = msg.contact_id ? contactMap[msg.contact_id] : null;
+            const inTakeover = contact?.human_takeover === true;
+            const isFirstForContact = msg.contact_id && !seenContacts.has(msg.contact_id);
+            if (msg.contact_id) seenContacts.add(msg.contact_id);
+            const showRefund = hasRefundKeyword(msg.content) && contact?.email && msg.channel !== 'Refund';
+            return (
+              <div key={msg.id} style={{ background: 'white', border: `1px solid ${inTakeover ? '#fde68a' : '#e4e9f0'}`, borderRadius: '10px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.04)' }}>
+                {/* Fix 1: takeover banner */}
+                {inTakeover && isFirstForContact && (
+                  <div style={{ background: '#fffbeb', borderBottom: '1px solid #fde68a', padding: '8px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: '#92400e' }}>
+                      You are handling this conversation — AI is paused
+                    </div>
+                    <button
+                      disabled={takeoverLoading[msg.contact_id]}
+                      onClick={() => toggleTakeover(msg.contact_id, false)}
+                      style={{ fontSize: '10px', padding: '4px 12px', background: '#10b981', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, flexShrink: 0 }}>
+                      {takeoverLoading[msg.contact_id] ? '…' : 'Hand Back to AI'}
+                    </button>
                   </div>
-                  <div style={{ fontSize: '9px', color: '#8896a8' }}>{formatTime(msg.created_at)}</div>
+                )}
+                <div style={{ padding: '14px 16px', display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                  <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: msg.direction === 'outbound' ? '#0a1628' : '#f0f3f8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', flexShrink: 0 }}>
+                    {channelIcon(msg.channel)}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628' }}>
+                        {msg.direction === 'outbound' ? `AI → ${msg.channel}` : msg.sender_name}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {/* Fix 1: take over button (first message per contact, not already in takeover) */}
+                        {isFirstForContact && contact && !inTakeover && (
+                          <button
+                            disabled={takeoverLoading[msg.contact_id]}
+                            onClick={() => toggleTakeover(msg.contact_id, true)}
+                            style={{ fontSize: '9px', padding: '3px 10px', background: 'rgba(10,22,40,0.06)', color: '#0a1628', border: '1px solid rgba(10,22,40,0.15)', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}>
+                            {takeoverLoading[msg.contact_id] ? '…' : 'Take Over'}
+                          </button>
+                        )}
+                        <div style={{ fontSize: '9px', color: '#8896a8' }}>{formatTime(msg.created_at)}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                      <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', background: msg.direction === 'outbound' ? '#ecfdf5' : '#eff6ff', color: msg.direction === 'outbound' ? '#059669' : '#3b82f6', border: `1px solid ${msg.direction === 'outbound' ? '#a7f3d0' : '#bfdbfe'}`, fontWeight: 600 }}>
+                        {msg.direction === 'outbound' ? '↑ Sent' : '↓ Received'}
+                      </span>
+                      <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', background: '#f8fafc', color: '#8896a8', border: '1px solid #e4e9f0' }}>{msg.channel}</span>
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#475569', lineHeight: '1.5' }}>{msg.content}</div>
+                    {/* Fix 2: refund button on messages with refund/return keywords */}
+                    {showRefund && (
+                      <div style={{ marginTop: '8px' }}>
+                        {refundResult[msg.id] ? (
+                          <div style={{ fontSize: '11px', color: refundResult[msg.id].ok ? '#059669' : '#dc2626', fontWeight: 600 }}>
+                            {refundResult[msg.id].text}
+                          </div>
+                        ) : (
+                          <button
+                            disabled={refundLoading[msg.id]}
+                            onClick={() => processRefund(msg)}
+                            style={{ fontSize: '10px', padding: '5px 14px', background: refundLoading[msg.id] ? '#f0f3f8' : '#dc2626', color: refundLoading[msg.id] ? '#8896a8' : 'white', border: 'none', borderRadius: '6px', cursor: refundLoading[msg.id] ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
+                            {refundLoading[msg.id] ? 'Processing…' : 'Process Refund'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', background: msg.direction === 'outbound' ? '#ecfdf5' : '#eff6ff', color: msg.direction === 'outbound' ? '#059669' : '#3b82f6', border: `1px solid ${msg.direction === 'outbound' ? '#a7f3d0' : '#bfdbfe'}`, fontWeight: 600 }}>
-                    {msg.direction === 'outbound' ? '↑ Sent' : '↓ Received'}
-                  </span>
-                  <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', background: '#f8fafc', color: '#8896a8', border: '1px solid #e4e9f0' }}>{msg.channel}</span>
-                </div>
-                <div style={{ fontSize: '11px', color: '#475569', lineHeight: '1.5' }}>{msg.content}</div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   // ─── CONTACTS ────────────────────────────────────────
   const ClientContacts = () => {
