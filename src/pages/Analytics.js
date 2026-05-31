@@ -200,19 +200,35 @@ export default function Analytics() {
           <div className="stat-sub-green">{convertedDeals.length} deals converted</div>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
-        {[
-          { label: 'Pipeline Value', value: `$${pipelineValue.toLocaleString()}`, sub: `${fd.length} open deals`, color: '#10b981' },
-          { label: 'Approval Rate', value: fa.length > 0 ? Math.round((approvedCount / fa.length) * 100) + '%' : '—', sub: `${approvedCount} of ${fa.length} approved`, color: '#c9a84c' },
-          { label: 'Inbound Messages', value: inbound.length, sub: `${monthStats?.inboundThisMonth ?? 0} this month`, color: '#3b82f6' },
-        ].map(s => (
-          <div key={s.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '16px 18px', borderTop: `2px solid ${s.color}`, boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
-            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>{s.label}</div>
-            <div style={{ fontSize: '24px', fontWeight: 700, color: '#0a1628', letterSpacing: '-0.5px', marginBottom: '4px' }}>{s.value}</div>
-            <div style={{ fontSize: '11px', color: s.color, fontWeight: 500 }}>{s.sub}</div>
+      {(() => {
+        const totalSeqEnrolled = seqPerformance.reduce((s, w) => s + w.enrolled, 0);
+        const totalSeqCompleted = seqPerformance.reduce((s, w) => s + w.completed, 0);
+        const hasOrderData = convertedDeals.length > 0;
+        const winRateValue = totalSeqEnrolled > 0
+          ? (hasOrderData
+            ? Math.round((convertedDeals.length / totalSeqEnrolled) * 100)
+            : Math.round((totalSeqCompleted / totalSeqEnrolled) * 100))
+          : 0;
+        const winRateSub = hasOrderData
+          ? `${convertedDeals.length} converted of ${totalSeqEnrolled} enrolled`
+          : `completion proxy — ${totalSeqCompleted} of ${totalSeqEnrolled} enrolled`;
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
+            {[
+              { label: 'Pipeline Value', value: `$${pipelineValue.toLocaleString()}`, sub: `${fd.length} open deals`, color: '#10b981' },
+              { label: 'Approval Rate', value: fa.length > 0 ? Math.round((approvedCount / fa.length) * 100) + '%' : '—', sub: `${approvedCount} of ${fa.length} approved`, color: '#c9a84c' },
+              { label: 'Inbound Messages', value: inbound.length, sub: `${monthStats?.inboundThisMonth ?? 0} this month`, color: '#3b82f6' },
+              { label: 'Win Rate', value: totalSeqEnrolled > 0 ? `${winRateValue}%` : '—', sub: winRateSub, color: '#a78bfa' },
+            ].map(s => (
+              <div key={s.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '16px 18px', borderTop: `2px solid ${s.color}`, boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+                <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>{s.label}</div>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: '#0a1628', letterSpacing: '-0.5px', marginBottom: '4px' }}>{s.value}</div>
+                <div style={{ fontSize: '11px', color: s.color, fontWeight: 500 }}>{s.sub}</div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        );
+      })()}
 
       {/* CHARTS */}
       <div className="section-label" style={{ marginBottom: '10px' }}>Breakdowns</div>

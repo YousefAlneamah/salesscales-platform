@@ -1909,6 +1909,90 @@ cron.schedule('0 9 * * *', async () => {
   }
 });
 
+// ─── AUTO SCHEDULER: ZAINAB — DAY 7 NEW CLIENT CHECK-IN ──
+// Every day at 9:15am — sends first-week congratulations to clients who joined exactly 7 days ago
+cron.schedule('15 9 * * *', async () => {
+  console.log('[AUTO] Zainab — day 7 new client check-in starting...');
+  try {
+    const dayStart = new Date();
+    dayStart.setDate(dayStart.getDate() - 7);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+
+    const { data: newClients } = await supabase
+      .from('clients')
+      .select('id, name, tier')
+      .gte('created_at', dayStart.toISOString())
+      .lt('created_at', dayEnd.toISOString())
+      .eq('status', 'active');
+
+    if (!newClients || newClients.length === 0) {
+      console.log('[AUTO] Zainab day 7 — no clients joined 7 days ago');
+      return;
+    }
+
+    for (const client of newClients) {
+      try {
+        const [enrollRes, emailRes, clientUserRes] = await Promise.all([
+          supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('client_id', client.id),
+          supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', client.id).eq('channel', 'Email').eq('direction', 'outbound'),
+          supabase.from('client_users').select('email, name').eq('client_id', client.id).maybeSingle(),
+        ]);
+
+        const enrollCount = enrollRes.count || 0;
+        const emailCount = emailRes.count || 0;
+        const clientUser = clientUserRes.data;
+
+        const emailContent = await aiCall(
+          `You are Zainab, the Client Partner AI at Sales Scales. You write warm, encouraging emails that make clients feel supported and excited. Write like a real person, not a marketing bot. Short sentences, genuine tone. You are Zainab — never break character.`,
+          `Write a first-week check-in email to ${client.name} (${client.tier || 'Starter'} plan). They joined Sales Scales 7 days ago.\n\nThis week so far:\n- Contacts enrolled in sequences: ${enrollCount}\n- Emails sent by AI team: ${emailCount}\n\nCongratulate them on their first week. Highlight the activity above. Mention that the system takes 2–4 weeks to hit its stride and they should start seeing real results soon. Let them know the full AI team — Hassan, Hussain, Ali, Mahdi, and Fatima — are all actively working on their account. Encourage them to log in and check their sequences. Keep it under 150 words.`,
+          ''
+        );
+
+        if (clientUser?.email) {
+          const sender = await getClientSender(client.id);
+          await sgMail.send({
+            to: clientUser.email,
+            from: sender,
+            subject: `Your first week with Sales Scales — here's what happened`,
+            html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+              <div style="background:#0a1628;padding:20px 24px;border-radius:8px 8px 0 0">
+                <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">Sales Scales</div>
+                <div style="color:white;font-size:16px;font-weight:600">Your first week ✓</div>
+              </div>
+              <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 8px 8px;padding:24px">
+                <div style="color:#4a5568;font-size:13px;line-height:1.8;white-space:pre-wrap">${emailContent}</div>
+                <div style="margin-top:20px;padding:16px;background:#f8fafc;border-radius:8px;border-left:3px solid #c9a84c">
+                  <div style="font-size:11px;color:#8896a8;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">This week at a glance</div>
+                  <div style="display:flex;gap:24px">
+                    <div><div style="font-size:22px;font-weight:700;color:#0a1628">${enrollCount}</div><div style="font-size:10px;color:#8896a8">contacts enrolled</div></div>
+                    <div><div style="font-size:22px;font-weight:700;color:#0a1628">${emailCount}</div><div style="font-size:10px;color:#8896a8">emails sent</div></div>
+                  </div>
+                </div>
+                <hr style="border:none;border-top:1px solid #e4e9f0;margin:18px 0" />
+                <p style="color:#8896a8;font-size:11px;margin:0">Zainab — AI Client Partner · Sales Scales</p>
+              </div>
+            </div>`,
+          });
+          console.log(`[AUTO] Zainab day 7 check-in sent to ${client.name} (${emailCount} emails, ${enrollCount} enrollments)`);
+        }
+
+        await storeBriefing('zainab', 'yousef',
+          `Day 7 Check-in: ${client.name} — Flag for Personal Call`,
+          `${client.name} completed their first 7 days on the ${client.tier || 'Starter'} plan.\n\nWeek 1 stats:\n- Contacts enrolled: ${enrollCount}\n- Emails sent: ${emailCount}\n\nZainab sent them an automated first-week check-in email. Recommend scheduling a personal check-in call this week to review their results, answer questions, and lock in retention. Clients contacted personally in week 1 have higher 90-day retention.\n\nAction: ${enrollCount > 0 ? 'Sequences are running — strong start. Book a quick 15-min check-in call.' : 'No enrollments yet — sequences may not be set up. Prioritise this call urgently.'}`,
+          'high'
+        );
+      } catch (clientErr) {
+        console.error(`[AUTO] Zainab day 7 failed for ${client.name}:`, clientErr.message);
+      }
+    }
+    console.log(`[AUTO] Zainab day 7 — processed ${newClients.length} new client(s)`);
+  } catch (e) {
+    console.error('[AUTO] Zainab day 7 error:', e.message);
+  }
+});
+
 // ─── AUTO SCHEDULER: RETENTION — DAILY HEALTH ALERT ─────
 // Every day at 8am — alert Yousef for any client below health score 50
 cron.schedule('0 8 * * *', async () => {

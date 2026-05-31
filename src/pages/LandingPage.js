@@ -1,5 +1,8 @@
 import React from 'react';
 
+// REPLACE_WITH_REAL_CALENDLY_LINK
+const CALENDLY_URL = 'https://calendly.com/yousef-salesscales/30min';
+
 const NAVY   = '#0a1628';
 const NAVYM  = '#112240';
 const GOLD   = '#c9a84c';
@@ -235,7 +238,7 @@ export default function LandingPage({ onLoginClick }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <button onClick={onLoginClick} style={s.btnNavLogin}>Log In</button>
-          <a href="mailto:yousef@aisalesscales.com" style={{ ...s.btnNavCta, textDecoration: 'none' }}>Book a Demo</a>
+          <a href={CALENDLY_URL} target="_blank" rel="noopener noreferrer" style={{ ...s.btnNavCta, textDecoration: 'none' }}>Book a Demo</a>
         </div>
       </nav>
 
@@ -249,7 +252,7 @@ export default function LandingPage({ onLoginClick }) {
           Six AI specialists — Hussain, Hassan, Ali, Mahdi, Fatima, and Zainab — working 24/7 on your Shopify store. Recovering carts. Closing deals. Growing your list. Automatically.
         </p>
         <div style={s.heroCtas}>
-          <a href="mailto:yousef@aisalesscales.com" style={s.btnPrimary}>Book a Demo →</a>
+          <a href={CALENDLY_URL} target="_blank" rel="noopener noreferrer" style={s.btnPrimary}>Book a Demo →</a>
           <button onClick={onLoginClick} style={s.btnSecondary}>Sign In to Platform</button>
         </div>
         <div style={s.heroNote}>No setup fees · Cancel anytime · Results in 7 days or less</div>
@@ -343,7 +346,7 @@ export default function LandingPage({ onLoginClick }) {
           <p style={{ ...s.subwhite, margin: '12px auto 32px', textAlign: 'center' }}>
             Book a 20-minute demo and see exactly how Sales Scales will work for your store — specific sequences, projections, and AI team walkthrough included.
           </p>
-          <a href="mailto:yousef@aisalesscales.com" style={s.btnPrimary}>Book a Demo →</a>
+          <a href={CALENDLY_URL} target="_blank" rel="noopener noreferrer" style={s.btnPrimary}>Book a Demo →</a>
         </div>
       </section>
 
