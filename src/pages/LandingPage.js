@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-// REPLACE_WITH_REAL_CALENDLY_LINK
+// REPLACE_WITH_YOUR_CALENDLY_URL
 const CALENDLY_URL = 'https://calendly.com/yousef-salesscales/30min';
 
 const NAVY   = '#0a1628';
@@ -158,6 +158,16 @@ export default function LandingPage({ onLoginClick }) {
 
   // Track landing page view on mount — useEffect is imported at top via React, useState above
   React.useEffect(() => { if (cookieConsent === 'accepted') trackPageview('/'); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fix 1: inject Calendly widget script for inline embed
+  useEffect(() => {
+    if (document.querySelector('script[src*="calendly.com/assets/external/widget.js"]')) return;
+    const script = document.createElement('script');
+    script.src = 'https://assets.calendly.com/assets/external/widget.js';
+    script.async = true;
+    document.head.appendChild(script);
+    return () => { try { document.head.removeChild(script); } catch {} };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const scrollTo = (id) => {
     const el = document.getElementById(id);
@@ -346,6 +356,26 @@ export default function LandingPage({ onLoginClick }) {
           <button onClick={onLoginClick} style={s.btnSecondary}>Sign In to Platform</button>
         </div>
         <div style={s.heroNote}>No setup fees · Cancel anytime · Results in 7 days or less</div>
+      </section>
+
+      {/* ── CALENDLY INLINE EMBED ── */}
+      {/* REPLACE_WITH_YOUR_CALENDLY_URL — update CALENDLY_URL at the top of this file */}
+      <section style={{ background: NAVY, padding: '72px 24px' }}>
+        <div style={{ maxWidth: 900, margin: '0 auto', textAlign: 'center' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '3px', color: GOLD, textTransform: 'uppercase', marginBottom: '16px' }}>Book a Call</div>
+          <h2 style={{ fontSize: '32px', fontWeight: 800, color: WHITE, marginBottom: '12px', letterSpacing: '-0.5px' }}>
+            See Sales Scales in Action
+          </h2>
+          <p style={{ fontSize: '15px', color: MUTED, marginBottom: '32px', maxWidth: 520, margin: '0 auto 32px' }}>
+            Pick a time and we'll walk you through exactly how your AI team recovers revenue from day one.
+          </p>
+          {/* Calendly inline widget — loads via script tag injected in useEffect */}
+          <div
+            className="calendly-inline-widget"
+            data-url={CALENDLY_URL}
+            style={{ minWidth: 320, height: 700, borderRadius: 16, overflow: 'hidden' }}
+          />
+        </div>
       </section>
 
       {/* ── PROBLEM ── */}

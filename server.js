@@ -3348,12 +3348,24 @@ app.post('/approvals/submit', async (req, res) => {
     }]).select().single();
     if (error) throw error;
     onUrgentApproval(data);
+    // Fix 4: Slack notification on every approval submission
+    (async () => {
+      try {
+        let clientName = null;
+        if (data?.client_id) {
+          const { data: cl } = await supabase.from('clients').select('name').eq('id', data.client_id).maybeSingle();
+          clientName = cl?.name || null;
+        }
+        await sendApprovalSlackNotification(data, clientName);
+      } catch {}
+    })();
     if (data?.client_id) {
-      await notifyClientUser(
+      // Fix 3: use branded email template for client notifications
+      notifyClientUserBranded(
         data.client_id,
         'New content is ready for your review',
         `<p>Your AI team has prepared new content — <strong>${title}</strong> — that is ready for your review.</p><p>Log in to your Sales Scales portal to review and approve it.</p>`
-      );
+      ).catch(() => {});
       createClientNotification(
         data.client_id,
         'New approval pending',
@@ -6249,6 +6261,227 @@ app.post('/workflows/generate', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// ─── FIX 2: IN-MEMORY RESPONSE CACHE ─────────────────────
+// Simple 60-second TTL cache for expensive read endpoints.
+const _cache = {};
+const CACHE_TTL = 60 * 1000;
+
+const cacheGet = (key) => {
+  const entry = _cache[key];
+  if (!entry) return null;
+  if (Date.now() - entry.ts > CACHE_TTL) { delete _cache[key]; return null; }
+  return entry.data;
+};
+
+const cacheSet = (key, data) => { _cache[key] = { data, ts: Date.now() }; };
+
+const cacheClear = (...keys) => { keys.forEach(k => { delete _cache[k]; }); };
+
+// Middleware factory: caches JSON responses under the given key
+const withCache = (key) => async (req, res, next) => {
+  const cached = cacheGet(key);
+  if (cached) return res.json(cached);
+  const origJson = res.json.bind(res);
+  res.json = (body) => { cacheSet(key, body); return origJson(body); };
+  next();
+};
+
+// Cached GET /clients
+app.get('/clients', withCache('clients'), async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('clients').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ clients: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Cached GET /contacts
+app.get('/contacts', withCache('contacts'), async (req, res) => {
+  try {
+    const { client_id } = req.query;
+    let q = supabase.from('contacts').select('*').order('created_at', { ascending: false });
+    if (client_id) q = q.eq('client_id', client_id);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json({ contacts: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Clear relevant caches when writes happen
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    const path = req.path.toLowerCase();
+    if (path.startsWith('/clients')) cacheClear('clients');
+    if (path.startsWith('/contacts')) cacheClear('contacts');
+    if (path.startsWith('/analytics')) cacheClear('analytics_stats');
+  }
+  next();
+});
+
+// ─── FIX 3: BRANDED NOTIFICATION EMAILS ──────────────────
+// Wrap notifyClientUser to use buildEmailHtml — keep the function name but upgrade the template
+const _legacyNotifyClientUser = notifyClientUser;
+const notifyClientUserBranded = async (clientId, subject, bodyHtml) => {
+  if (!clientId) return;
+  try {
+    const { data: clientRow } = await supabase.from('clients').select('name').eq('id', clientId).maybeSingle();
+    const { data: users } = await supabase.from('client_users').select('email, name').eq('client_id', clientId);
+    const recipients = (users || []).map(u => u.email).filter(Boolean);
+    if (recipients.length === 0) return;
+    const from = { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' };
+    const html = buildEmailHtml({
+      content: bodyHtml.replace(/<p>/g, '').replace(/<\/p>/g, '\n').replace(/<strong>/g, '').replace(/<\/strong>/g, ''),
+      subject,
+      clientName: clientRow?.name || 'Sales Scales',
+      brandColor: '#0a1628',
+    });
+    await Promise.all(recipients.map(to => sgMail.send({ to, from, subject, html })
+      .catch(e => console.error(`notifyClientUser send to ${to} failed:`, e.message))));
+  } catch (e) {
+    console.error('notifyClientUserBranded error:', e.message);
+  }
+};
+
+// ─── FIX 4: SLACK NOTIFICATION ON APPROVAL SUBMIT ────────
+// Wired into POST /approvals/submit — send Slack message with approval details
+const sendApprovalSlackNotification = async (approval, clientName) => {
+  const url = process.env.SLACK_WEBHOOK_URL;
+  if (!url) return;
+  const priorityEmoji = { urgent: '🚨', high: '⚠️', normal: '📋', low: '💤' }[approval.priority] || '📋';
+  const text = `${priorityEmoji} *New approval waiting* — ${approval.type} from *${approval.from_member || 'system'}*${clientName ? ` for ${clientName}` : ''}\n*${approval.title}*\nPriority: ${approval.priority || 'normal'}\nReview at https://aisalesscales.com`;
+  try { await axios.post(url, { text }); }
+  catch (e) { console.error('Approval Slack notification failed:', e.message); }
+};
+
+// ─── FIX 5: DAILY OWNER SUMMARY EMAIL — 7AM ──────────────
+cron.schedule('0 7 * * *', async () => {
+  console.log('[AUTO] Daily owner summary email starting...');
+  if (!process.env.SENDGRID_API_KEY || !process.env.SENDGRID_FROM_EMAIL) return;
+  try {
+    const yesterdayStart = new Date(Date.now() - 86400000);
+    yesterdayStart.setHours(0, 0, 0, 0);
+    const yesterdayEnd   = new Date(yesterdayStart.getTime() + 86400000);
+    const ysISO = yesterdayStart.toISOString();
+    const yeISO = yesterdayEnd.toISOString();
+
+    const [
+      activeClientsRes, newContactsRes,
+      completedEnrollmentsRes, urgentApprovalsRes,
+      lowHealthClientsRes, recentErrorsRes,
+    ] = await Promise.all([
+      supabase.from('clients').select('id', { count: 'exact', head: true }).eq('status', 'active'),
+      supabase.from('contacts').select('id', { count: 'exact', head: true })
+        .gte('created_at', ysISO).lt('created_at', yeISO),
+      supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true })
+        .eq('status', 'completed').gte('completed_at', ysISO).lt('completed_at', yeISO),
+      supabase.from('approvals').select('id, title, from_member, priority, clients(name)')
+        .eq('status', 'pending').eq('priority', 'urgent').order('created_at', { ascending: false }).limit(5),
+      supabase.from('clients').select('id, name, health_score')
+        .lt('health_score', 50).not('health_score', 'is', null).order('health_score').limit(5),
+      supabase.from('errors').select('message, endpoint, created_at')
+        .gte('created_at', ysISO).order('created_at', { ascending: false }).limit(10),
+    ]);
+
+    const activeClients   = activeClientsRes.count || 0;
+    const newContacts     = newContactsRes.count || 0;
+    const completedEnroll = completedEnrollmentsRes.count || 0;
+    const urgentApprovals = urgentApprovalsRes.data || [];
+    const lowHealthClients = lowHealthClientsRes.data || [];
+    const recentErrors    = recentErrorsRes.data || [];
+    const dateStr = yesterdayStart.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+    const urgentRows = urgentApprovals.length > 0
+      ? urgentApprovals.map(a => `<tr><td style="padding:6px 0;font-size:13px;color:#dc2626;font-weight:600">${a.title}</td><td style="padding:6px 0 6px 16px;font-size:12px;color:#4a5568">${a.from_member}</td></tr>`).join('')
+      : '<tr><td colspan="2" style="padding:8px 0;font-size:13px;color:#10b981">✓ No urgent approvals</td></tr>';
+
+    const lowHealthRows = lowHealthClients.length > 0
+      ? lowHealthClients.map(c => `<tr><td style="padding:6px 0;font-size:13px;color:#0a1628;font-weight:600">${c.name}</td><td style="padding:6px 0 6px 16px;font-size:12px;color:#dc2626;font-weight:700">${c.health_score}/100</td></tr>`).join('')
+      : '<tr><td colspan="2" style="padding:8px 0;font-size:13px;color:#10b981">✓ All clients healthy</td></tr>';
+
+    const errorRows = recentErrors.length > 0
+      ? recentErrors.slice(0, 5).map(e => `<tr><td style="padding:4px 0;font-size:11px;color:#dc2626;font-family:monospace">${(e.message || '').slice(0, 80)}</td><td style="padding:4px 0 4px 12px;font-size:10px;color:#8896a8">${e.endpoint}</td></tr>`).join('')
+      : '<tr><td colspan="2" style="padding:8px 0;font-size:13px;color:#10b981">✓ No errors recorded</td></tr>';
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/></head>
+<body style="margin:0;padding:0;background:#f0f3f8;font-family:Arial,Helvetica,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f3f8;padding:24px 16px;">
+<tr><td align="center">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 8px 28px rgba(10,22,40,0.10);">
+  <tr><td style="background:#0a1628;padding:28px 32px;text-align:center;">
+    <div style="color:#ffffff;font-size:20px;font-weight:800;letter-spacing:1px;">SALES SCALES</div>
+    <div style="width:40px;height:3px;background:#c9a84c;border-radius:2px;margin:10px auto 0;"></div>
+    <div style="color:rgba(255,255,255,0.5);font-size:12px;margin-top:10px;font-weight:600;letter-spacing:1px;">DAILY OWNER SUMMARY</div>
+  </td></tr>
+  <tr><td style="padding:24px 32px 8px;">
+    <div style="font-size:13px;color:#8896a8;">${dateStr}</div>
+    <div style="font-size:20px;font-weight:700;color:#0a1628;margin-top:4px;">Good morning, Yousef 👋</div>
+  </td></tr>
+  <tr><td style="padding:20px 32px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td width="25%" style="text-align:center;background:#f8fafc;border-radius:10px;padding:16px 8px;border:1px solid #e4e9f0;">
+          <div style="font-size:28px;font-weight:800;color:#0a1628;">${activeClients}</div>
+          <div style="font-size:10px;color:#8896a8;margin-top:4px;letter-spacing:1px;text-transform:uppercase;">Active Clients</div>
+        </td>
+        <td width="4%"></td>
+        <td width="25%" style="text-align:center;background:#f8fafc;border-radius:10px;padding:16px 8px;border:1px solid #e4e9f0;">
+          <div style="font-size:28px;font-weight:800;color:#3b82f6;">${newContacts}</div>
+          <div style="font-size:10px;color:#8896a8;margin-top:4px;letter-spacing:1px;text-transform:uppercase;">New Contacts</div>
+        </td>
+        <td width="4%"></td>
+        <td width="25%" style="text-align:center;background:#f8fafc;border-radius:10px;padding:16px 8px;border:1px solid #e4e9f0;">
+          <div style="font-size:28px;font-weight:800;color:#10b981;">${completedEnroll}</div>
+          <div style="font-size:10px;color:#8896a8;margin-top:4px;letter-spacing:1px;text-transform:uppercase;">Sequences Done</div>
+        </td>
+        <td width="4%"></td>
+        <td width="25%" style="text-align:center;background:#f8fafc;border-radius:10px;padding:16px 8px;border:1px solid #e4e9f0;">
+          <div style="font-size:28px;font-weight:800;color:${urgentApprovals.length > 0 ? '#dc2626' : '#10b981'};">${urgentApprovals.length}</div>
+          <div style="font-size:10px;color:#8896a8;margin-top:4px;letter-spacing:1px;text-transform:uppercase;">Urgent Approvals</div>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+  ${urgentApprovals.length > 0 ? `
+  <tr><td style="padding:20px 32px 0;">
+    <div style="font-size:11px;font-weight:700;color:#dc2626;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;">⚠ Urgent Approvals Waiting</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${urgentRows}</table>
+  </td></tr>` : ''}
+  ${lowHealthClients.length > 0 ? `
+  <tr><td style="padding:20px 32px 0;">
+    <div style="font-size:11px;font-weight:700;color:#f59e0b;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;">⚡ Clients Needing Attention</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${lowHealthRows}</table>
+  </td></tr>` : ''}
+  <tr><td style="padding:20px 32px 0;">
+    <div style="font-size:11px;font-weight:700;color:#4a5568;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;">🖥 Server Errors Yesterday</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${errorRows}</table>
+  </td></tr>
+  <tr><td style="padding:20px 32px 32px;text-align:center;">
+    <a href="https://aisalesscales.com" style="display:inline-block;background:#c9a84c;color:#0a1628;font-weight:700;font-size:13px;padding:14px 32px;border-radius:10px;text-decoration:none;letter-spacing:0.3px;">Open Platform →</a>
+  </td></tr>
+  <tr><td style="background:#f8fafc;border-top:1px solid #e4e9f0;padding:20px 32px;text-align:center;">
+    <div style="color:#8896a8;font-size:11px;">Sales Scales · Daily Summary · ${new Date().toLocaleString()}</div>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>`;
+
+    await sgMail.send({
+      to: 'yousef@aisalesscales.com',
+      from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+      subject: `Daily Summary — ${dateStr} · ${activeClients} clients · ${newContacts} new contacts`,
+      html,
+    });
+    console.log(`[AUTO] Daily owner summary sent — ${activeClients} clients, ${newContacts} contacts, ${completedEnroll} completed enrollments`);
+  } catch (e) {
+    console.error('[AUTO] Daily summary email error:', e.message);
+  }
+}, { timezone: 'Asia/Riyadh' });
 
 // ─── GLOBAL ERROR HANDLER ─────────────────────────────────
 app.use((err, req, res, next) => {
