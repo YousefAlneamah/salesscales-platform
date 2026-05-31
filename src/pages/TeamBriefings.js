@@ -18,6 +18,71 @@ const PRIORITY_BADGE = {
   low: 'badge-green',
 };
 
+const PRIORITY_COLOR = {
+  urgent: '#dc2626',
+  high: '#d97706',
+  normal: '#3b82f6',
+  low: '#10b981',
+};
+
+function CalendarView({ briefings, getMemberName }) {
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    return d;
+  });
+
+  const getBriefingsForDay = (day) => {
+    const dayStr = day.toISOString().slice(0, 10);
+    return briefings.filter(b => {
+      const src = b.scheduled_for || b.created_at;
+      return src && new Date(src).toISOString().slice(0, 10) === dayStr;
+    });
+  };
+
+  const dayLabel = (d) => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const isToday = (d) => d.toDateString() === new Date().toDateString();
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(120px, 1fr))', gap: '8px', minWidth: '840px' }}>
+        {days.map((day, idx) => {
+          const dayBriefings = getBriefingsForDay(day);
+          return (
+            <div key={idx} style={{ background: isToday(day) ? 'rgba(201,168,76,0.05)' : 'var(--bg)', border: `1px solid ${isToday(day) ? 'var(--gold)' : 'var(--border)'}`, borderRadius: '10px', padding: '10px', minHeight: '140px' }}>
+              <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: isToday(day) ? 'var(--gold)' : 'var(--muted)', marginBottom: '8px' }}>
+                {dayLabel(day)}{isToday(day) ? ' · Today' : ''}
+              </div>
+              {dayBriefings.length === 0 ? (
+                <div style={{ fontSize: '10px', color: 'var(--muted)', textAlign: 'center', marginTop: '24px' }}>—</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  {dayBriefings.map(b => (
+                    <div key={b.id} style={{ background: 'white', border: `1px solid ${PRIORITY_COLOR[b.priority] || '#e4e9f0'}`, borderLeft: `3px solid ${PRIORITY_COLOR[b.priority] || '#3b82f6'}`, borderRadius: '6px', padding: '6px 8px' }}>
+                      <div style={{ fontSize: '9px', fontWeight: 700, color: PRIORITY_COLOR[b.priority] || '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>{b.priority}</div>
+                      <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text)', lineHeight: 1.3, marginBottom: '2px', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{b.subject}</div>
+                      <div style={{ fontSize: '9px', color: 'var(--muted)' }}>{getMemberName(b.from_member)} → {getMemberName(b.to_member)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: '12px', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+        {Object.entries(PRIORITY_COLOR).map(([p, c]) => (
+          <div key={p} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: 'var(--muted)' }}>
+            <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: c }} />
+            {p.charAt(0).toUpperCase() + p.slice(1)}
+          </div>
+        ))}
+        <div style={{ fontSize: '11px', color: 'var(--muted)', marginLeft: 'auto' }}>Showing today + 6 days · Scheduled briefings shown on their scheduled date, others on created date</div>
+      </div>
+    </div>
+  );
+}
+
 const inputStyle = {
   width: '100%',
   padding: '8px 12px',
@@ -46,6 +111,7 @@ export default function TeamBriefings() {
     subject: '',
     content: '',
     priority: 'normal',
+    scheduled_for: '',
   });
   const [submitting, setSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
@@ -53,6 +119,7 @@ export default function TeamBriefings() {
   const [expandedId, setExpandedId] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [activeTab, setActiveTab] = useState('list');
 
   const fetchBriefings = async () => {
     setLoading(true);
@@ -79,7 +146,10 @@ export default function TeamBriefings() {
     }
     setSubmitting(true);
     try {
-      await axios.post(`${API_BASE}/team/brief`, form);
+      await axios.post(`${API_BASE}/team/brief`, {
+        ...form,
+        scheduled_for: form.scheduled_for || null,
+      });
       setSuccessMsg(`Briefing sent to ${getMemberName(form.to_member)}.`);
       setForm(f => ({ ...f, subject: '', content: '' }));
       fetchBriefings();
@@ -155,13 +225,15 @@ export default function TeamBriefings() {
       </div>
 
       <div className="card" style={{ marginBottom: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
-          <i className="ti ti-send" style={{ fontSize: '17px', color: 'var(--gold)' }} aria-hidden="true"></i>
-          <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text)' }}>Create Briefing</div>
-          <div style={{ fontSize: '12px', color: 'var(--muted)', marginLeft: '4px' }}>— handoff context that gets injected into the recipient's next AI session</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <i className="ti ti-send" style={{ fontSize: '17px', color: 'var(--gold)' }} aria-hidden="true"></i>
+            <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text)' }}>Create Briefing</div>
+            <div style={{ fontSize: '12px', color: 'var(--muted)', marginLeft: '4px' }}>— handoff context injected into the recipient's next AI session</div>
+          </div>
         </div>
         <form onSubmit={handleSubmit}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', marginBottom: '14px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '14px', marginBottom: '14px' }}>
             <div>
               <div className="section-label" style={{ marginBottom: '6px' }}>From</div>
               <select style={selectStyle} value={form.from_member} onChange={e => setForm(f => ({ ...f, from_member: e.target.value }))}>
@@ -182,6 +254,11 @@ export default function TeamBriefings() {
                 <option value="high">High</option>
                 <option value="urgent">Urgent</option>
               </select>
+            </div>
+            <div>
+              <div className="section-label" style={{ marginBottom: '6px' }}>Schedule For (optional)</div>
+              <input type="date" style={inputStyle} value={form.scheduled_for}
+                onChange={e => setForm(f => ({ ...f, scheduled_for: e.target.value }))} />
             </div>
           </div>
           <div style={{ marginBottom: '12px' }}>
@@ -219,25 +296,37 @@ export default function TeamBriefings() {
 
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text)' }}>All Briefings</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button onClick={() => setShowArchived(v => !v)}
-              style={{ background: showArchived ? 'rgba(201,168,76,0.1)' : 'var(--bg)', color: showArchived ? 'var(--gold)' : 'var(--muted)', border: `1px solid ${showArchived ? 'var(--gold)' : 'var(--border)'}`, borderRadius: '7px', padding: '5px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
-              {showArchived ? 'Hide Archived' : 'Show Archived'}
-            </button>
-            <div className="section-label" style={{ marginRight: '4px' }}>Filter by recipient:</div>
-            <select
-              style={{ ...selectStyle, width: 'auto', padding: '6px 10px', fontSize: '12px' }}
-              value={filter}
-              onChange={e => setFilter(e.target.value)}
-            >
-              <option value="all">All Members</option>
-              {MEMBERS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            {[{ id: 'list', label: 'All Briefings', icon: 'ti-list' }, { id: 'calendar', label: 'Calendar', icon: 'ti-calendar' }].map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                style={{ background: activeTab === tab.id ? 'var(--navy)' : 'var(--bg)', color: activeTab === tab.id ? 'var(--gold)' : 'var(--muted)', border: `1px solid ${activeTab === tab.id ? 'var(--navy)' : 'var(--border)'}`, borderRadius: '8px', padding: '6px 14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <i className={`ti ${tab.icon}`} aria-hidden="true"></i>
+                {tab.label}
+              </button>
+            ))}
           </div>
+          {activeTab === 'list' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button onClick={() => setShowArchived(v => !v)}
+                style={{ background: showArchived ? 'rgba(201,168,76,0.1)' : 'var(--bg)', color: showArchived ? 'var(--gold)' : 'var(--muted)', border: `1px solid ${showArchived ? 'var(--gold)' : 'var(--border)'}`, borderRadius: '7px', padding: '5px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+                {showArchived ? 'Hide Archived' : 'Show Archived'}
+              </button>
+              <div className="section-label" style={{ marginRight: '4px' }}>Filter by recipient:</div>
+              <select
+                style={{ ...selectStyle, width: 'auto', padding: '6px 10px', fontSize: '12px' }}
+                value={filter}
+                onChange={e => setFilter(e.target.value)}
+              >
+                <option value="all">All Members</option>
+                {MEMBERS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </div>
+          )}
         </div>
 
-        {loading ? (
+        {activeTab === 'calendar' ? (
+          <CalendarView briefings={briefings} getMemberName={getMemberName} />
+        ) : loading ? (
           <div style={{ textAlign: 'center', padding: '48px', color: 'var(--muted)', fontSize: '13px' }}>Loading briefings...</div>
         ) : briefings.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '48px' }}>

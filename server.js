@@ -1758,6 +1758,33 @@ Return JSON: {"prospects":[{"name":"...","niche":"...","channel":"Email","pain_p
           console.error('[AUTO] Hassan LinkedIn parse error:', liErr.message);
         }
       }
+
+      // Fix 7: Cold email outreach per prospect
+      if (prospects.length > 0) {
+        const emailProspectList = prospects.map((p, i) =>
+          `${i + 1}. Name: ${p.name || (p.niche + ' store owner')} | Niche: ${p.niche || 'ecommerce'} | Pain point: ${p.pain_point || 'scaling revenue'}`
+        ).join('\n');
+        try {
+          const emailRaw = await aiCall(
+            `You are Hassan, the Growth and Outreach AI at Sales Scales. Return ONLY valid JSON, no markdown.`,
+            `Write a cold email under 200 words for each prospect, with a compelling subject line and personalized body targeting their pain point.\n\nProspects:\n${emailProspectList}\n\nReturn JSON: {"emails":[{"prospect":"name or niche label","subject":"subject line","body":"email body under 200 words"}]}`
+          );
+          const ec = emailRaw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+          const em = ec.match(/\{[\s\S]*\}/);
+          const emailParsed = JSON.parse(em ? em[0] : ec);
+          for (const item of (emailParsed.emails || [])) {
+            if (!item.subject || !item.body) continue;
+            await storeBriefing('hassan', 'yousef',
+              `Cold Email — ${item.prospect || 'Prospect'}`,
+              `Subject: ${item.subject}\n\n${item.body}`,
+              'normal'
+            );
+          }
+          console.log(`[AUTO] Hassan — ${(emailParsed.emails || []).length} cold email(s) stored`);
+        } catch (emailErr) {
+          console.error('[AUTO] Hassan cold email error:', emailErr.message);
+        }
+      }
     } catch (parseErr) {
       console.error('[AUTO] Hassan prospects parse error:', parseErr.message);
     }
@@ -2470,6 +2497,33 @@ app.post('/email/inbound', upload.any(), async (req, res) => {
   }
 });
 
+// ─── FIX 4: WORKFLOW STEP EDITOR ──────────────────────────
+app.put('/workflow-steps/:id', async (req, res) => {
+  const { content, subject, wait_hours, step_type } = req.body;
+  try {
+    const updates = {};
+    if (content !== undefined) updates.content = content;
+    if (subject !== undefined) updates.subject = subject;
+    if (wait_hours !== undefined) updates.wait_hours = parseInt(wait_hours, 10) || 0;
+    if (step_type !== undefined) updates.step_type = step_type;
+    const { data, error } = await supabase.from('workflow_steps').update(updates).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ step: data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/workflow-steps/:workflow_id', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('workflow_steps').select('*').eq('workflow_id', req.params.workflow_id).order('step_order');
+    if (error) throw error;
+    res.json({ steps: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── FIX 3: WORKFLOW PAUSE / RESUME ENROLLMENTS ───────────
 app.post('/workflows/pause', async (req, res) => {
   const { workflow_id, client_id } = req.body;
@@ -2554,6 +2608,28 @@ const parseCSV = (text) => {
   return { headers, rows };
 };
 
+// Fix 3: validates rows without importing — returns preview of first 5 rows + validation errors
+app.post('/contacts/import/preview', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'CSV file required' });
+  try {
+    const text = req.file.buffer.toString('utf-8');
+    const { rows } = parseCSV(text);
+    if (rows.length === 0) return res.status(400).json({ error: 'CSV is empty or has no data rows' });
+    const preview = rows.slice(0, 5);
+    const validation = rows.map((row, idx) => {
+      const issues = [];
+      const email = (row.email || '').trim();
+      if (!email) issues.push('email is required');
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) issues.push('email format invalid');
+      if (!(row.first_name || '').trim()) issues.push('first_name is required');
+      const phone = (row.phone || '').trim();
+      if (phone && phone.replace(/\D/g, '').length < 10) issues.push('phone must be 10+ digits or blank');
+      return { row: idx + 2, email: email || '(missing)', issues };
+    }).filter(v => v.issues.length > 0);
+    res.json({ total: rows.length, preview, validation, valid: rows.length - validation.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/contacts/import', upload.single('file'), async (req, res) => {
   const { client_id } = req.body;
   if (!client_id) return res.status(400).json({ error: 'client_id required' });
@@ -2563,27 +2639,34 @@ app.post('/contacts/import', upload.single('file'), async (req, res) => {
     const { rows } = parseCSV(text);
     if (rows.length === 0) return res.status(400).json({ error: 'CSV is empty or has no data rows' });
 
-    let imported = 0; const errors = [];
+    let imported = 0;
+    const errors = [];
     for (const [idx, row] of rows.entries()) {
+      const rowNum = idx + 2;
       const email = (row.email || '').trim().toLowerCase();
-      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        errors.push(`Row ${idx + 2}: invalid or missing email`);
-        continue;
-      }
+      const firstName = (row.first_name || '').trim();
+      const phone = (row.phone || '').replace(/\D/g, '');
+
+      // Fix 3: detailed per-row validation
+      if (!firstName) { errors.push({ row: rowNum, field: 'first_name', message: 'first_name is required' }); continue; }
+      if (!email) { errors.push({ row: rowNum, field: 'email', message: 'email is required' }); continue; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errors.push({ row: rowNum, field: 'email', message: `"${email}" is not a valid email address` }); continue; }
+      if (phone && phone.length < 10) { errors.push({ row: rowNum, field: 'phone', message: `phone "${row.phone}" must be 10+ digits or left blank` }); continue; }
+
       const { error } = await supabase.from('contacts').upsert([{
-        first_name: (row.first_name || '').trim(),
+        first_name: firstName,
         last_name:  (row.last_name  || '').trim(),
         email,
-        phone:      (row.phone      || '').trim() || null,
+        phone: phone ? (row.phone || '').trim() : null,
         client_id,
         source: 'CSV Import', channel: 'Email',
         pipeline_stage: 'New Lead',
         last_activity: new Date().toISOString(),
       }], { onConflict: 'email,client_id' });
-      if (error) { errors.push(`Row ${idx + 2}: ${error.message}`); }
+      if (error) { errors.push({ row: rowNum, field: 'db', message: error.message }); }
       else { imported++; }
     }
-    res.json({ ok: true, imported, errors, total: rows.length });
+    res.json({ ok: true, imported, errors, total: rows.length, skipped: errors.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -3002,7 +3085,7 @@ app.post('/search-knowledge', async (req, res) => {
 
 // ─── TEAM BRIEFING ENDPOINTS ─────────────────────────────
 app.post('/team/brief', async (req, res) => {
-  const { from_member, to_member, subject, content, priority, client_id } = req.body;
+  const { from_member, to_member, subject, content, priority, client_id, scheduled_for } = req.body;
   if (!from_member || !to_member || !subject || !content) {
     return res.status(400).json({ error: 'Missing required fields: from_member, to_member, subject, content' });
   }
@@ -3011,6 +3094,7 @@ app.post('/team/brief', async (req, res) => {
       from_member, to_member, subject, content,
       priority: priority || 'normal',
       client_id: client_id || null,
+      scheduled_for: scheduled_for || null,
       is_read: false,
       created_at: new Date().toISOString()
     }]).select().single();
@@ -3295,6 +3379,21 @@ app.post('/approvals/action', async (req, res) => {
           `You are Ali, the Sales Closer AI at Sales Scales. You use the NEPQ (Neuro-Emotional Persuasion Questioning) framework. You are direct, confident, and focused on high-ticket closing. Never break character.`,
           `Generate a concise NEPQ-based closing script for this prospect:\n\nName: ${prospectName}\nNiche: ${meta.niche || 'ecommerce'}\nPain Point: ${meta.pain_point || 'scaling their store'}\nChannel: ${meta.channel || 'outreach'}\n\nInclude: opening NEPQ questions, a problem-agitation frame, and 2 key objection-handling lines. Keep it under 300 words.`
         );
+
+        // Fix 10: Objection handling playbook
+        try {
+          const objectionPlaybook = await aiCall(
+            `You are Ali, the Sales Closer AI at Sales Scales. You use the NEPQ framework. You are direct, confident, and focused on high-ticket closing. Never break character.`,
+            `Generate an objection handling playbook for this prospect:\n\nName: ${prospectName}\nNiche: ${meta.niche || 'ecommerce'}\nPain Point: ${meta.pain_point || 'scaling their store'}\n\nCover exactly 5 common objections they will raise. For each:\n- OBJECTION: the exact words they'll say\n- REFRAME: one sentence to shift their perspective\n- RESPONSE: 2-3 sentence NEPQ-based counter\n- CLOSE: the follow-up question that moves them forward\n\nBe tactical and specific to their niche.`
+          );
+          await storeBriefing('ali', 'yousef',
+            `Objection Playbook — ${prospectName}`,
+            objectionPlaybook,
+            'high'
+          );
+        } catch (objErr) {
+          console.error('[prospect-approval] Ali objection playbook failed:', objErr.message);
+        }
 
         const outreachDate = new Date();
         const day3Date = new Date(outreachDate.getTime() + 3 * 24 * 60 * 60 * 1000)
@@ -4398,7 +4497,47 @@ cron.schedule('0 15 * * *', async () => {
   }
 });
 
-// ─── FIX 8: BROWSE ABANDONMENT WEBHOOK ────────────────────
+// ─── FIX 1: BROWSE TRACK SCRIPT ───────────────────────────
+// Returns a JS snippet to paste into Shopify theme.liquid before </body>
+app.get('/shopify/browse-track', (req, res) => {
+  const { client_id } = req.query;
+  const apiBase = process.env.REACT_APP_API_URL || 'https://api.aisalesscales.com';
+  // HOW TO INSTALL IN SHOPIFY:
+  // 1. Go to Shopify Admin → Online Store → Themes → Edit code
+  // 2. Open layout/theme.liquid
+  // 3. Paste the script before the closing </body> tag
+  // 4. Replace YOUR_CLIENT_ID with the actual client_id from your Sales Scales platform
+  // 5. Save — the tracker fires automatically on product pages for logged-in customers
+  const snippet = `<script>
+/* Sales Scales Browse Abandonment Tracker — installed via GET /shopify/browse-track */
+(function() {
+  try {
+    if (!window.Shopify || !Shopify.customer || !Shopify.customer.email) return;
+    if (!window.location.pathname.startsWith('/products/')) return;
+    var email = Shopify.customer.email;
+    var productTitle = document.querySelector('h1.product__title')?.innerText
+      || document.querySelector('h1')?.innerText
+      || document.title;
+    setTimeout(function() {
+      fetch(${JSON.stringify(apiBase)} + '/shopify/browse-abandon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email,
+          product_title: productTitle,
+          product_url: window.location.href,
+          client_id: ${JSON.stringify(client_id || 'YOUR_CLIENT_ID')}
+        })
+      }).catch(function(){});
+    }, 30000);
+  } catch(e) {}
+})();
+</script>`;
+  res.setHeader('Content-Type', 'text/plain');
+  res.send(snippet.trim());
+});
+
+// ─── FIX 8 (orig): BROWSE ABANDONMENT WEBHOOK ─────────────
 app.post('/shopify/browse-abandon', async (req, res) => {
   res.sendStatus(200);
   const { email, product_title, product_id, client_id } = req.body;
@@ -4714,6 +4853,93 @@ cron.schedule('0 8 * * 1', async () => {
       } catch (wfErr) { console.error(`[AUTO] Sequence alert failed for ${wf.name}:`, wfErr.message); }
     }
   } catch (e) { console.error('[AUTO] Sequence performance cron error:', e.message); }
+});
+
+// ─── FIX 8: FATIMA DELIVERABILITY MONITORING — DAILY 7AM ──
+// SQL: ALTER TABLE team_briefings ADD COLUMN IF NOT EXISTS scheduled_for timestamptz;
+// SQL: ALTER TABLE workflow_steps ADD COLUMN IF NOT EXISTS content text;
+cron.schedule('0 7 * * *', async () => {
+  console.log('[AUTO] Fatima — deliverability monitoring starting...');
+  if (!process.env.SENDGRID_API_KEY) return;
+  try {
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const sgStatsRes = await axios.get('https://api.sendgrid.com/v3/stats', {
+      headers: { Authorization: `Bearer ${process.env.SENDGRID_API_KEY}` },
+      params: { start_date: yesterday, end_date: yesterday, aggregated_by: 'day' }
+    });
+    const stats = sgStatsRes.data;
+    if (!stats || stats.length === 0) return;
+    const metrics = stats[0]?.stats?.[0]?.metrics || {};
+    const requests = metrics.requests || 0;
+    if (requests === 0) return;
+    const bounceRate = ((metrics.bounces || 0) / requests * 100).toFixed(2);
+    const spamRate = ((metrics.spam_reports || 0) / requests * 100).toFixed(3);
+    const flags = [];
+    if (parseFloat(bounceRate) > 5) flags.push(`Bounce rate: ${bounceRate}% (threshold: 5%)`);
+    if (parseFloat(spamRate) > 0.1) flags.push(`Spam rate: ${spamRate}% (threshold: 0.1%)`);
+    if (flags.length === 0) {
+      console.log(`[AUTO] Fatima deliverability OK — bounce: ${bounceRate}%, spam: ${spamRate}%`);
+      return;
+    }
+    await storeBriefing('fatima', 'yousef',
+      `Deliverability Alert — ${new Date(yesterday).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}`,
+      `SendGrid deliverability thresholds exceeded for ${yesterday}.\n\n${flags.join('\n')}\n\nRequests: ${requests} | Bounces: ${metrics.bounces || 0} | Spam reports: ${metrics.spam_reports || 0}\n\nRequired actions:\n1. Review and remove invalid/stale addresses from your contact lists\n2. Check for spam trigger words in recent email subject lines and content\n3. Verify domain DKIM/DMARC alignment in SendGrid settings\n4. Pause any sequences sending to unverified contacts\n5. Run a list hygiene pass on all client contact lists`,
+      'urgent'
+    );
+    console.log(`[AUTO] Fatima deliverability alert — bounce: ${bounceRate}%, spam: ${spamRate}%`);
+  } catch (e) {
+    console.error('[AUTO] Fatima deliverability error:', e.message);
+  }
+});
+
+// ─── FIX 9: HUSSAIN COMPETITOR MONITORING — WEEKLY TUESDAY 6AM ──
+cron.schedule('0 6 * * 2', async () => {
+  console.log('[AUTO] Hussain — competitor monitoring starting...');
+  try {
+    const { data: competitorDocs } = await supabase
+      .from('knowledge_base')
+      .select('client_id, content, title')
+      .or('content.ilike.%competitor%,content.ilike.%competition%,title.ilike.%competitor%')
+      .eq('status', 'active');
+    if (!competitorDocs || competitorDocs.length === 0) {
+      console.log('[AUTO] Hussain competitor — no competitor docs found');
+      return;
+    }
+    const byClient = {};
+    for (const doc of competitorDocs) {
+      if (!doc.client_id) continue;
+      if (!byClient[doc.client_id]) byClient[doc.client_id] = [];
+      byClient[doc.client_id].push(doc);
+    }
+    for (const [clientId, docs] of Object.entries(byClient)) {
+      try {
+        const { data: client } = await supabase.from('clients').select('name').eq('id', clientId).maybeSingle();
+        const clientName = client?.name || clientId;
+        const competitorSnippet = docs.slice(0, 3).map(d => d.title || d.content.slice(0, 200)).join('\n---\n');
+        const ragContext = await ragSearch(`competitor analysis positioning ${clientName}`, clientId);
+        const analysis = await aiCall(
+          `You are Hussain, Intelligence & Strategy AI for Sales Scales. You are a sharp, data-driven analyst with a founder mindset. Never break character.`,
+          `Run a competitor analysis for client "${clientName}" based on this intelligence from their knowledge base:\n\n${competitorSnippet}\n\nKnowledge base context:\n${ragContext}\n\nProvide:\n1. Who their top 2–3 competitors are (inferred from context)\n2. Each competitor's positioning and weaknesses\n3. How ${clientName} can differentiate and win market share\n4. 3 immediate actions to outmanoeuvre the competition\n\nBe specific to their niche. Think like a strategic advisor.`
+        );
+        await supabase.from('approvals').insert([{
+          type: 'competitor_report',
+          title: `Weekly Competitor Analysis — ${clientName} — ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}`,
+          content: analysis,
+          metadata: { client_name: clientName, generated_by: 'hussain_auto' },
+          from_member: 'hussain',
+          client_id: clientId,
+          priority: 'normal',
+          status: 'pending',
+          created_at: new Date().toISOString()
+        }]);
+        console.log(`[AUTO] Hussain competitor report submitted for ${clientName}`);
+      } catch (clientErr) {
+        console.error(`[AUTO] Hussain competitor error for ${clientId}:`, clientErr.message);
+      }
+    }
+  } catch (e) {
+    console.error('[AUTO] Hussain competitor cron error:', e.message);
+  }
 });
 
 // ─── ROUTE MODULES ────────────────────────────────────────

@@ -8,6 +8,8 @@ export default function Clients() {
   const [showForm, setShowForm] = useState(false);
   const [selectedClient, setSelectedClient] = useState(null);
   const [healthScores, setHealthScores] = useState({});
+  const [healthBreakdowns, setHealthBreakdowns] = useState({});
+  const [tooltipClientId, setTooltipClientId] = useState(null);
   const [clientNotes, setClientNotes] = useState({});
   const [notesSaving, setNotesSaving] = useState({});
   const [notesUpdatedAt, setNotesUpdatedAt] = useState({});
@@ -82,15 +84,21 @@ export default function Clients() {
     const activeSeq = tally((wfRes.data || []).filter(w => w.status === "active"));
     const recentAct = tally(actRes.data);
     const scores = {};
+    const breakdowns = {};
     for (const c of clientList) {
-      let score = 0;
-      score += Math.min(30, (enrollWeek[c.id] || 0) * 10);
-      score += Math.min(30, (msgMonth[c.id] || 0) * 3);
-      score += Math.min(20, (activeSeq[c.id] || 0) * 10);
-      score += (recentAct[c.id] || 0) > 0 ? 20 : 0;
-      scores[c.id] = Math.min(100, score);
+      const enroll = enrollWeek[c.id] || 0;
+      const msgs = msgMonth[c.id] || 0;
+      const seqs = activeSeq[c.id] || 0;
+      const hasAct = (recentAct[c.id] || 0) > 0;
+      const enrollPts = Math.min(30, enroll * 10);
+      const msgPts = Math.min(30, msgs * 3);
+      const seqPts = Math.min(20, seqs * 10);
+      const actPts = hasAct ? 20 : 0;
+      scores[c.id] = Math.min(100, enrollPts + msgPts + seqPts + actPts);
+      breakdowns[c.id] = { enroll, enrollPts, msgs, msgPts, seqs, seqPts, hasAct, actPts };
     }
     setHealthScores(scores);
+    setHealthBreakdowns(breakdowns);
   };
 
   const healthColor = (s) => {
@@ -369,10 +377,42 @@ export default function Clients() {
                   {(() => {
                     const s = healthScores[client.id] ?? client.health_score ?? 0;
                     const hc = healthColor(s);
+                    const bd = healthBreakdowns[client.id];
+                    const isOpen = tooltipClientId === client.id;
                     return (
-                      <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: hc.bg, color: hc.color, border: `1px solid ${hc.border}` }}>
-                        {s}/100
-                      </span>
+                      <div style={{ position: 'relative' }}
+                        onMouseEnter={() => setTooltipClientId(client.id)}
+                        onMouseLeave={() => setTooltipClientId(null)}>
+                        <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: hc.bg, color: hc.color, border: `1px solid ${hc.border}`, cursor: 'default' }}>
+                          {s}/100
+                        </span>
+                        {isOpen && bd && (
+                          <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', marginTop: '6px', background: '#0a1628', borderRadius: '10px', padding: '12px 14px', width: '200px', zIndex: 100, boxShadow: '0 8px 24px rgba(10,22,40,0.25)', pointerEvents: 'none' }}>
+                            <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '10px' }}>Score Breakdown</div>
+                            {[
+                              { label: 'Enrollments this week', val: bd.enroll, pts: bd.enrollPts, max: 30 },
+                              { label: 'Messages this month', val: bd.msgs, pts: bd.msgPts, max: 30 },
+                              { label: 'Active sequences', val: bd.seqs, pts: bd.seqPts, max: 20 },
+                              { label: 'Recent contact activity', val: bd.hasAct ? 'Yes' : 'No', pts: bd.actPts, max: 20 },
+                            ].map(row => (
+                              <div key={row.label} style={{ marginBottom: '8px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
+                                  <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)' }}>{row.label}</span>
+                                  <span style={{ fontSize: '10px', color: '#c9a84c', fontWeight: 600 }}>{row.pts}/{row.max}</span>
+                                </div>
+                                <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.35)' }}>{row.val}</div>
+                                <div style={{ height: '3px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', marginTop: '3px' }}>
+                                  <div style={{ width: `${(row.pts / row.max) * 100}%`, height: '100%', background: '#c9a84c', borderRadius: '2px' }} />
+                                </div>
+                              </div>
+                            ))}
+                            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '8px', display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)' }}>Total</span>
+                              <span style={{ fontSize: '11px', color: 'white', fontWeight: 700 }}>{s}/100</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     );
                   })()}
                 </div>

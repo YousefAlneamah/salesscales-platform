@@ -19,6 +19,11 @@ export default function Sequences() {
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackResult, setFeedbackResult] = useState(null);
   const [feedbackStats, setFeedbackStats] = useState(null);
+  const [expandedWorkflowId, setExpandedWorkflowId] = useState(null);
+  const [expandedSteps, setExpandedSteps] = useState([]);
+  const [stepsLoading, setStepsLoading] = useState(false);
+  const [editingStep, setEditingStep] = useState(null);
+  const [editSaving, setEditSaving] = useState(false);
 
   const triggers = [
     'Cart Abandoned',
@@ -134,6 +139,37 @@ export default function Sequences() {
 
   const getClientName = (id) => clients.find(c => c.id === id)?.name || '—';
   const filtered = filterClient === 'All' ? workflows : workflows.filter(w => w.client_id === filterClient);
+
+  const toggleExpand = async (workflow) => {
+    if (expandedWorkflowId === workflow.id) {
+      setExpandedWorkflowId(null);
+      setExpandedSteps([]);
+      return;
+    }
+    setExpandedWorkflowId(workflow.id);
+    setExpandedSteps([]);
+    setStepsLoading(true);
+    const { data } = await supabase.from('workflow_steps').select('*').eq('workflow_id', workflow.id).order('step_order');
+    setExpandedSteps(data || []);
+    setStepsLoading(false);
+  };
+
+  const saveStepEdit = async () => {
+    if (!editingStep || editSaving) return;
+    setEditSaving(true);
+    try {
+      await axios.put(`${API_BASE}/workflow-steps/${editingStep.id}`, {
+        content: editingStep.content,
+        subject: editingStep.subject,
+        wait_hours: editingStep.wait_hours,
+      });
+      setExpandedSteps(prev => prev.map(s => s.id === editingStep.id ? { ...s, ...editingStep } : s));
+      setEditingStep(null);
+    } catch (_) { alert('Failed to save step.'); }
+    setEditSaving(false);
+  };
+
+  const stepIcon = (type) => stepTypes.find(t => t.type === type)?.icon || '📋';
 
   const getFeedback = async (workflow) => {
     if (feedbackId === workflow.id && feedbackResult) {
@@ -358,9 +394,12 @@ export default function Sequences() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {filtered.map(workflow => (
-            <div key={workflow.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 1px 3px rgba(10,22,40,0.04)' }}>
+            <div key={workflow.id}>
+            <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: expandedWorkflowId === workflow.id ? '12px 12px 0 0' : '12px', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 1px 3px rgba(10,22,40,0.04)', cursor: 'pointer' }}
+              onClick={() => toggleExpand(workflow)}>
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '5px' }}>
+                  <span style={{ fontSize: '11px', color: expandedWorkflowId === workflow.id ? '#c9a84c' : '#8896a8' }}>{expandedWorkflowId === workflow.id ? '▾' : '▸'}</span>
                   <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628' }}>{workflow.name}</div>
                   <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: workflow.status === 'active' ? '#ecfdf5' : workflow.status === 'paused' ? '#fffbeb' : '#f8fafc', color: workflow.status === 'active' ? '#059669' : workflow.status === 'paused' ? '#d97706' : '#8896a8', border: `1px solid ${workflow.status === 'active' ? '#a7f3d0' : workflow.status === 'paused' ? '#fde68a' : '#e4e9f0'}` }}>
                     {workflow.status.charAt(0).toUpperCase() + workflow.status.slice(1)}
@@ -384,7 +423,7 @@ export default function Sequences() {
                 ))}
               </div>
 
-              <div style={{ display: 'flex', gap: '6px' }}>
+              <div style={{ display: 'flex', gap: '6px' }} onClick={e => e.stopPropagation()}>
                 <button onClick={() => openBuilder(workflow)}
                   style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
                   Edit
@@ -412,7 +451,93 @@ export default function Sequences() {
                 </button>
               </div>
             </div>
+
+            {/* INLINE STEPS PANEL */}
+            {expandedWorkflowId === workflow.id && (
+              <div style={{ background: '#f8fafc', border: '1px solid #e4e9f0', borderTop: 'none', borderRadius: '0 0 12px 12px', padding: '12px 20px' }}>
+                {stepsLoading ? (
+                  <div style={{ fontSize: '11px', color: '#8896a8', padding: '8px 0' }}>Loading steps...</div>
+                ) : expandedSteps.length === 0 ? (
+                  <div style={{ fontSize: '11px', color: '#8896a8', padding: '8px 0' }}>No steps — click Edit to build this workflow.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>{expandedSteps.length} Step{expandedSteps.length !== 1 ? 's' : ''}</div>
+                    {expandedSteps.map((step, idx) => (
+                      <div key={step.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '16px', flexShrink: 0 }}>{stepIcon(step.step_type)}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '10px', color: '#8896a8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '1px' }}>Step {idx + 1} — {step.step_type}</div>
+                          {step.step_type === 'wait' ? (
+                            <div style={{ fontSize: '11px', color: '#4a5568' }}>Wait {step.wait_hours || 0}h</div>
+                          ) : (
+                            <div style={{ fontSize: '11px', color: '#4a5568', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {step.subject ? <span style={{ fontWeight: 600 }}>{step.subject} — </span> : null}
+                              {(step.content || '').slice(0, 80) || '(no content)'}
+                            </div>
+                          )}
+                        </div>
+                        <button onClick={() => setEditingStep({ ...step })}
+                          style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '6px', padding: '5px 12px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>
+                          Edit
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            </div>
           ))}
+        </div>
+      )}
+
+      {/* STEP EDIT MODAL */}
+      {editingStep && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,22,40,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: '12px', padding: '24px', width: '480px', maxWidth: '90vw', boxShadow: '0 20px 60px rgba(10,22,40,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div>
+                <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Edit Step</div>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628', textTransform: 'capitalize' }}>{editingStep.step_type} — Step {(expandedSteps.findIndex(s => s.id === editingStep.id) + 1)}</div>
+              </div>
+              <button onClick={() => setEditingStep(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '22px', lineHeight: 1 }}>×</button>
+            </div>
+            {editingStep.step_type === 'wait' ? (
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>Wait hours</div>
+                <input type="number" value={editingStep.wait_hours} min={0}
+                  onChange={e => setEditingStep(s => ({ ...s, wait_hours: parseInt(e.target.value, 10) || 0 }))}
+                  style={inputStyle} />
+              </div>
+            ) : (
+              <>
+                {editingStep.step_type === 'email' && (
+                  <div style={{ marginBottom: '12px' }}>
+                    <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>Subject line</div>
+                    <input type="text" value={editingStep.subject || ''} placeholder="Subject..."
+                      onChange={e => setEditingStep(s => ({ ...s, subject: e.target.value }))}
+                      style={inputStyle} />
+                  </div>
+                )}
+                <div style={{ marginBottom: '16px' }}>
+                  <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>Content</div>
+                  <textarea rows={5} value={editingStep.content || ''} placeholder="Message content..."
+                    onChange={e => setEditingStep(s => ({ ...s, content: e.target.value }))}
+                    style={{ ...inputStyle, resize: 'vertical' }} />
+                </div>
+              </>
+            )}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={saveStepEdit} disabled={editSaving}
+                style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
+                {editSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+              <button onClick={() => setEditingStep(null)}
+                style={{ background: 'white', border: '1px solid #e4e9f0', color: '#8896a8', borderRadius: '8px', padding: '9px 16px', fontSize: '12px', cursor: 'pointer' }}>
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
