@@ -431,7 +431,7 @@ const getClientBranding = async (clientId) => {
 
 // ─── HELPER: WHITE-LABEL HTML EMAIL TEMPLATE ─────────────
 // Renders the client's own branded email — no Sales Scales branding is shown to the end customer.
-const buildEmailHtml = ({ content, subject, clientName, cartLink, contactName, brandColor = '#0a1628', logoText, contactId, clientId }) => {
+const buildEmailHtml = ({ content, subject, clientName, cartLink, contactName, brandColor = '#0a1628', logoText, contactId, clientId, preheader }) => {
   const store = logoText || clientName || 'Your Store';
   const year = new Date().getFullYear();
   const apiBase = process.env.REACT_APP_API_URL || 'http://localhost:3001';
@@ -439,6 +439,7 @@ const buildEmailHtml = ({ content, subject, clientName, cartLink, contactName, b
     ? `${apiBase}/email/unsubscribe?contact_id=${contactId}&client_id=${clientId}`
     : `${apiBase}/email/unsubscribe`;
   const safe = (content || '').trim();
+  const preheaderText = preheader || (safe.slice(0, 100).replace(/<[^>]+>/g, ''));
 
   const bodyHtml = safe
     .split(/\n{2,}/)
@@ -447,10 +448,10 @@ const buildEmailHtml = ({ content, subject, clientName, cartLink, contactName, b
     .join('');
 
   const ctaHtml = cartLink ? `
-        <tr><td style="padding:8px 32px 32px;">
-          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-            <td style="border-radius:8px;background:#c9a84c;">
-              <a href="${cartLink}" target="_blank" style="display:inline-block;padding:14px 34px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#0a1628;text-decoration:none;border-radius:8px;">Complete Your Order →</a>
+        <tr><td style="padding:8px 32px 36px;text-align:center;">
+          <table role="presentation" cellpadding="0" cellspacing="0" align="center"><tr>
+            <td style="border-radius:12px;background:#c9a84c;box-shadow:0 4px 14px rgba(201,168,76,0.35);">
+              <a href="${cartLink}" target="_blank" style="display:inline-block;padding:18px 42px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:800;color:#0a1628;text-decoration:none;border-radius:12px;letter-spacing:0.3px;">Complete Your Order →</a>
             </td>
           </tr></table>
         </td></tr>` : '';
@@ -461,22 +462,29 @@ const buildEmailHtml = ({ content, subject, clientName, cartLink, contactName, b
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <meta name="color-scheme" content="light"/>
+  <title>${subject || store}</title>
 </head>
 <body style="margin:0;padding:0;background:#f0f3f8;font-family:Arial,Helvetica,sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f3f8;padding:32px 16px;">
+  <!-- Preheader text (hidden, shows as email preview in inboxes) -->
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;font-size:1px;line-height:1px;color:#f0f3f8;">${preheaderText}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
+  <!-- View in browser -->
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f3f8;padding:8px 16px 0;">
+    <tr><td align="center"><div style="font-size:11px;color:#8896a8;padding:6px 0;">Having trouble viewing this email? <a href="${apiBase}/email/view?contact_id=${contactId || ''}" style="color:#c9a84c;text-decoration:underline;">View in browser</a></div></td></tr>
+  </table>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f3f8;padding:16px 16px 32px;">
     <tr><td align="center">
-      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 8px 24px rgba(10,22,40,0.08);">
-        <tr><td style="background:${brandColor};padding:30px 32px;text-align:center;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 8px 28px rgba(10,22,40,0.10);">
+        <tr><td style="background:${brandColor};padding:32px 32px 28px;text-align:center;">
           <div style="color:#ffffff;font-size:22px;font-weight:700;letter-spacing:1px;">${store}</div>
-          <div style="width:40px;height:3px;background:#c9a84c;border-radius:2px;margin:12px auto 0;"></div>
+          <div style="width:48px;height:3px;background:#c9a84c;border-radius:2px;margin:12px auto 0;"></div>
         </td></tr>
-        ${subject ? `<tr><td style="padding:30px 32px 0;"><div style="color:#0a1628;font-size:21px;font-weight:700;line-height:1.35;">${subject}</div></td></tr>` : ''}
+        ${subject ? `<tr><td style="padding:32px 32px 0;"><div style="color:#0a1628;font-size:22px;font-weight:700;line-height:1.3;letter-spacing:-0.3px;">${subject}</div></td></tr>` : ''}
         <tr><td style="padding:24px 32px 8px;">${bodyHtml}</td></tr>
         ${ctaHtml}
-        <tr><td style="background:#f8fafc;border-top:1px solid #e4e9f0;padding:22px 32px;text-align:center;">
+        <tr><td style="background:#f8fafc;border-top:1px solid #e4e9f0;padding:24px 32px;text-align:center;">
           <div style="color:#8896a8;font-size:12px;line-height:1.7;">You're receiving this email because you shopped with ${store}.</div>
           <div style="color:#aab4c0;font-size:11px;margin-top:8px;">© ${year} ${store}. All rights reserved.</div>
-          <div style="color:#aab4c0;font-size:11px;margin-top:10px;"><a href="${unsubUrl}" style="color:#8896a8;text-decoration:underline;">Unsubscribe</a> from these emails.</div>
+          <div style="margin-top:12px;"><a href="${unsubUrl}" style="color:#8896a8;font-size:11px;text-decoration:underline;">Unsubscribe</a><span style="color:#d0d7df;margin:0 8px">·</span><a href="/privacy" style="color:#8896a8;font-size:11px;text-decoration:underline;">Privacy Policy</a></div>
         </td></tr>
       </table>
     </td></tr>
@@ -659,9 +667,15 @@ const TOPIC_TRIGGER_MAP = {
 };
 
 const processWebhookEvent = async (topic, shop, payload) => {
+  let webhookSuccess = true;
+  let webhookError = null;
   const { data: connection } = await supabase
     .from('shopify_connections').select('*').eq('shop', shop).single();
-  if (!connection) { console.log('No Shopify connection for shop:', shop); return; }
+  if (!connection) {
+    console.log('No Shopify connection for shop:', shop);
+    logWebhook(shop, topic, false, 'No Shopify connection found').catch(() => {});
+    return;
+  }
 
   const clientId = connection.client_id;
 
@@ -812,6 +826,7 @@ const processWebhookEvent = async (topic, shop, payload) => {
 
   sendSlackAlert(`🛒 *Shopify webhook* — ${topic.replace('/', ': ')} | ${contact.email} → "${workflow.name}"`);
   console.log(`Webhook processed: ${contact.email} → ${triggerType} → ${workflow.name}`);
+  logWebhook(shop, topic, true, null).catch(() => {});
 };
 
 // ─── HELPER: PIPELINE STAGE AUTO-PROGRESSION ─────────────
@@ -2376,6 +2391,8 @@ app.post('/sms/inbound', async (req, res) => {
         sender_name: contact.first_name + ' ' + contact.last_name,
         sender_phone: From, content: Body, status: 'unread'
       }]);
+      // Fix 8: engagement score — +30 for SMS reply
+      await supabase.from('contacts').update({ engagement_score: (contact.engagement_score || 0) + 30 }).eq('id', contact.id);
       await supabase.from('workflow_enrollments')
         .update({ status: 'paused' })
         .eq('contact_id', contact.id)
@@ -2690,8 +2707,13 @@ app.post('/email/tracking', async (req, res) => {
           created_at: new Date(timestamp * 1000).toISOString()
         }]);
         if (eventType === 'open' || eventType === 'click') {
+          // Fix 8: update engagement_score
+          // SQL: ALTER TABLE contacts ADD COLUMN IF NOT EXISTS engagement_score integer DEFAULT 0;
+          const scoreIncrement = eventType === 'open' ? 10 : 20;
+          const currentScore = contact.engagement_score || 0;
           await supabase.from('contacts').update({
-            last_activity: new Date(timestamp * 1000).toISOString()
+            last_activity: new Date(timestamp * 1000).toISOString(),
+            engagement_score: currentScore + scoreIncrement,
           }).eq('id', contact.id);
           // Fix 9: auto-tag based on behaviour
           const behavTag = eventType === 'open' ? 'email_opener' : 'link_clicker';
@@ -4073,6 +4095,74 @@ app.post('/clients/onboard', async (req, res) => {
       console.error('Welcome email failed (non-fatal):', mailErr.message);
     }
 
+    // Fix 6: Welcome sequence — email 2 (day 3) and email 3 (day 7)
+    const firstName = name.split(' ')[0];
+    setTimeout(async () => {
+      try {
+        await sgMail.send({
+          to: email,
+          from: { email: 'yousef@aisalesscales.com', name: 'Yousef — Sales Scales' },
+          subject: `How to get the most from Sales Scales, ${firstName}`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f0f3f8;padding:32px 16px">
+            <div style="background:#0a1628;padding:28px 32px;border-radius:12px 12px 0 0;text-align:center">
+              <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase">Sales Scales</div>
+            </div>
+            <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 12px 12px;padding:32px">
+              <p style="font-size:17px;font-weight:700;color:#0a1628;margin:0 0 16px">Day 3 — How to get the most from Sales Scales, ${firstName}</p>
+              <p style="color:#4a5568;line-height:1.8;margin:0 0 16px">It's been 3 days since you joined — here are the 3 things that make the biggest difference for new clients:</p>
+              <div style="background:#f8fafc;border-radius:8px;padding:20px;margin:0 0 20px;border-left:3px solid #c9a84c">
+                <p style="margin:0 0 12px;font-weight:700;color:#0a1628">1. Connect your Shopify store</p>
+                <p style="margin:0;color:#4a5568;font-size:14px;line-height:1.7">This unlocks cart abandonment recovery, your live store data dashboard, and lets the AI team personalise every message with real product names and order history.</p>
+              </div>
+              <div style="background:#f8fafc;border-radius:8px;padding:20px;margin:0 0 20px;border-left:3px solid #c9a84c">
+                <p style="margin:0 0 12px;font-weight:700;color:#0a1628">2. Complete your onboarding questionnaire</p>
+                <p style="margin:0;color:#4a5568;font-size:14px;line-height:1.7">Takes 5 minutes and tells your AI team everything they need to write in your exact brand voice. Skip it and the sequences will be generic. Complete it and they'll sound exactly like you.</p>
+              </div>
+              <div style="background:#f8fafc;border-radius:8px;padding:20px;margin:0 0 24px;border-left:3px solid #c9a84c">
+                <p style="margin:0 0 12px;font-weight:700;color:#0a1628">3. Review and approve your first sequences</p>
+                <p style="margin:0;color:#4a5568;font-size:14px;line-height:1.7">Check the Approvals page — your AI team has already started drafting sequences for you. Read through, approve or edit, and they'll go live immediately.</p>
+              </div>
+              <p style="color:#4a5568;line-height:1.8;margin:0 0 24px">Any questions? Just reply to this email — I personally monitor it.</p>
+              <p style="color:#4a5568;margin:0">Yousef<br><span style="color:#8896a8;font-size:12px">Founder, Sales Scales</span></p>
+            </div>
+          </div>`,
+        });
+        console.log(`[Welcome] Day 3 email sent to ${email}`);
+      } catch (e) { console.error('[Welcome] Day 3 email failed:', e.message); }
+    }, 3 * 24 * 60 * 60 * 1000);
+
+    setTimeout(async () => {
+      try {
+        await sgMail.send({
+          to: email,
+          from: { email: 'yousef@aisalesscales.com', name: 'Yousef — Sales Scales' },
+          subject: `Day 7 check-in — your first results, ${firstName}`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f0f3f8;padding:32px 16px">
+            <div style="background:#0a1628;padding:28px 32px;border-radius:12px 12px 0 0;text-align:center">
+              <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase">Sales Scales</div>
+            </div>
+            <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 12px 12px;padding:32px">
+              <p style="font-size:17px;font-weight:700;color:#0a1628;margin:0 0 16px">Day 7 — how's it going, ${firstName}?</p>
+              <p style="color:#4a5568;line-height:1.8;margin:0 0 16px">It's been one week. I wanted to check in personally and see how things are going.</p>
+              <p style="color:#4a5568;line-height:1.8;margin:0 0 16px">If your sequences are live, you should be seeing your first recovered carts in the Revenue Dashboard. If you haven't connected your store yet or haven't approved your sequences, now is the time — most clients see results within 24 hours of going live.</p>
+              <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:18px;margin:0 0 24px">
+                <p style="margin:0;color:#059669;font-size:14px;line-height:1.7;font-weight:600">Quick checklist for week 1:</p>
+                <ul style="color:#059669;margin:8px 0 0;padding-left:18px;font-size:14px;line-height:1.8">
+                  <li>Shopify connected ✓</li>
+                  <li>Onboarding questionnaire completed ✓</li>
+                  <li>First sequences approved ✓</li>
+                  <li>First contacts enrolled ✓</li>
+                </ul>
+              </div>
+              <p style="color:#4a5568;line-height:1.8;margin:0 0 24px">If any of those aren't done yet, reply to this email and tell me where you're stuck. I'll personally help you get unblocked.</p>
+              <p style="color:#4a5568;margin:0">Yousef<br><span style="color:#8896a8;font-size:12px">Founder, Sales Scales</span></p>
+            </div>
+          </div>`,
+        });
+        console.log(`[Welcome] Day 7 email sent to ${email}`);
+      } catch (e) { console.error('[Welcome] Day 7 email failed:', e.message); }
+    }, 7 * 24 * 60 * 60 * 1000);
+
     // Issue email verification code
     try {
       const verifyCode = String(Math.floor(100000 + Math.random() * 900000));
@@ -4653,6 +4743,50 @@ app.get('/nps/submit', async (req, res) => {
   } catch (e) {
     console.error('NPS submit error:', e.message);
     res.status(500).send('Error saving response');
+  }
+});
+
+// ─── FIX 5: CLIENT LTV ENDPOINT ───────────────────────────
+// SQL: no new tables needed — uses existing clients + workflow_enrollments
+const TIER_PRICES = { starter: 997, growth: 1997, elite: 2997, 'Starter': 997, 'Growth': 1997, 'Elite': 2997 };
+app.get('/clients/ltv', async (req, res) => {
+  try {
+    const { data: clients } = await supabase.from('clients').select('id, name, tier, created_at, status');
+    if (!clients || clients.length === 0) return res.json({ clients: [] });
+    const results = await Promise.all(clients.map(async (client) => {
+      const monthsActive = Math.max(1, Math.floor((Date.now() - new Date(client.created_at)) / (30.44 * 86400000)));
+      const monthlyFee = TIER_PRICES[client.tier] || TIER_PRICES[client.tier?.toLowerCase()] || 997;
+      const totalSubscription = monthlyFee * monthsActive;
+      const { count: completedEnrollments } = await supabase
+        .from('workflow_enrollments').select('id', { count: 'exact', head: true })
+        .eq('client_id', client.id).eq('status', 'completed');
+      const totalRecovered = (completedEnrollments || 0) * 75;
+      const roi = totalSubscription > 0 ? (totalRecovered / totalSubscription).toFixed(2) : '0.00';
+      return { id: client.id, name: client.name, tier: client.tier, monthlyFee, monthsActive, totalSubscription, totalRecovered, roi: parseFloat(roi) };
+    }));
+    res.json({ clients: results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 7: WEBHOOK DELIVERY MONITORING ───────────────────
+// SQL: CREATE TABLE IF NOT EXISTS webhook_logs (id uuid default gen_random_uuid() primary key, shop text, topic text, received_at timestamptz default now(), success boolean DEFAULT true, error_message text);
+const logWebhook = async (shop, topic, success, errorMsg) => {
+  try {
+    await supabase.from('webhook_logs').insert([{
+      shop, topic, received_at: new Date().toISOString(), success, error_message: errorMsg || null
+    }]);
+  } catch (e) { /* non-critical */ }
+};
+
+app.get('/webhooks/logs', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('webhook_logs').select('*').order('received_at', { ascending: false }).limit(100);
+    if (error) throw error;
+    res.json({ logs: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

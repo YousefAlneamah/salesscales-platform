@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 // REPLACE_WITH_REAL_CALENDLY_LINK
 const CALENDLY_URL = 'https://calendly.com/yousef-salesscales/30min';
@@ -79,7 +79,63 @@ const STATS = [
   { value: '24–31%', label: 'recovery rate with Sales Scales AI sequences' },
 ];
 
+const FAQS = [
+  {
+    q: 'What is Sales Scales?',
+    a: 'Sales Scales is an AI-powered revenue system for ecommerce brands built on Shopify. You get a team of six AI specialists — Hussain, Hassan, Ali, Mahdi, Fatima, and Zainab — who work 24/7 to recover abandoned carts, run email and SMS sequences, close deals, and manage client relationships automatically.',
+  },
+  {
+    q: 'How does it work?',
+    a: 'Connect your Shopify store in one click. Your AI team immediately pulls your product catalogue, order history, and abandoned checkouts. Within 24 hours, Mahdi writes your sequences, Fatima configures the workflows, and Hussain generates your first strategic briefing. Revenue recovery starts in the first week.',
+  },
+  {
+    q: 'How long until I see results?',
+    a: 'Most clients see their first recovered cart within 24–48 hours of going live. Measurable uplift in monthly recurring revenue typically appears within the first 7–14 days as sequences warm up and send volume increases. Full compounding effect shows by month two.',
+  },
+  {
+    q: 'What platforms do you integrate with?',
+    a: 'Sales Scales integrates natively with Shopify (cart recovery, order events, customer sync), Klaviyo (email performance), Meta Ads (ad spend and ROAS), HubSpot CRM, Twilio (SMS and WhatsApp), SendGrid (email delivery), Canva, ElevenLabs (voice agents), and Calendly.',
+  },
+  {
+    q: 'What happens if I cancel?',
+    a: 'All plans are month-to-month with no long-term commitment. If you cancel, your sequences stop immediately and you retain all contacts and data. There are no cancellation fees, no notice period required, and no penalties. We believe in earning your business every month.',
+  },
+  {
+    q: 'Is my customer data safe?',
+    a: 'Yes. All data is stored in encrypted Supabase (PostgreSQL) databases hosted in secure cloud infrastructure. We never sell customer data, never share it with third parties, and each client\'s data is strictly isolated. We are GDPR-compliant and provide data export and deletion on request.',
+  },
+];
+
+const JSON_LD = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Sales Scales',
+  applicationCategory: 'BusinessApplication',
+  operatingSystem: 'Web',
+  description: 'AI-powered revenue system for ecommerce brands. Six AI specialists recover abandoned carts, run email and SMS sequences, and manage client relationships automatically.',
+  url: 'https://aisalesscales.com',
+  offers: {
+    '@type': 'AggregateOffer',
+    lowPrice: '997',
+    highPrice: '2997',
+    priceCurrency: 'USD',
+    offerCount: '3',
+  },
+  provider: {
+    '@type': 'Organization',
+    name: 'Sales Scales',
+    url: 'https://aisalesscales.com',
+    email: 'yousef@aisalesscales.com',
+  },
+});
+
 export default function LandingPage({ onLoginClick }) {
+  const [openFaq, setOpenFaq] = useState(null);
+
+  const scrollTo = (id) => {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   const s = {
     // Fonts default to system sans — DM Sans loaded via Google Fonts in global.css
@@ -229,6 +285,8 @@ export default function LandingPage({ onLoginClick }) {
 
   return (
     <div style={s.page}>
+      {/* JSON-LD structured data */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON_LD }} />
 
       {/* ── NAV ── */}
       <nav style={s.nav}>
@@ -236,7 +294,12 @@ export default function LandingPage({ onLoginClick }) {
           <div style={s.logo}>Sales Scales</div>
           <div style={s.logosub}>AI Revenue System</div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+          <div style={s.navLinks}>
+            {[['how-it-works', 'How It Works'], ['pricing', 'Pricing'], ['faq', 'FAQ']].map(([id, label]) => (
+              <span key={id} onClick={() => scrollTo(id)} style={s.navLink}>{label}</span>
+            ))}
+          </div>
           <button onClick={onLoginClick} style={s.btnNavLogin}>Log In</button>
           <a href={CALENDLY_URL} target="_blank" rel="noopener noreferrer" style={{ ...s.btnNavCta, textDecoration: 'none' }}>Book a Demo</a>
         </div>
@@ -301,7 +364,7 @@ export default function LandingPage({ onLoginClick }) {
       </section>
 
       {/* ── HOW IT WORKS ── */}
-      <section style={s.section(BG)}>
+      <section id="how-it-works" style={s.section(BG)}>
         <div style={s.container}>
           <div style={{ textAlign: 'center' }}>
             <div style={s.sectionLabel}>How It Works</div>
@@ -320,7 +383,7 @@ export default function LandingPage({ onLoginClick }) {
       </section>
 
       {/* ── PRICING ── */}
-      <section style={s.section(WHITE)}>
+      <section id="pricing" style={s.section(WHITE)}>
         <div style={s.container}>
           <div style={{ textAlign: 'center' }}>
             <div style={s.sectionLabel}>Pricing</div>
@@ -334,6 +397,37 @@ export default function LandingPage({ onLoginClick }) {
           </div>
           <div style={{ textAlign: 'center', marginTop: '28px', fontSize: '12px', color: MUTED }}>
             All plans are month-to-month. Email <a href="mailto:yousef@aisalesscales.com" style={{ color: GOLD }}>yousef@aisalesscales.com</a> to get started.
+          </div>
+        </div>
+      </section>
+
+      {/* ── FAQ ── */}
+      <section id="faq" style={s.section(BG)}>
+        <div style={s.container}>
+          <div style={{ textAlign: 'center', marginBottom: '48px' }}>
+            <div style={s.sectionLabel}>FAQ</div>
+            <h2 style={s.h2}>Everything you need to know.</h2>
+            <p style={{ ...s.sub, margin: '12px auto 0', textAlign: 'center' }}>Can't find the answer you're looking for? Email <a href="mailto:yousef@aisalesscales.com" style={{ color: GOLD }}>yousef@aisalesscales.com</a></p>
+          </div>
+          <div style={{ maxWidth: '720px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {FAQS.map((faq, i) => {
+              const isOpen = openFaq === i;
+              return (
+                <div key={i} style={{ background: WHITE, border: `1px solid ${isOpen ? GOLD : BORDER}`, borderRadius: '12px', overflow: 'hidden', transition: 'border-color 0.2s', boxShadow: isOpen ? '0 4px 16px rgba(10,22,40,0.08)' : '0 1px 3px rgba(10,22,40,0.04)' }}>
+                  <button
+                    onClick={() => setOpenFaq(isOpen ? null : i)}
+                    style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'DM Sans, sans-serif' }}>
+                    <span style={{ fontSize: '15px', fontWeight: 700, color: NAVY }}>{faq.q}</span>
+                    <span style={{ fontSize: '18px', color: isOpen ? GOLD : MUTED, transition: 'transform 0.2s, color 0.2s', transform: isOpen ? 'rotate(45deg)' : 'none', flexShrink: 0, marginLeft: '16px' }}>+</span>
+                  </button>
+                  {isOpen && (
+                    <div style={{ padding: '0 24px 20px', fontSize: '14px', color: MUTED, lineHeight: 1.8, borderTop: `1px solid ${BORDER}`, paddingTop: '16px', marginTop: 0 }}>
+                      {faq.a}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>

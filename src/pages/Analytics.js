@@ -52,8 +52,12 @@ export default function Analytics() {
   const [rateLimitStats, setRateLimitStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filterClient, setFilterClient] = useState('All');
+  const [webhookLogs, setWebhookLogs] = useState([]);
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => {
+    fetchAll();
+    axios.get(`${API_BASE}/webhooks/logs`).then(r => setWebhookLogs(r.data.logs || [])).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchAll = async () => {
     setLoading(true);
@@ -320,6 +324,36 @@ export default function Analytics() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* FIX 7: WEBHOOK DELIVERY LOGS */}
+      {webhookLogs.length > 0 && (
+        <div className="card" style={{ marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+            <div className="section-label">Webhook Delivery Log</div>
+            <div style={{ fontSize: '10px', color: '#8896a8' }}>Last {Math.min(webhookLogs.length, 20)} events</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 1fr', padding: '8px 12px', background: '#0a1628', borderRadius: '6px 6px 0 0' }}>
+            {['Shop', 'Topic', 'Received', 'Status'].map(h => (
+              <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase' }}>{h}</div>
+            ))}
+          </div>
+          <div style={{ border: '1px solid #e4e9f0', borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+            {webhookLogs.slice(0, 20).map((log, i) => (
+              <div key={log.id || i} style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 1fr', padding: '10px 12px', borderBottom: '1px solid #f8fafc', alignItems: 'center' }}>
+                <div style={{ fontSize: '11px', fontFamily: 'DM Mono, monospace', color: '#0a1628', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.shop || '—'}</div>
+                <div style={{ fontSize: '11px', color: '#4a5568' }}>{log.topic || '—'}</div>
+                <div style={{ fontSize: '10px', color: '#8896a8' }}>{log.received_at ? new Date(log.received_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</div>
+                <div>
+                  {log.success !== false
+                    ? <span className="badge-green" style={{ fontSize: '9px' }}>✓ OK</span>
+                    : <span className="badge-red" style={{ fontSize: '9px' }}>✗ Failed</span>
+                  }
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

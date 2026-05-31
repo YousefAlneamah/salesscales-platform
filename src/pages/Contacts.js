@@ -629,18 +629,21 @@ export default function Contacts() {
         </div>
       ) : (
         <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '32px 2.5fr 1.2fr 1fr 1fr 1fr', padding: '12px 18px', background: '#0a1628' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '32px 2.2fr 1.1fr 0.9fr 0.9fr 70px 0.9fr', padding: '12px 18px', background: '#0a1628' }}>
             <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0} onChange={toggleSelectAll}
               style={{ accentColor: '#c9a84c', cursor: 'pointer', width: '14px', height: '14px', margin: 'auto 0' }} />
-            {['CONTACT', 'STORE', 'SOURCE', 'STAGE', 'ADDED'].map(h => (
+            {['CONTACT', 'STORE', 'SOURCE', 'STAGE', 'SCORE', 'ADDED'].map(h => (
               <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px', fontWeight: 700 }}>{h}</div>
             ))}
           </div>
           {filtered.map(contact => {
             const s = stageColor(contact.pipeline_stage);
+            const score = contact.engagement_score || 0;
+            const scoreColor = score >= 80 ? '#059669' : score >= 40 ? '#d97706' : '#8896a8';
+            const scoreBg = score >= 80 ? '#ecfdf5' : score >= 40 ? '#fffbeb' : '#f8fafc';
             return (
               <div key={contact.id}
-                style={{ display: 'grid', gridTemplateColumns: '32px 2.5fr 1.2fr 1fr 1fr 1fr', padding: '13px 18px', borderBottom: '1px solid #f4f6fa', cursor: 'pointer', background: selectedContact?.id === contact.id || selectedIds.has(contact.id) ? '#fafbfd' : 'white', transition: 'background 0.1s', alignItems: 'center' }}
+                style={{ display: 'grid', gridTemplateColumns: '32px 2.2fr 1.1fr 0.9fr 0.9fr 70px 0.9fr', padding: '13px 18px', borderBottom: '1px solid #f4f6fa', cursor: 'pointer', background: selectedContact?.id === contact.id || selectedIds.has(contact.id) ? '#fafbfd' : 'white', transition: 'background 0.1s', alignItems: 'center' }}
                 onClick={() => { const c = selectedContact?.id === contact.id ? null : contact; setSelectedContact(c); if (c) loadTimeline(c); }}>
                 <div onClick={e => { e.stopPropagation(); toggleSelect(contact.id); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <input type="checkbox" checked={selectedIds.has(contact.id)} onChange={() => toggleSelect(contact.id)}
@@ -660,6 +663,11 @@ export default function Contacts() {
                 <div style={{ display: 'flex', alignItems: 'center' }}>
                   <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', background: s.bg, color: s.color, border: `1px solid ${s.border}`, fontWeight: 600 }}>
                     {contact.pipeline_stage}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <span title={`Engagement score: ${score} pts`} style={{ fontSize: '9px', padding: '3px 8px', borderRadius: '20px', background: scoreBg, color: scoreColor, border: `1px solid ${score >= 80 ? '#a7f3d0' : score >= 40 ? '#fde68a' : '#e4e9f0'}`, fontWeight: 700 }}>
+                    {score > 0 ? `${score}` : '—'}
                   </span>
                 </div>
                 <div style={{ fontSize: '10px', color: '#8896a8', display: 'flex', alignItems: 'center' }}>{formatDate(contact.created_at)}</div>

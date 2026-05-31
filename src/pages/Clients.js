@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import axios from "axios";
 import { supabase } from "../supabase";
 import { API_BASE } from "../config";
 
@@ -10,6 +11,7 @@ export default function Clients() {
   const [healthScores, setHealthScores] = useState({});
   const [healthBreakdowns, setHealthBreakdowns] = useState({});
   const [tooltipClientId, setTooltipClientId] = useState(null);
+  const [ltvData, setLtvData] = useState({});
   const [clientNotes, setClientNotes] = useState({});
   const [notesSaving, setNotesSaving] = useState({});
   const [notesUpdatedAt, setNotesUpdatedAt] = useState({});
@@ -46,6 +48,11 @@ export default function Clients() {
 
   useEffect(() => {
     fetchClients();
+    axios.get(`${API_BASE}/clients/ltv`).then(r => {
+      const map = {};
+      (r.data.clients || []).forEach(c => { map[c.id] = c; });
+      setLtvData(map);
+    }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -345,8 +352,8 @@ export default function Clients() {
         </div>
       ) : (
         <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1fr', padding: '12px 18px', background: '#0a1628' }}>
-            {['CLIENT', 'NICHE', 'TIER', 'HEALTH', 'STATUS'].map(h => (
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1fr 1fr', padding: '12px 18px', background: '#0a1628' }}>
+            {['CLIENT', 'NICHE', 'TIER', 'HEALTH', 'LTV', 'STATUS'].map(h => (
               <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px', fontWeight: 700 }}>{h}</div>
             ))}
           </div>
@@ -355,7 +362,7 @@ export default function Clients() {
             return (
               <div key={client.id}
                 onClick={() => { const c = selectedClient?.id === client.id ? null : client; setSelectedClient(c); if (c) loadChecklist(c.id); }}
-                style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1fr', padding: '14px 18px', borderBottom: '1px solid #f4f6fa', cursor: 'pointer', background: selectedClient?.id === client.id ? '#fafbfd' : 'white', transition: 'background 0.1s' }}
+                style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1fr 1fr', padding: '14px 18px', borderBottom: '1px solid #f4f6fa', cursor: 'pointer', background: selectedClient?.id === client.id ? '#fafbfd' : 'white', transition: 'background 0.1s' }}
                 onMouseEnter={e => { if (selectedClient?.id !== client.id) e.currentTarget.style.background = '#fafbfd'; }}
                 onMouseLeave={e => { if (selectedClient?.id !== client.id) e.currentTarget.style.background = 'white'; }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -412,6 +419,19 @@ export default function Clients() {
                             </div>
                           </div>
                         )}
+                      </div>
+                    );
+                  })()}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  {(() => {
+                    const ltv = ltvData[client.id];
+                    if (!ltv) return <span style={{ fontSize: '10px', color: '#8896a8' }}>—</span>;
+                    const roiColor = ltv.roi >= 2 ? '#059669' : ltv.roi >= 1 ? '#d97706' : '#dc2626';
+                    return (
+                      <div>
+                        <div style={{ fontSize: '11px', fontWeight: 700, color: '#0a1628' }}>${ltv.totalSubscription.toLocaleString()}</div>
+                        <div style={{ fontSize: '9px', color: roiColor, fontWeight: 600 }}>{ltv.roi}× ROI</div>
                       </div>
                     );
                   })()}

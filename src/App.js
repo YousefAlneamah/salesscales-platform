@@ -59,6 +59,8 @@ import PlatformSettings from "./pages/PlatformSettings";
 import TeamPerformance from "./pages/TeamPerformance";
 import LandingPage from "./pages/LandingPage";
 import SequenceTemplates from "./pages/SequenceTemplates";
+import SequenceAnalytics from "./pages/SequenceAnalytics";
+import Changelog from "./pages/Changelog";
 
 const navItems = [
   { group: "MAIN", items: [
@@ -109,6 +111,7 @@ const navItems = [
     { id: "store-audit", label: "Store Audit", icon: "ti-search" },
     { id: "competitive-intelligence", label: "Competitive Intel", icon: "ti-radar" },
     { id: "sequence-templates", label: "Sequence Templates", icon: "ti-template" },
+    { id: "sequence-analytics", label: "Sequence Analytics", icon: "ti-chart-sankey" },
   ]},
   { group: "PLATFORM", items: [
     { id: "transcribe", label: "Transcribe", icon: "ti-microphone-2" },
@@ -121,6 +124,7 @@ const navItems = [
     { id: "billing", label: "Billing", icon: "ti-credit-card" },
     { id: "platform-settings", label: "Platform Settings", icon: "ti-adjustments" },
     { id: "settings", label: "Settings", icon: "ti-settings" },
+    { id: "changelog", label: "Changelog", icon: "ti-clipboard-list" },
   ]},
 ];
 
@@ -169,6 +173,8 @@ const pageTitles = {
   "store-audit": "Store Audit Tool",
   "competitive-intelligence": "Competitive Intelligence",
   "sequence-templates": "Sequence Templates",
+  "sequence-analytics": "Sequence Analytics",
+  "changelog": "Platform Changelog",
   transcribe: "Call Transcription",
   onboarding: "Onboarding",
   marketplace: "Marketplace",
@@ -410,6 +416,8 @@ function App() {
       case "store-audit": return <AuditTool />;
       case "competitive-intelligence": return <CompetitiveIntelligence />;
       case "sequence-templates": return <SequenceTemplates />;
+      case "sequence-analytics": return <SequenceAnalytics />;
+      case "changelog": return <Changelog />;
       case "transcribe": return <Transcribe />;
       case "onboarding": return <Onboarding />;
       case "marketplace": return <Marketplace />;
