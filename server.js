@@ -6485,6 +6485,325 @@ cron.schedule('0 7 * * *', async () => {
   }
 }, { timezone: 'Asia/Riyadh' });
 
+// ─── FIX 1: BIRTHDAY SEQUENCE ─────────────────────────────
+// SQL: ALTER TABLE contacts ADD COLUMN IF NOT EXISTS birthday date;
+cron.schedule('0 8 * * *', async () => {
+  console.log('[AUTO] Birthday sequence check starting...');
+  try {
+    // Target contacts whose birthday month+day = today + 7 days
+    const target = new Date(Date.now() + 7 * 24 * 3600 * 1000);
+    const mm = String(target.getMonth() + 1).padStart(2, '0');
+    const dd = String(target.getDate()).padStart(2, '0');
+
+    // Supabase doesn't support month/day extraction directly — fetch all with birthday set
+    const { data: allContacts } = await supabase
+      .from('contacts')
+      .select('id, first_name, email, client_id, birthday')
+      .not('birthday', 'is', null)
+      .not('email', 'is', null);
+
+    if (!allContacts || allContacts.length === 0) return;
+
+    // Filter to contacts whose birthday month/day matches the target
+    const upcoming = allContacts.filter(c => {
+      if (!c.birthday) return false;
+      const [, cMm, cDd] = c.birthday.split('-');
+      return cMm === mm && cDd === dd;
+    });
+
+    if (upcoming.length === 0) {
+      console.log('[AUTO] Birthday check — no upcoming birthdays in 7 days');
+      return;
+    }
+
+    for (const contact of upcoming) {
+      try {
+        // Only generate for contacts who have made a purchase (completed enrollment)
+        const { count } = await supabase.from('workflow_enrollments')
+          .select('id', { count: 'exact', head: true })
+          .eq('contact_id', contact.id)
+          .eq('status', 'completed');
+        if (!count || count === 0) continue;
+
+        // Check if we already submitted a birthday approval for this contact this year
+        const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString();
+        const { count: existing } = await supabase.from('approvals')
+          .select('id', { count: 'exact', head: true })
+          .eq('client_id', contact.client_id)
+          .ilike('title', `%Birthday%${contact.first_name}%`)
+          .gte('created_at', yearStart);
+        if (existing && existing > 0) continue;
+
+        const { data: client } = await supabase.from('clients').select('name, niche').eq('id', contact.client_id).maybeSingle();
+        const ctx = await ragSearch(`birthday offer ${client?.niche || 'ecommerce'}`, contact.client_id).catch(() => '');
+
+        const emailRaw = await aiCall(
+          `You are Mahdi, Marketing & Content AI at Sales Scales. Return ONLY valid JSON, no markdown. Write warmly and personally — like a friend at the brand wishing them happy birthday. Include a special discount offer. No exclamation marks. Never mention Claude.`,
+          `Write a birthday offer email for ${contact.first_name}, a customer of ${client?.name || 'the store'} (${client?.niche || 'ecommerce'}). Their birthday is in 7 days. Offer a special birthday discount — suggest a % off (choose 15%, 20%, or 25% based on what feels right for the brand). Warm, personal tone. One clear CTA. Return JSON: {"subject":"...","content":"...","discount_percentage":"20"}`,
+          ctx
+        );
+        let parsed = { subject: `Happy Birthday, ${contact.first_name} 🎂`, content: '', discount_percentage: '20' };
+        try {
+          const s = emailRaw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+          const m = s.match(/\{[\s\S]*\}/);
+          parsed = JSON.parse(m ? m[0] : s);
+        } catch { /* keep defaults */ }
+
+        await supabase.from('approvals').insert([{
+          type: 'email_sequence', from_member: 'mahdi', client_id: contact.client_id,
+          title: `Birthday Offer — ${contact.first_name} (${mm}/${dd})`,
+          content: parsed.content || '',
+          metadata: {
+            subject: parsed.subject,
+            contact_id: contact.id,
+            contact_email: contact.email,
+            discount_percentage: parsed.discount_percentage,
+            birthday: contact.birthday,
+            steps: [{ step_type: 'email', subject: parsed.subject, content: parsed.content || '', wait_hours: 0 }],
+          },
+          priority: 'normal', status: 'pending', created_at: new Date().toISOString(),
+        }]);
+        console.log(`[AUTO] Birthday approval submitted for ${contact.first_name} (${contact.client_id})`);
+      } catch (contactErr) {
+        console.error(`[AUTO] Birthday error for contact ${contact.id}:`, contactErr.message);
+      }
+    }
+  } catch (e) {
+    console.error('[AUTO] Birthday cron error:', e.message);
+  }
+});
+
+// ─── FIX 2: CALENDLY WEBHOOK ──────────────────────────────
+// SQL: CREATE TABLE IF NOT EXISTS calendly_bookings (
+//   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+//   invitee_name text, invitee_email text,
+//   event_name text, start_time timestamptz,
+//   cancel_url text, reschedule_url text,
+//   created_at timestamptz DEFAULT now()
+// );
+app.post('/calendly/webhook', async (req, res) => {
+  res.sendStatus(200);
+  try {
+    const event = req.body;
+    if (event.event !== 'invitee.created') return;
+
+    const payload      = event.payload || {};
+    const invitee      = payload.invitee || {};
+    const eventType    = payload.event_type || {};
+    const name         = invitee.name || 'Prospect';
+    const email        = invitee.email || '';
+    const eventName    = eventType.name || 'Sales Call';
+    const startTime    = payload.event?.start_time || payload.scheduled_event?.start_time || '';
+    const cancelUrl    = invitee.cancel_url || '';
+    const rescheduleUrl = invitee.reschedule_url || '';
+
+    // Store booking
+    await supabase.from('calendly_bookings').insert([{
+      invitee_name: name, invitee_email: email,
+      event_name: eventName, start_time: startTime || null,
+      cancel_url: cancelUrl, reschedule_url: rescheduleUrl,
+      created_at: new Date().toISOString(),
+    }]);
+
+    const formattedTime = startTime
+      ? new Date(startTime).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
+      : 'time TBC';
+
+    // Send confirmation email to prospect
+    if (email && process.env.SENDGRID_FROM_EMAIL) {
+      const confirmHtml = buildEmailHtml({
+        subject: `You're booked — ${eventName}`,
+        content: `Hi ${name},\n\nYour call is confirmed. Here are your booking details:\n\nEvent: ${eventName}\nTime: ${formattedTime}\n\nWe're looking forward to showing you exactly how Sales Scales works and how quickly you can start recovering revenue.\n\nIf you need to reschedule, use the link below.`,
+        clientName: 'Sales Scales',
+        brandColor: '#0a1628',
+        cartLink: rescheduleUrl || '',
+      }).replace('Complete Your Order →', 'Reschedule if needed');
+      await sgMail.send({
+        to: email,
+        from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+        subject: `You're booked — ${eventName}`,
+        html: confirmHtml,
+      }).catch(e => console.error('Calendly confirmation email failed:', e.message));
+    }
+
+    // Hassan briefing with talking points
+    const talkingPoints = await aiCall(
+      `You are Hassan, Growth & Outreach AI at Sales Scales. You are sharp, personable, and know how to open a great sales conversation. You are Hassan — never mention Claude.`,
+      `A prospect named ${name} (${email || 'email unknown'}) just booked a ${eventName} for ${formattedTime}.\n\nGenerate a concise briefing for Yousef with:\n1. A recommended opening line for the call\n2. 3 qualifying questions to understand their situation\n3. Key pain points to probe for (cart abandonment, low email open rates, manual follow-up)\n4. How to position Sales Scales specifically for an ecommerce agency prospect\n5. A suggested close and next step\n\nKeep it tight and actionable — this is a pre-call prep note, not an essay.`
+    ).catch(() => `New booking: ${name} — ${formattedTime}`);
+
+    await storeBriefing(
+      'hassan', 'yousef',
+      `New Booking — ${name} · ${eventName} · ${formattedTime}`,
+      `Prospect: ${name}\nEmail: ${email || '—'}\nEvent: ${eventName}\nTime: ${formattedTime}\n\n${talkingPoints}`,
+      'high'
+    ).catch(e => console.error('Calendly briefing error:', e.message));
+
+    console.log(`[calendly] Booking stored and briefing sent for ${name} (${email})`);
+  } catch (e) {
+    console.error('/calendly/webhook error:', e.message);
+  }
+});
+
+// ─── FIX 3: CONTRACT PDF GENERATOR ───────────────────────
+app.get('/contracts/generate', async (req, res) => {
+  const { client_id } = req.query;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+  try {
+    const { data: client } = await supabase.from('clients').select('name, tier').eq('id', client_id).maybeSingle();
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+
+    const TIER_FEES   = { starter: '$997', growth: '$1,997', elite: '$2,997', enterprise: 'Custom' };
+    const TIER_SVCS   = {
+      starter:    'Email automation, SMS automation, CRM & contacts, AI team (6 members), up to 3 active sequences',
+      growth:     'Everything in Starter, plus WhatsApp automation, unlimited sequences, Klaviyo, Meta Ads, HubSpot CRM integrations',
+      elite:      'Everything in Growth, plus Voice AI agents, Shopify live data, Canva design briefs, Higgsfield video briefs',
+      enterprise: 'Custom scope as agreed in writing',
+    };
+    const tier        = (client.tier || 'starter').toLowerCase();
+    const fee         = TIER_FEES[tier] || '$997';
+    const services    = TIER_SVCS[tier] || TIER_SVCS.starter;
+    const today       = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    const year        = new Date().getFullYear();
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Service Agreement — ${client.name}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Georgia, 'Times New Roman', serif; font-size: 12pt; color: #0a1628; background: #fff; padding: 48px 60px; line-height: 1.7; }
+    .header { text-align: center; border-bottom: 3px solid #0a1628; padding-bottom: 24px; margin-bottom: 32px; }
+    .logo { font-size: 22pt; font-weight: 700; letter-spacing: 2px; color: #0a1628; font-family: Arial, sans-serif; }
+    .logo span { color: #c9a84c; }
+    .subtitle { font-size: 9pt; color: #8896a8; letter-spacing: 3px; text-transform: uppercase; margin-top: 6px; font-family: Arial, sans-serif; }
+    .doc-title { font-size: 16pt; font-weight: 700; margin-top: 20px; color: #0a1628; font-family: Arial, sans-serif; }
+    .section { margin-bottom: 22px; }
+    .section-num { font-size: 9pt; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #c9a84c; font-family: Arial, sans-serif; margin-bottom: 6px; }
+    .section-title { font-size: 12pt; font-weight: 700; margin-bottom: 8px; font-family: Arial, sans-serif; }
+    p { margin-bottom: 8px; }
+    .parties-table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; }
+    .parties-table td { padding: 10px 14px; border: 1px solid #e4e9f0; font-size: 11pt; }
+    .parties-table td:first-child { font-weight: 700; font-family: Arial, sans-serif; width: 30%; background: #f8fafc; font-size: 9pt; text-transform: uppercase; letter-spacing: 1px; color: #4a5568; }
+    .fee-box { background: #f8fafc; border: 1px solid #e4e9f0; border-left: 4px solid #c9a84c; border-radius: 4px; padding: 16px 20px; margin: 12px 0; }
+    .fee-amount { font-size: 20pt; font-weight: 700; color: #0a1628; font-family: Arial, sans-serif; }
+    .fee-label { font-size: 9pt; color: #8896a8; text-transform: uppercase; letter-spacing: 1px; font-family: Arial, sans-serif; }
+    ol { padding-left: 20px; }
+    ol li { margin-bottom: 6px; }
+    .sig-block { margin-top: 48px; display: flex; gap: 60px; }
+    .sig-col { flex: 1; }
+    .sig-line { border-bottom: 1px solid #0a1628; height: 36px; margin-bottom: 6px; }
+    .sig-label { font-size: 9pt; color: #8896a8; font-family: Arial, sans-serif; }
+    .footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #e4e9f0; text-align: center; font-size: 9pt; color: #8896a8; font-family: Arial, sans-serif; }
+    @media print {
+      body { padding: 24px 36px; }
+      @page { margin: 0.75in; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">SALES <span>SCALES</span></div>
+    <div class="subtitle">AI Revenue System</div>
+    <div class="doc-title">Service Agreement</div>
+    <div style="font-size:10pt;color:#8896a8;margin-top:8px;font-family:Arial,sans-serif;">Effective Date: ${today}</div>
+  </div>
+
+  <div class="section">
+    <div class="section-num">1. Parties</div>
+    <div class="section-title">Service Provider &amp; Client</div>
+    <table class="parties-table">
+      <tr><td>Service Provider</td><td>Sales Scales · aisalesscales.com</td></tr>
+      <tr><td>Client</td><td>${client.name}</td></tr>
+      <tr><td>Plan</td><td>${tier.charAt(0).toUpperCase() + tier.slice(1)}</td></tr>
+      <tr><td>Effective Date</td><td>${today}</td></tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-num">2. Services</div>
+    <div class="section-title">Scope of Work</div>
+    <p>Sales Scales will provide the following services under the <strong>${tier.charAt(0).toUpperCase() + tier.slice(1)}</strong> plan:</p>
+    <p>${services}.</p>
+    <p>Services are delivered via the Sales Scales platform and AI team, operating on behalf of the Client's store automatically and continuously.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-num">3. Fees &amp; Payment</div>
+    <div class="section-title">Monthly Retainer</div>
+    <div class="fee-box">
+      <div class="fee-label">Monthly Fee</div>
+      <div class="fee-amount">${fee}</div>
+      <div style="font-size:10pt;color:#4a5568;margin-top:4px;">per month, billed monthly in advance</div>
+    </div>
+    <p>Payment is due on the same day each calendar month. Late payments beyond 7 days may result in service suspension. All fees are in USD.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-num">4. Term &amp; Termination</div>
+    <div class="section-title">Duration</div>
+    <p>This Agreement commences on the Effective Date and continues on a month-to-month basis. Either party may terminate with 30 days' written notice. Sales Scales may terminate immediately for non-payment or material breach.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-num">5. Intellectual Property</div>
+    <div class="section-title">Ownership</div>
+    <p>All content generated by Sales Scales on behalf of the Client (emails, SMS copy, sequences) is the property of the Client upon payment. The Sales Scales platform, AI systems, and proprietary technology remain the sole property of Sales Scales.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-num">6. Confidentiality</div>
+    <div class="section-title">Non-Disclosure</div>
+    <p>Both parties agree to keep confidential any non-public information received from the other party and to use such information solely for the purposes of this Agreement.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-num">7. Limitation of Liability</div>
+    <div class="section-title">Cap on Damages</div>
+    <p>Sales Scales' total liability shall not exceed the fees paid in the three months preceding the claim. Sales Scales is not liable for indirect, incidental, or consequential damages. Revenue estimates shown in the platform are illustrative and not guaranteed.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-num">8. Governing Law</div>
+    <div class="section-title">Jurisdiction</div>
+    <p>This Agreement is governed by the laws of the jurisdiction in which Sales Scales operates. Any disputes shall be resolved through binding arbitration before resorting to litigation.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-num">9. Entire Agreement</div>
+    <p>This document constitutes the entire agreement between the parties and supersedes all prior discussions. Amendments must be in writing and signed by both parties.</p>
+  </div>
+
+  <div class="sig-block">
+    <div class="sig-col">
+      <div class="sig-line"></div>
+      <div class="sig-label">Sales Scales — Authorised Signatory</div>
+      <div style="font-size:9pt;color:#8896a8;font-family:Arial,sans-serif;margin-top:4px;">Date: _______________</div>
+    </div>
+    <div class="sig-col">
+      <div class="sig-line"></div>
+      <div class="sig-label">${client.name} — Client Signatory</div>
+      <div style="font-size:9pt;color:#8896a8;font-family:Arial,sans-serif;margin-top:4px;">Date: _______________</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    &copy; ${year} Sales Scales &nbsp;·&nbsp; aisalesscales.com &nbsp;·&nbsp; Generated ${today}
+    <br/>To save as PDF: File &rarr; Print &rarr; Save as PDF
+  </div>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `inline; filename="Sales-Scales-Agreement-${client.name.replace(/\s+/g, '-')}.html"`);
+    res.send(html);
+  } catch (e) {
+    console.error('/contracts/generate error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── GLOBAL ERROR HANDLER ─────────────────────────────────
 app.use((err, req, res, next) => {
   const endpoint = `${req.method} ${req.path}`;

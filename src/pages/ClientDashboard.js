@@ -2229,6 +2229,19 @@ export default function ClientDashboard({ user, onLogout }) {
                 ↓ Download My Data
               </button>
             </div>
+
+            {/* Fix 3: Download Contract */}
+            <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid #f0f3f8' }}>
+              <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>Service Agreement</div>
+              <div style={{ fontSize: '12px', color: '#8896a8', marginBottom: '12px', lineHeight: 1.6 }}>Download your formal service agreement as a print-ready document. Open it in your browser and use File → Print → Save as PDF.</div>
+              <a
+                href={`${API_BASE}/contracts/generate?client_id=${user.clientId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: 'inline-block', background: '#0a1628', color: '#c9a84c', border: 'none', borderRadius: '10px', padding: '10px 22px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', textDecoration: 'none' }}>
+                ↓ Download Contract
+              </a>
+            </div>
           </>
         )}
       </div>
