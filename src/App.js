@@ -55,6 +55,7 @@ import Fatima from "./pages/Fatima";
 import Zainab from "./pages/Zainab";
 import TeamBriefings from "./pages/TeamBriefings";
 import Tasks from "./pages/Tasks";
+import PlatformSettings from "./pages/PlatformSettings";
 import TeamPerformance from "./pages/TeamPerformance";
 import LandingPage from "./pages/LandingPage";
 
@@ -116,6 +117,7 @@ const navItems = [
     { id: "referrals", label: "Referrals", icon: "ti-users" },
     { id: "auto-reports", label: "Auto Reports", icon: "ti-file-report" },
     { id: "billing", label: "Billing", icon: "ti-credit-card" },
+    { id: "platform-settings", label: "Platform Settings", icon: "ti-adjustments" },
     { id: "settings", label: "Settings", icon: "ti-settings" },
   ]},
 ];
@@ -168,6 +170,7 @@ const pageTitles = {
   onboarding: "Onboarding",
   marketplace: "Marketplace",
   whitelabel: "White Label",
+  "platform-settings": "Platform Settings",
   settings: "Settings",
 };
 
@@ -368,6 +371,7 @@ function App() {
       case "referrals": return <Referrals />;
       case "auto-reports": return <AutoReports />;
       case "billing": return <Billing />;
+      case "platform-settings": return <PlatformSettings />;
       case "settings": return <Settings />;
       default: return <Dashboard />;
     }

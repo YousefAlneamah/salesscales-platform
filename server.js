@@ -116,31 +116,49 @@ app.use(express.json({ limit: '50mb', verify: (req, res, buf) => { req.rawBody =
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 
 // ─── RATE LIMITING ────────────────────────────────────────
+// Fix 2: log every rate-limit hit to rate_limit_hits table
+const logRateLimitHit = (req, limiterName) => {
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unknown';
+  supabase.from('rate_limit_hits').insert([{ ip, endpoint: `${limiterName}:${req.method} ${req.path}`, created_at: new Date().toISOString() }]).catch(() => {});
+};
+
+const makeHandler = (limiterName, msg) => (req, res, next, options) => {
+  logRateLimitHit(req, limiterName);
+  res.status(options.statusCode).json({ error: msg });
+};
+
 const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later.' },
+  windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false,
+  handler: makeHandler('general', 'Too many requests, please try again later.'),
 });
 
 const aiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'AI team rate limit exceeded. Maximum 20 requests per 15 minutes.' },
+  windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false,
+  handler: makeHandler('ai', 'AI team rate limit exceeded. Maximum 20 requests per 15 minutes.'),
 });
 
 const importLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Import rate limit exceeded. Maximum 5 imports per hour.' },
+  windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false,
+  handler: makeHandler('import', 'Import rate limit exceeded. Maximum 5 imports per hour.'),
 });
 
 app.use(generalLimiter);
+
+// Fix 3: response-time logging middleware — only logs requests >500ms
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const ms = Date.now() - start;
+    if (ms > 500) {
+      supabase.from('request_logs').insert([{
+        method: req.method, path: req.path,
+        status_code: res.statusCode, response_time_ms: ms,
+        created_at: new Date().toISOString(),
+      }]).catch(() => {});
+    }
+  });
+  next();
+});
 
 // ─── HEALTH CHECK ─────────────────────────────────────────
 app.get('/health', (req, res) => {
@@ -4132,6 +4150,199 @@ cron.schedule('0 3 * * *', async () => {
   } catch (e) {
     console.error('[AUTO] Data retention error:', e.message);
   }
+});
+
+// ─── FIX 2: RATE LIMIT STATS ──────────────────────────────
+app.get('/admin/rate-limit-stats', async (req, res) => {
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    const { data } = await supabase.from('rate_limit_hits').select('ip, endpoint, created_at').gte('created_at', weekAgo);
+    const byEndpoint = {}, byIp = {};
+    (data || []).forEach(h => {
+      byEndpoint[h.endpoint] = (byEndpoint[h.endpoint] || 0) + 1;
+      byIp[h.ip] = (byIp[h.ip] || 0) + 1;
+    });
+    const topEndpoints = Object.entries(byEndpoint).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([endpoint, hits]) => ({ endpoint, hits }));
+    const topIps = Object.entries(byIp).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([ip, hits]) => ({ ip, hits }));
+    res.json({ total: data?.length || 0, topEndpoints, topIps, week_start: weekAgo });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── FIX 3: SLOW ENDPOINT STATS ───────────────────────────
+app.get('/admin/slow-endpoints', async (req, res) => {
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    const { data } = await supabase.from('request_logs').select('method, path, response_time_ms').gte('created_at', weekAgo);
+    const grouped = {};
+    (data || []).forEach(r => {
+      const key = `${r.method} ${r.path}`;
+      if (!grouped[key]) grouped[key] = { total: 0, count: 0 };
+      grouped[key].total += r.response_time_ms;
+      grouped[key].count++;
+    });
+    const stats = Object.entries(grouped).map(([endpoint, { total, count }]) => ({ endpoint, avg_ms: Math.round(total / count), count })).sort((a, b) => b.avg_ms - a.avg_ms).slice(0, 20);
+    res.json({ slow_endpoints: stats, week_start: weekAgo });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── FIX 5: CALENDLY UPCOMING CALLS ───────────────────────
+// REPLACE_WITH_REAL_CALENDLY_API_KEY — set CALENDLY_API_KEY in your hosting env vars (not .env)
+app.get('/calendly/upcoming', async (req, res) => {
+  const apiKey = process.env.CALENDLY_API_KEY;
+  if (!apiKey) return res.json({ events: [], configured: false, note: 'Set CALENDLY_API_KEY env var to activate' });
+  try {
+    const userRes = await axios.get('https://api.calendly.com/users/me', { headers: { Authorization: `Bearer ${apiKey}` } });
+    const userUri = userRes.data.resource?.uri;
+    const eventsRes = await axios.get('https://api.calendly.com/scheduled_events', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      params: { user: userUri, status: 'active', count: 10, sort: 'start_time:asc', min_start_time: new Date().toISOString() },
+    });
+    const events = (eventsRes.data.collection || []).map(e => ({
+      id: e.uri.split('/').pop(),
+      name: e.name,
+      start_time: e.start_time,
+      end_time: e.end_time,
+      status: e.status,
+      join_url: e.location?.join_url || null,
+    }));
+    res.json({ events, configured: true });
+  } catch (e) {
+    console.error('Calendly fetch error:', e.response?.data || e.message);
+    res.json({ events: [], configured: true, error: e.response?.data?.message || e.message });
+  }
+});
+
+// ─── FIX 6: PLATFORM SETTINGS ─────────────────────────────
+// SQL: create table if not exists platform_settings (key text primary key, value text, updated_at timestamptz default now());
+app.get('/settings/platform', async (req, res) => {
+  try {
+    const { data } = await supabase.from('platform_settings').select('key, value');
+    const settings = (data || []).reduce((acc, r) => { acc[r.key] = r.value; return acc; }, {});
+    res.json({ settings });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/settings/platform', async (req, res) => {
+  const { settings } = req.body;
+  if (!settings || typeof settings !== 'object') return res.status(400).json({ error: 'settings object required' });
+  try {
+    const rows = Object.entries(settings).map(([key, value]) => ({ key, value: String(value), updated_at: new Date().toISOString() }));
+    await supabase.from('platform_settings').upsert(rows, { onConflict: 'key' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── FIX 8: REFERRALS ALL (owner view) ────────────────────
+app.get('/referrals/all', async (req, res) => {
+  try {
+    const { data } = await supabase.from('referrals').select('*').order('created_at', { ascending: false });
+    const referrals = data || [];
+    const converted = referrals.filter(r => r.status === 'converted').length;
+    const pending = referrals.filter(r => r.status === 'pending').length;
+    res.json({ referrals, stats: { total: referrals.length, converted, pending, estimated_revenue: converted * 1500 } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── FIX 9: INVOICE GENERATION ────────────────────────────
+// SQL: create table if not exists invoices (id uuid default gen_random_uuid() primary key, invoice_number text unique, client_id uuid, client_name text, plan text, amount numeric, due_date date, status text default 'unpaid', line_items jsonb default '[]', created_at timestamptz default now());
+const nextInvoiceNumber = async () => {
+  const year = new Date().getFullYear();
+  const { count } = await supabase.from('invoices').select('id', { count: 'exact', head: true });
+  return `INV-${year}-${String((count || 0) + 1).padStart(4, '0')}`;
+};
+
+app.post('/invoices/generate', async (req, res) => {
+  const { client_id, plan, amount, due_date, line_items } = req.body;
+  if (!client_id || !amount) return res.status(400).json({ error: 'client_id and amount required' });
+  try {
+    const { data: client } = await supabase.from('clients').select('name, tier').eq('id', client_id).maybeSingle();
+    const invoice_number = await nextInvoiceNumber();
+    const { data, error } = await supabase.from('invoices').insert([{
+      invoice_number, client_id,
+      client_name: client?.name || 'Unknown Client',
+      plan: plan || client?.tier || 'starter',
+      amount: parseFloat(amount),
+      due_date: due_date || new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0],
+      line_items: line_items || [{ description: `${plan || client?.tier || 'Starter'} Plan — Monthly Subscription`, amount }],
+      status: 'unpaid',
+      created_at: new Date().toISOString(),
+    }]).select().single();
+    if (error) throw error;
+    res.json({ invoice: data });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/invoices/list', async (req, res) => {
+  const { client_id } = req.query;
+  try {
+    let q = supabase.from('invoices').select('*').order('created_at', { ascending: false });
+    if (client_id) q = q.eq('client_id', client_id);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json({ invoices: data || [] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/invoices/pdf', async (req, res) => {
+  const { invoice_id } = req.query;
+  if (!invoice_id) return res.status(400).send('invoice_id required');
+  try {
+    const { data: inv } = await supabase.from('invoices').select('*').eq('id', invoice_id).maybeSingle();
+    if (!inv) return res.status(404).send('Invoice not found');
+    const items = Array.isArray(inv.line_items) ? inv.line_items : [];
+    const itemRows = items.map(li => `<tr><td style="padding:10px 0;border-bottom:1px solid #f0f3f8;font-size:13px;color:#4a5568">${li.description || ''}</td><td style="padding:10px 0;border-bottom:1px solid #f0f3f8;text-align:right;font-size:13px;font-weight:600;color:#0a1628">$${parseFloat(li.amount).toLocaleString()}</td></tr>`).join('');
+    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice ${inv.invoice_number}</title><style>body{font-family:Arial,sans-serif;max-width:700px;margin:40px auto;padding:0 20px;color:#0a1628}@media print{body{margin:0}}</style></head><body>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:40px;padding-bottom:24px;border-bottom:2px solid #0a1628">
+        <div><div style="font-size:22px;font-weight:800;letter-spacing:2px;color:#0a1628">SALES SCALES</div><div style="font-size:10px;color:#8896a8;letter-spacing:2px;margin-top:4px">AI REVENUE SYSTEM</div></div>
+        <div style="text-align:right"><div style="font-size:28px;font-weight:700;color:#c9a84c">${inv.invoice_number}</div><div style="font-size:11px;color:#8896a8;margin-top:4px">Invoice</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-bottom:40px">
+        <div><div style="font-size:9px;font-weight:700;color:#8896a8;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px">Billed To</div><div style="font-size:14px;font-weight:600">${inv.client_name}</div></div>
+        <div style="text-align:right"><div style="font-size:9px;font-weight:700;color:#8896a8;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px">Details</div><div style="font-size:12px;color:#4a5568">Issue Date: ${new Date(inv.created_at).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div><div style="font-size:12px;color:#4a5568;margin-top:4px">Due Date: ${inv.due_date || '—'}</div><div style="margin-top:6px"><span style="background:${inv.status==='paid'?'#ecfdf5':'#fffbeb'};color:${inv.status==='paid'?'#059669':'#d97706'};border:1px solid ${inv.status==='paid'?'#a7f3d0':'#fde68a'};padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700">${inv.status?.toUpperCase()}</span></div></div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:24px"><thead><tr><th style="text-align:left;font-size:9px;font-weight:700;color:#8896a8;letter-spacing:2px;text-transform:uppercase;padding-bottom:10px;border-bottom:1px solid #e4e9f0">Description</th><th style="text-align:right;font-size:9px;font-weight:700;color:#8896a8;letter-spacing:2px;text-transform:uppercase;padding-bottom:10px;border-bottom:1px solid #e4e9f0">Amount</th></tr></thead><tbody>${itemRows}</tbody></table>
+      <div style="text-align:right;padding:16px 0;border-top:2px solid #0a1628"><span style="font-size:18px;font-weight:700;color:#0a1628">Total: $${parseFloat(inv.amount).toLocaleString()}</span></div>
+      <div style="margin-top:40px;padding-top:20px;border-top:1px solid #f0f3f8;font-size:10px;color:#8896a8;text-align:center">Sales Scales · AI Revenue System · support@aisalesscales.com</div>
+      <script>window.onload=()=>window.print()</script>
+    </body></html>`);
+  } catch (e) { res.status(500).send('Error generating invoice'); }
+});
+
+app.patch('/invoices/:id/status', async (req, res) => {
+  const { status } = req.body;
+  if (!status) return res.status(400).json({ error: 'status required' });
+  try {
+    const { data, error } = await supabase.from('invoices').update({ status }).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ invoice: data });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── FIX 7: CLIENT ONBOARDING CHECKLIST DAILY ALERT ───────
+cron.schedule('30 9 * * *', async () => {
+  try {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: newClients } = await supabase.from('clients').select('id, name').eq('status', 'active').gte('created_at', eightDaysAgo).lte('created_at', sevenDaysAgo);
+    if (!newClients || newClients.length === 0) return;
+    for (const client of newClients) {
+      const [shopifyRes, approvedRes, enrolledRes, emailRes] = await Promise.all([
+        supabase.from('shopify_connections').select('id', { count: 'exact', head: true }).eq('client_id', client.id),
+        supabase.from('approvals').select('id', { count: 'exact', head: true }).eq('client_id', client.id).eq('status', 'approved'),
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('client_id', client.id),
+        supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', client.id).eq('channel', 'email').eq('direction', 'outbound'),
+      ]);
+      const checks = { shopify: (shopifyRes.count || 0) > 0, approved: (approvedRes.count || 0) > 0, enrolled: (enrolledRes.count || 0) > 0, email_sent: (emailRes.count || 0) > 0 };
+      const done = Object.values(checks).filter(Boolean).length;
+      if (done < 4) {
+        const missing = Object.entries(checks).filter(([,v]) => !v).map(([k]) => k.replace(/_/g, ' ')).join(', ');
+        await storeBriefing('fatima', 'yousef',
+          `Onboarding Incomplete — ${client.name} (7 days in)`,
+          `${client.name} has been onboarded for 7 days but has not completed all setup steps.\n\nCompleted: ${done}/4\nMissing: ${missing}\n\nRecommend scheduling a check-in call to help them complete setup.`,
+          'high', client.id);
+      }
+    }
+  } catch (e) { console.error('[AUTO] Onboarding checklist cron error:', e.message); }
 });
 
 // ─── FIX 5: RE-ENGAGEMENT SEQUENCE CRON — DAILY 3PM ──────

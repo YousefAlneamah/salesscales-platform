@@ -17,6 +17,10 @@ export default function Contacts() {
   const [enrollmentMap, setEnrollmentMap] = useState({});
   const [timeline, setTimeline] = useState([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkTag, setBulkTag] = useState('');
+  const [bulkWorkflow, setBulkWorkflow] = useState('');
+  const [bulkWorking, setBulkWorking] = useState(false);
   const [selectedContact, setSelectedContact] = useState(null);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -199,6 +203,57 @@ export default function Contacts() {
       setTimeline(events);
     } catch (e) { console.error('Timeline error:', e.message); }
     setTimelineLoading(false);
+  };
+
+  const toggleSelect = (id) => setSelectedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  const toggleSelectAll = () => setSelectedIds(prev => prev.size === filtered.length ? new Set() : new Set(filtered.map(c => c.id)));
+
+  const bulkEnroll = async () => {
+    if (!bulkWorkflow || selectedIds.size === 0) return;
+    setBulkWorking(true);
+    for (const id of selectedIds) {
+      const c = contacts.find(c => c.id === id);
+      if (!c) continue;
+      await fetch(`${API_BASE}/contacts/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contact_id: id, workflow_id: bulkWorkflow, client_id: c.client_id }) }).catch(() => {});
+    }
+    setBulkWorking(false);
+    setSelectedIds(new Set());
+    setBulkWorkflow('');
+    alert(`Enrolled ${selectedIds.size} contacts`);
+  };
+
+  const bulkAddTag = async () => {
+    if (!bulkTag.trim() || selectedIds.size === 0) return;
+    setBulkWorking(true);
+    for (const id of selectedIds) {
+      const c = contacts.find(c => c.id === id);
+      const existing = Array.isArray(c?.tags) ? c.tags : [];
+      if (!existing.includes(bulkTag)) await supabase.from('contacts').update({ tags: [...existing, bulkTag] }).eq('id', id);
+    }
+    setBulkWorking(false);
+    setSelectedIds(new Set());
+    setBulkTag('');
+    fetchContacts();
+  };
+
+  const bulkExport = () => {
+    const selected = contacts.filter(c => selectedIds.has(c.id));
+    const headers = ['first_name', 'last_name', 'email', 'phone', 'pipeline_stage', 'source'];
+    const rows = selected.map(c => headers.map(h => { const v = c[h]; return v && String(v).includes(',') ? `"${v}"` : (v || ''); }).join(','));
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'selected-contacts.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const bulkDelete = async () => {
+    if (!window.confirm(`Delete ${selectedIds.size} selected contact(s)? This cannot be undone.`)) return;
+    setBulkWorking(true);
+    await supabase.from('contacts').delete().in('id', [...selectedIds]);
+    setBulkWorking(false);
+    setSelectedIds(new Set());
+    fetchContacts();
   };
 
   const filtered = contacts.filter(c => {
@@ -384,6 +439,37 @@ export default function Contacts() {
         <div style={{ marginLeft: 'auto', fontSize: '11px', color: '#8896a8' }}>{filtered.length} contacts</div>
       </div>
 
+      {/* BULK ACTION TOOLBAR */}
+      {selectedIds.size > 0 && (
+        <div style={{ background: '#0a1628', borderRadius: '10px', padding: '10px 16px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '11px', fontWeight: 700, color: '#c9a84c', flexShrink: 0 }}>{selectedIds.size} selected</span>
+          <select value={bulkWorkflow} onChange={e => setBulkWorkflow(e.target.value)}
+            style={{ background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', padding: '5px 8px', fontSize: '11px', outline: 'none' }}>
+            <option value="">Pick sequence…</option>
+            {clients.flatMap(c => []).concat([])}
+          </select>
+          <button onClick={bulkEnroll} disabled={!bulkWorkflow || bulkWorking}
+            style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '6px', padding: '5px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+            Enroll All
+          </button>
+          <input value={bulkTag} onChange={e => setBulkTag(e.target.value)} placeholder="Tag name…"
+            style={{ background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', padding: '5px 8px', fontSize: '11px', outline: 'none', width: '100px' }} />
+          <button onClick={bulkAddTag} disabled={!bulkTag.trim() || bulkWorking}
+            style={{ background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', padding: '5px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+            Add Tag
+          </button>
+          <button onClick={bulkExport}
+            style={{ background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', padding: '5px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+            Export Selected
+          </button>
+          <button onClick={bulkDelete} disabled={bulkWorking}
+            style={{ background: 'rgba(220,38,38,0.25)', color: '#fca5a5', border: '1px solid rgba(220,38,38,0.4)', borderRadius: '6px', padding: '5px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+            Delete
+          </button>
+          <button onClick={() => setSelectedIds(new Set())} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: '14px' }}>×</button>
+        </div>
+      )}
+
       {/* CONTACT DETAIL */}
       {selectedContact && (
         <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', marginBottom: '16px', boxShadow: '0 4px 6px rgba(10,22,40,0.05)' }}>
@@ -474,7 +560,9 @@ export default function Contacts() {
         </div>
       ) : (
         <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 1.2fr 1fr 1fr 1fr', padding: '12px 18px', background: '#0a1628' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '32px 2.5fr 1.2fr 1fr 1fr 1fr', padding: '12px 18px', background: '#0a1628' }}>
+            <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0} onChange={toggleSelectAll}
+              style={{ accentColor: '#c9a84c', cursor: 'pointer', width: '14px', height: '14px', margin: 'auto 0' }} />
             {['CONTACT', 'STORE', 'SOURCE', 'STAGE', 'ADDED'].map(h => (
               <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px', fontWeight: 700 }}>{h}</div>
             ))}
@@ -483,10 +571,12 @@ export default function Contacts() {
             const s = stageColor(contact.pipeline_stage);
             return (
               <div key={contact.id}
-                onClick={() => { const c = selectedContact?.id === contact.id ? null : contact; setSelectedContact(c); if (c) loadTimeline(c); }}
-                style={{ display: 'grid', gridTemplateColumns: '2.5fr 1.2fr 1fr 1fr 1fr', padding: '13px 18px', borderBottom: '1px solid #f4f6fa', cursor: 'pointer', background: selectedContact?.id === contact.id ? '#fafbfd' : 'white', transition: 'background 0.1s' }}
-                onMouseEnter={e => { if (selectedContact?.id !== contact.id) e.currentTarget.style.background = '#fafbfd'; }}
-                onMouseLeave={e => { if (selectedContact?.id !== contact.id) e.currentTarget.style.background = 'white'; }}>
+                style={{ display: 'grid', gridTemplateColumns: '32px 2.5fr 1.2fr 1fr 1fr 1fr', padding: '13px 18px', borderBottom: '1px solid #f4f6fa', cursor: 'pointer', background: selectedContact?.id === contact.id || selectedIds.has(contact.id) ? '#fafbfd' : 'white', transition: 'background 0.1s', alignItems: 'center' }}
+                onClick={() => { const c = selectedContact?.id === contact.id ? null : contact; setSelectedContact(c); if (c) loadTimeline(c); }}>
+                <div onClick={e => { e.stopPropagation(); toggleSelect(contact.id); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <input type="checkbox" checked={selectedIds.has(contact.id)} onChange={() => toggleSelect(contact.id)}
+                    style={{ accentColor: '#c9a84c', cursor: 'pointer', width: '14px', height: '14px' }} />
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <div style={{ width: '30px', height: '30px', borderRadius: '8px', background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', color: '#c9a84c', fontWeight: 700, flexShrink: 0 }}>
                     {contact.first_name?.[0]}{contact.last_name?.[0]}

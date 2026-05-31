@@ -3,6 +3,62 @@ import axios from 'axios';
 import { supabase } from '../supabase';
 import { API_BASE } from '../config';
 
+// Fix 1: 2FA component for the Security tab
+function TwoFASection({ inputStyle, labelStyle, handleSave }) {
+  const [twoFAEnabled, setTwoFAEnabled] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    axios.get(`${API_BASE}/auth/2fa-status`).then(r => setTwoFAEnabled(r.data.twofa_enabled || false)).catch(() => {});
+  }, []);
+
+  const toggle2FA = async () => {
+    setToggling(true);
+    setMsg('');
+    try {
+      const endpoint = twoFAEnabled ? '/auth/disable-2fa' : '/auth/enable-2fa';
+      const { data } = await axios.post(`${API_BASE}${endpoint}`);
+      setTwoFAEnabled(data.twofa_enabled);
+      setMsg(data.twofa_enabled ? '✓ 2FA enabled — you will need to enter a code on each login' : '✓ 2FA disabled');
+      setTimeout(() => setMsg(''), 4000);
+    } catch (e) { setMsg(e.response?.data?.error || 'Failed to update 2FA'); }
+    setToggling(false);
+  };
+
+  return (
+    <div>
+      <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628', marginBottom: '20px' }}>Security Settings</div>
+
+      {/* 2FA */}
+      <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '18px 20px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628', marginBottom: '4px' }}>Two-Factor Authentication</div>
+            <div style={{ fontSize: '11px', color: '#8896a8', lineHeight: 1.5 }}>
+              {twoFAEnabled ? 'Enabled — a 6-digit code will be sent to your email on each login.' : 'Disabled — enable to require an email code on each login.'}
+            </div>
+          </div>
+          <button onClick={toggle2FA} disabled={toggling}
+            style={{ background: twoFAEnabled ? '#fef2f2' : '#0a1628', color: twoFAEnabled ? '#dc2626' : 'white', border: `1px solid ${twoFAEnabled ? '#fecaca' : '#0a1628'}`, borderRadius: '8px', padding: '8px 16px', fontSize: '12px', fontWeight: 600, cursor: toggling ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}>
+            {toggling ? '...' : twoFAEnabled ? 'Disable 2FA' : 'Enable 2FA'}
+          </button>
+        </div>
+        {msg && <div style={{ marginTop: '10px', fontSize: '11px', color: msg.startsWith('✓') ? '#059669' : '#dc2626', fontWeight: 500 }}>{msg}</div>}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div><label style={labelStyle}>Current Password</label><input type="password" placeholder="Enter current password" style={inputStyle} /></div>
+        <div><label style={labelStyle}>New Password</label><input type="password" placeholder="Enter new password" style={inputStyle} /></div>
+        <div><label style={labelStyle}>Confirm New Password</label><input type="password" placeholder="Confirm new password" style={inputStyle} /></div>
+        <button onClick={handleSave} style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', width: 'fit-content' }}>
+          Update Password
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const [activeTab, setActiveTab] = useState('profile');
   const [saved, setSaved] = useState(false);
@@ -650,22 +706,7 @@ export default function Settings() {
 
           {/* SECURITY */}
           {activeTab === 'security' && (
-            <div>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628', marginBottom: '20px' }}>Security Settings</div>
-              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '14px 16px', marginBottom: '20px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 600, color: '#d97706', marginBottom: '4px' }}>⚠ Security Hardening Pending</div>
-                <div style={{ fontSize: '10px', color: '#92400e', lineHeight: '1.6' }}>JWT authentication, proper Row Level Security, and rate limiting will be implemented before production launch.</div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div><label style={labelStyle}>Current Password</label><input type="password" placeholder="Enter current password" style={inputStyle} /></div>
-                <div><label style={labelStyle}>New Password</label><input type="password" placeholder="Enter new password" style={inputStyle} /></div>
-                <div><label style={labelStyle}>Confirm New Password</label><input type="password" placeholder="Confirm new password" style={inputStyle} /></div>
-                <button onClick={handleSave}
-                  style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', width: 'fit-content' }}>
-                  Update Password
-                </button>
-              </div>
-            </div>
+            <TwoFASection inputStyle={inputStyle} labelStyle={labelStyle} handleSave={handleSave} />
           )}
         </div>
       </div>

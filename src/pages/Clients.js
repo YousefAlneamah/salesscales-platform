@@ -11,6 +11,7 @@ export default function Clients() {
   const [clientNotes, setClientNotes] = useState({});
   const [notesSaving, setNotesSaving] = useState({});
   const [notesUpdatedAt, setNotesUpdatedAt] = useState({});
+  const [checklist, setChecklist] = useState({});
   const [form, setForm] = useState({
     name: "", email: "", niche: "", tier: "starter", status: "onboarding"
   });
@@ -112,6 +113,25 @@ export default function Clients() {
       setShowForm(false);
       setForm({ name: "", email: "", niche: "", tier: "starter", status: "onboarding" });
     }
+  };
+
+  const loadChecklist = async (clientId) => {
+    if (checklist[clientId]) return;
+    const [shopifyRes, approvedRes, enrolledRes, emailRes] = await Promise.all([
+      supabase.from('shopify_connections').select('id', { count: 'exact', head: true }).eq('client_id', clientId),
+      supabase.from('approvals').select('id', { count: 'exact', head: true }).eq('client_id', clientId).eq('status', 'approved'),
+      supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('client_id', clientId),
+      supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', clientId).eq('channel', 'email').eq('direction', 'outbound'),
+    ]);
+    setChecklist(prev => ({
+      ...prev,
+      [clientId]: {
+        shopify: (shopifyRes.count || 0) > 0,
+        approved: (approvedRes.count || 0) > 0,
+        enrolled: (enrolledRes.count || 0) > 0,
+        email_sent: (emailRes.count || 0) > 0,
+      },
+    }));
   };
 
   const saveNotes = async (clientId, notes) => {
@@ -254,6 +274,38 @@ export default function Clients() {
             })}
           </div>
 
+          {/* Fix 7: Onboarding checklist */}
+          {checklist[selectedClient.id] && (() => {
+            const cl = checklist[selectedClient.id];
+            const items = [
+              { key: 'shopify', label: 'Shopify connected' },
+              { key: 'approved', label: 'Sequences approved' },
+              { key: 'enrolled', label: 'First contact enrolled' },
+              { key: 'email_sent', label: 'First email sent' },
+            ];
+            const done = items.filter(i => cl[i.key]).length;
+            const pct = Math.round((done / items.length) * 100);
+            return (
+              <div style={{ borderTop: '1px solid #f0f3f8', paddingTop: '14px', marginBottom: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase' }}>Onboarding Checklist</div>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: pct === 100 ? '#10b981' : '#c9a84c' }}>{done}/{items.length} · {pct}%</div>
+                </div>
+                <div style={{ height: '4px', background: '#f0f3f8', borderRadius: '2px', marginBottom: '10px', overflow: 'hidden' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: pct === 100 ? '#10b981' : '#c9a84c', borderRadius: '2px', transition: 'width 0.4s' }} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                  {items.map(item => (
+                    <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: cl[item.key] ? '#059669' : '#8896a8' }}>
+                      <span style={{ fontSize: '12px' }}>{cl[item.key] ? '✓' : '○'}</span>
+                      {item.label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Fix 2: Private owner notes */}
           <div style={{ borderTop: '1px solid #f0f3f8', paddingTop: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
@@ -294,7 +346,7 @@ export default function Clients() {
             const sc = statusColor(client.status);
             return (
               <div key={client.id}
-                onClick={() => setSelectedClient(selectedClient?.id === client.id ? null : client)}
+                onClick={() => { const c = selectedClient?.id === client.id ? null : client; setSelectedClient(c); if (c) loadChecklist(c.id); }}
                 style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1fr', padding: '14px 18px', borderBottom: '1px solid #f4f6fa', cursor: 'pointer', background: selectedClient?.id === client.id ? '#fafbfd' : 'white', transition: 'background 0.1s' }}
                 onMouseEnter={e => { if (selectedClient?.id !== client.id) e.currentTarget.style.background = '#fafbfd'; }}
                 onMouseLeave={e => { if (selectedClient?.id !== client.id) e.currentTarget.style.background = 'white'; }}>

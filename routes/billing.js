@@ -238,11 +238,46 @@ module.exports = ({ supabase, axios, sgMail, storeBriefing }) => {
   router.get('/subscription-cancel', (req, res) => res.send(cancelHtml));
 
   // ─── POST /billing/webhook ────────────────────────────────
+  // Fix 4: PayPal webhook signature validation
+  // Set PAYPAL_WEBHOOK_ID in your env vars (get it from PayPal Developer Dashboard > Webhooks)
+  const verifyPayPalWebhook = async (headers, rawBody) => {
+    const webhookId = process.env.PAYPAL_WEBHOOK_ID;
+    if (!webhookId) { console.warn('[PayPal] PAYPAL_WEBHOOK_ID not set — skipping signature verification'); return true; }
+    if (!ppConfigured()) return false;
+    try {
+      const token = await ppToken();
+      const payload = typeof rawBody === 'string' ? JSON.parse(rawBody) : (rawBody instanceof Buffer ? JSON.parse(rawBody.toString()) : rawBody);
+      const { data } = await axios.post(
+        `${PAYPAL_BASE()}/v1/notifications/verify-webhook-signature`,
+        {
+          auth_algo: headers['paypal-auth-algo'],
+          cert_url: headers['paypal-cert-url'],
+          transmission_id: headers['paypal-transmission-id'],
+          transmission_sig: headers['paypal-transmission-sig'],
+          transmission_time: headers['paypal-transmission-time'],
+          webhook_id: webhookId,
+          webhook_event: payload,
+        },
+        { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
+      );
+      return data.verification_status === 'SUCCESS';
+    } catch (e) {
+      console.error('[PayPal] Webhook verification failed:', e.response?.data || e.message);
+      return false;
+    }
+  };
+
   router.post('/webhook', async (req, res) => {
+    // Fix 4: verify before processing
+    const verified = await verifyPayPalWebhook(req.headers, req.rawBody || req.body);
+    if (!verified) {
+      console.warn('[PayPal Webhook] Signature verification failed — rejecting');
+      return res.status(401).json({ error: 'Webhook signature verification failed' });
+    }
     res.status(200).json({ received: true });
     const event = req.body;
     const eventType = event.event_type || '';
-    console.log(`[PayPal Webhook] ${eventType}`);
+    console.log(`[PayPal Webhook] ${eventType} (verified)`);
 
     try {
       // PAYMENT RECEIVED — log invoice

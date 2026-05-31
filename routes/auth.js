@@ -58,17 +58,67 @@ module.exports = ({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }) =>
       if (!user.password_hash) return res.status(401).json({ error: 'Invalid email or password' });
       const valid = await bcrypt.compare(password, user.password_hash);
       if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
-      const token = jwt.sign(
-        { id: user.id, email: user.email, name: user.name, role: user.role },
-        JWT_SECRET,
-        { expiresIn: '7d' }
-      );
+
+      // Fix 1: 2FA check
+      const { data: ownerSettings } = await supabase.from('owner_settings').select('twofa_enabled').eq('id', 'owner').maybeSingle();
+      if (ownerSettings?.twofa_enabled) {
+        const code = String(Math.floor(100000 + Math.random() * 900000));
+        const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+        await supabase.from('owner_settings').upsert([{ id: 'owner', twofa_pending_code: code, twofa_code_expires_at: expires, updated_at: new Date().toISOString() }], { onConflict: 'id' });
+        await sgMail.send({
+          to: user.email,
+          from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+          subject: 'Your Sales Scales login code',
+          html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px"><div style="background:#0a1628;padding:20px 24px;border-radius:8px 8px 0 0"><div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase">Sales Scales</div><div style="color:white;font-size:16px;font-weight:600;margin-top:6px">Two-Factor Authentication</div></div><div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 8px 8px;padding:28px 24px"><p style="color:#4a5568;font-size:13px;margin:0 0 20px">Hi ${user.name || 'there'}, enter this code to complete your login. Expires in 10 minutes.</p><div style="background:#f0f3f8;border:1px solid #e4e9f0;border-radius:10px;padding:20px;text-align:center;font-size:36px;font-weight:800;letter-spacing:12px;color:#0a1628;font-family:monospace">${code}</div></div></div>`,
+        });
+        return res.json({ twofa_required: true });
+      }
+
+      const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
       console.log('Owner login:', user.email);
       res.json({ token, user: { name: user.name, email: user.email, role: user.role } });
     } catch (e) {
       console.error('Login error:', e.message);
       res.status(500).json({ error: 'Login failed' });
     }
+  });
+
+  // Fix 1: verify 2FA code
+  router.post('/verify-2fa', async (req, res) => {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ error: 'code required' });
+    try {
+      const { data: settings } = await supabase.from('owner_settings').select('twofa_pending_code, twofa_code_expires_at').eq('id', 'owner').maybeSingle();
+      if (!settings?.twofa_pending_code) return res.status(400).json({ error: 'No pending 2FA code — please log in again' });
+      if (new Date(settings.twofa_code_expires_at) < new Date()) return res.status(400).json({ error: '2FA code expired — please log in again' });
+      if (String(code).trim() !== settings.twofa_pending_code) return res.status(401).json({ error: 'Invalid 2FA code' });
+      await supabase.from('owner_settings').update({ twofa_pending_code: null, twofa_code_expires_at: null }).eq('id', 'owner');
+      const { data: user } = await supabase.from('users').select('*').eq('role', 'owner').maybeSingle();
+      if (!user) return res.status(500).json({ error: 'User not found' });
+      const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+      res.json({ token, user: { name: user.name, email: user.email, role: user.role } });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  router.post('/enable-2fa', verifyToken, async (req, res) => {
+    try {
+      await supabase.from('owner_settings').upsert([{ id: 'owner', twofa_enabled: true, updated_at: new Date().toISOString() }], { onConflict: 'id' });
+      res.json({ ok: true, twofa_enabled: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  router.post('/disable-2fa', verifyToken, async (req, res) => {
+    try {
+      await supabase.from('owner_settings').upsert([{ id: 'owner', twofa_enabled: false, twofa_pending_code: null, updated_at: new Date().toISOString() }], { onConflict: 'id' });
+      res.json({ ok: true, twofa_enabled: false });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  router.get('/2fa-status', verifyToken, async (req, res) => {
+    try {
+      const { data } = await supabase.from('owner_settings').select('twofa_enabled').eq('id', 'owner').maybeSingle();
+      res.json({ twofa_enabled: data?.twofa_enabled || false });
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   router.post('/change-password', verifyToken, async (req, res) => {

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
+// Fix 2: rate limit stats state added to component below
 
 const BarChart = ({ data, title, color = '#c9a84c' }) => {
   const entries = Object.entries(data || {}).filter(([k]) => k && k !== 'null' && k !== 'undefined');
@@ -48,6 +49,7 @@ export default function Analytics() {
   const [approvals, setApprovals] = useState([]);
   const [clients, setClients] = useState([]);
   const [seqPerformance, setSeqPerformance] = useState([]);
+  const [rateLimitStats, setRateLimitStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filterClient, setFilterClient] = useState('All');
 
@@ -99,6 +101,8 @@ export default function Analytics() {
         };
       }).sort((a, b) => b.completion_rate - a.completion_rate);
       setSeqPerformance(perf);
+      // Fix 2: fetch rate limit stats
+      axios.get(`${API_BASE}/admin/rate-limit-stats`).then(r => setRateLimitStats(r.data)).catch(() => {});
     } catch (e) {
       console.error('Analytics error:', e);
     }
@@ -317,6 +321,33 @@ export default function Analytics() {
             );
           })}
         </div>
+      )}
+
+      {/* FIX 2: RATE LIMIT STATS */}
+      {rateLimitStats && (
+        <>
+          <div className="section-label" style={{ margin: '24px 0 10px' }}>Rate Limit Activity (This Week)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+            <div className="card">
+              <div className="section-label" style={{ marginBottom: '12px' }}>Top Blocked Endpoints</div>
+              {rateLimitStats.topEndpoints.length === 0 ? <div style={{ fontSize: '11px', color: '#8896a8' }}>No hits this week</div> : rateLimitStats.topEndpoints.map((r, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f4f6fa', fontSize: '11px' }}>
+                  <span style={{ color: '#4a5568', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '200px' }}>{r.endpoint}</span>
+                  <span className="badge-red" style={{ flexShrink: 0 }}>{r.hits}×</span>
+                </div>
+              ))}
+            </div>
+            <div className="card">
+              <div className="section-label" style={{ marginBottom: '12px' }}>Top Blocked IPs</div>
+              {rateLimitStats.topIps.length === 0 ? <div style={{ fontSize: '11px', color: '#8896a8' }}>No hits this week</div> : rateLimitStats.topIps.map((r, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f4f6fa', fontSize: '11px' }}>
+                  <span style={{ color: '#4a5568', fontFamily: 'DM Mono, monospace' }}>{r.ip}</span>
+                  <span className="badge-red" style={{ flexShrink: 0 }}>{r.hits}×</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

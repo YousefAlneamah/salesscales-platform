@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabase';
+import axios from 'axios';
+import { API_BASE } from '../config';
 
 export default function Dashboard() {
   const [stats, setStats] = useState({
@@ -18,8 +20,13 @@ export default function Dashboard() {
   const [recentContacts, setRecentContacts] = useState([]);
   const [recentApprovals, setRecentApprovals] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [upcomingCalls, setUpcomingCalls] = useState([]);
+  const [calendlyConfigured, setCalendlyConfigured] = useState(false);
 
-  useEffect(() => { fetchAllData(); }, []);
+  useEffect(() => {
+    fetchAllData();
+    axios.get(`${API_BASE}/calendly/upcoming`).then(r => { setUpcomingCalls(r.data.events || []); setCalendlyConfigured(r.data.configured || false); }).catch(() => {});
+  }, []);
 
   const fetchAllData = async () => {
     setLoading(true);
@@ -260,6 +267,29 @@ export default function Dashboard() {
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Fix 5: Upcoming Calls from Calendly */}
+      <div style={{ marginTop: '24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <div className="section-label">Upcoming Calls</div>
+          {!calendlyConfigured && <div style={{ fontSize: '10px', color: '#8896a8' }}>Set CALENDLY_API_KEY env var to activate</div>}
+        </div>
+        {upcomingCalls.length === 0 ? (
+          <div className="card" style={{ textAlign: 'center', padding: '24px', color: '#8896a8', fontSize: '12px' }}>
+            {calendlyConfigured ? 'No upcoming calls scheduled' : 'Calendly not connected — add CALENDLY_API_KEY to your env vars'}
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+            {upcomingCalls.map(ev => (
+              <div key={ev.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '14px 16px', borderLeft: '3px solid #c9a84c', boxShadow: '0 1px 3px rgba(10,22,40,0.05)' }}>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.name}</div>
+                <div style={{ fontSize: '11px', color: '#8896a8' }}>{new Date(ev.start_time).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                {ev.join_url && <a href={ev.join_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '10px', color: '#c9a84c', fontWeight: 600, textDecoration: 'none', display: 'inline-block', marginTop: '6px' }}>Join →</a>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
