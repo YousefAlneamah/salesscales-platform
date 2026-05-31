@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import axios from 'axios';
 import { API_BASE } from '../config';
 import { supabase } from '../supabase';
 
@@ -32,6 +33,11 @@ export default function Contacts() {
   const [notes, setNotes] = useState('');
   const [clientId, setClientId] = useState('');
   const [unenrolling, setUnenrolling] = useState(false);
+  const [showMerge, setShowMerge] = useState(false);
+  const [mergePrimary, setMergePrimary] = useState('');
+  const [mergeDuplicate, setMergeDuplicate] = useState('');
+  const [merging, setMerging] = useState(false);
+  const [mergeMsg, setMergeMsg] = useState('');
 
   useEffect(() => {
     fetchContacts();
@@ -315,6 +321,10 @@ export default function Contacts() {
             style={{ background: 'white', color: '#0a1628', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
             ↓ Export CSV
           </button>
+          <button onClick={() => { setShowMerge(!showMerge); setMergeMsg(''); setMergePrimary(''); setMergeDuplicate(''); }}
+            style={{ background: 'white', color: '#8896a8', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+            ⇄ Merge Duplicates
+          </button>
           <button onClick={() => setShowForm(!showForm)}
             style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
             + Add Contact
@@ -326,6 +336,65 @@ export default function Contacts() {
           </div>
         )}
       </div>
+
+      {/* MERGE DUPLICATES */}
+      {showMerge && (() => {
+        const dupeGroups = {};
+        contacts.forEach(c => {
+          if (!c.email) return;
+          const k = c.email.toLowerCase().trim();
+          if (!dupeGroups[k]) dupeGroups[k] = [];
+          dupeGroups[k].push(c);
+        });
+        const dupes = Object.values(dupeGroups).filter(g => g.length > 1);
+        const doMerge = async () => {
+          if (!mergePrimary || !mergeDuplicate) { setMergeMsg('Select both contacts.'); return; }
+          setMerging(true); setMergeMsg('');
+          try {
+            await axios.post(`${API_BASE}/contacts/merge`, { primary_contact_id: mergePrimary, duplicate_contact_id: mergeDuplicate });
+            setMergeMsg('✓ Merged successfully');
+            setMergePrimary(''); setMergeDuplicate('');
+            fetchContacts();
+          } catch (e) { setMergeMsg(e.response?.data?.error || 'Merge failed'); }
+          setMerging(false);
+        };
+        return (
+          <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', marginBottom: '20px', boxShadow: '0 4px 6px rgba(10,22,40,0.05)' }}>
+            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '12px' }}>Merge Duplicates</div>
+            {dupes.length === 0 ? (
+              <div style={{ fontSize: '12px', color: '#8896a8' }}>No duplicate emails found — all contacts have unique email addresses.</div>
+            ) : (
+              <div>
+                <div style={{ fontSize: '11px', color: '#d97706', marginBottom: '12px' }}>⚠ Found {dupes.length} email{dupes.length !== 1 ? 's' : ''} with multiple contacts</div>
+                {dupes.map(group => (
+                  <div key={group[0].email} style={{ background: '#f8fafc', borderRadius: '8px', padding: '12px 14px', marginBottom: '8px', border: '1px solid #f0f3f8' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#0a1628', marginBottom: '8px' }}>{group[0].email} — {group.length} contacts</div>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                      {group.map(c => (
+                        <div key={c.id} style={{ fontSize: '11px' }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                            <input type="radio" name={`primary_${group[0].email}`} value={c.id} onChange={() => setMergePrimary(c.id)} checked={mergePrimary === c.id} />
+                            <span style={{ color: '#059669', fontWeight: 600 }}>Keep:</span> {c.first_name} {c.last_name} ({c.source || '—'})
+                          </label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', marginTop: '4px' }}>
+                            <input type="radio" name={`dupe_${group[0].email}`} value={c.id} onChange={() => setMergeDuplicate(c.id)} checked={mergeDuplicate === c.id} />
+                            <span style={{ color: '#dc2626', fontWeight: 600 }}>Delete:</span> {c.first_name} {c.last_name}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {mergeMsg && <div style={{ fontSize: '11px', color: mergeMsg.startsWith('✓') ? '#059669' : '#dc2626', marginBottom: '10px' }}>{mergeMsg}</div>}
+                <button onClick={doMerge} disabled={merging || !mergePrimary || !mergeDuplicate}
+                  style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 18px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+                  {merging ? 'Merging...' : 'Merge Selected'}
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ADD CONTACT FORM */}
       {showForm && (

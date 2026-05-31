@@ -44,6 +44,8 @@ export default function Approvals() {
   const [filterStatus, setFilterStatus] = useState('pending');
   const [filterType, setFilterType] = useState('All');
   const [filterClient, setFilterClient] = useState('All');
+  const [filterPriority, setFilterPriority] = useState('All');
+  const [sortOrder, setSortOrder] = useState('newest');
   const [selected, setSelected] = useState(null);
   const [feedback, setFeedback] = useState('');
   const [showReject, setShowReject] = useState(false);
@@ -114,12 +116,17 @@ export default function Approvals() {
       const matchS = filterStatus === 'All' || a.status === filterStatus;
       const matchT = filterType === 'All' || a.type === filterType;
       const matchC = filterClient === 'All' || a.client_id === filterClient;
-      return matchS && matchT && matchC;
+      const matchP = filterPriority === 'All' || (a.priority || 'normal') === filterPriority;
+      return matchS && matchT && matchC && matchP;
     })
     .sort((a, b) => {
-      const pa = PRIORITY_ORDER[a.priority || 'normal'] ?? 2;
-      const pb = PRIORITY_ORDER[b.priority || 'normal'] ?? 2;
-      if (pa !== pb) return pa - pb;
+      if (sortOrder === 'oldest') return new Date(a.created_at) - new Date(b.created_at);
+      if (sortOrder === 'client') return (getClientName(a.client_id) || '').localeCompare(getClientName(b.client_id) || '');
+      if (sortOrder === 'priority') {
+        const pa = PRIORITY_ORDER[a.priority || 'normal'] ?? 2;
+        const pb = PRIORITY_ORDER[b.priority || 'normal'] ?? 2;
+        if (pa !== pb) return pa - pb;
+      }
       return new Date(b.created_at) - new Date(a.created_at);
     });
 
@@ -170,6 +177,17 @@ export default function Approvals() {
             {s === 'All' ? 'All Status' : s.charAt(0).toUpperCase() + s.slice(1)}
           </button>
         ))}
+        <div style={{ width: '1px', height: '20px', background: '#e4e9f0', margin: '0 2px' }} />
+        {[{ v: 'All', label: 'All Priority' }, { v: 'urgent', label: '● Urgent' }, { v: 'high', label: '● High' }, { v: 'normal', label: '● Normal' }].map(({ v, label }) => {
+          const ps = PRIORITY_STYLES[v] || {};
+          const active = filterPriority === v;
+          return (
+            <button key={v} onClick={() => setFilterPriority(v)}
+              style={{ padding: '6px 14px', borderRadius: '20px', border: '1px solid', fontSize: '11px', cursor: 'pointer', fontWeight: active ? 600 : 400, background: active ? (ps.bg || '#c9a84c') : 'white', color: active ? (ps.color || '#0a1628') : '#8896a8', borderColor: active ? (ps.border || '#c9a84c') : '#e4e9f0' }}>
+              {label}
+            </button>
+          );
+        })}
         <div style={{ width: '1px', height: '20px', background: '#e4e9f0', margin: '0 4px' }} />
         {['All', 'email_sequence', 'sms_sequence', 'client_checkin', 'prospect', 'outreach_message'].map(t => (
           <button key={t} onClick={() => setFilterType(t)}
@@ -177,9 +195,15 @@ export default function Approvals() {
             {t === 'All' ? 'All Types' : TYPE_LABELS[t] || t}
           </button>
         ))}
-        <select value={filterClient} onChange={e => setFilterClient(e.target.value)} style={{ ...inputStyle, width: '150px', marginLeft: 'auto' }}>
+        <select value={filterClient} onChange={e => setFilterClient(e.target.value)} style={{ ...inputStyle, width: '140px', marginLeft: 'auto' }}>
           <option value="All">All Stores</option>
           {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select value={sortOrder} onChange={e => setSortOrder(e.target.value)} style={{ ...inputStyle, width: '140px' }}>
+          <option value="newest">Newest First</option>
+          <option value="oldest">Oldest First</option>
+          <option value="client">By Client</option>
+          <option value="priority">By Priority</option>
         </select>
       </div>
 

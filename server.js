@@ -4579,25 +4579,44 @@ cron.schedule('0 10 28 * *', async () => {
       try {
         const { data: users } = await supabase.from('client_users').select('email, name').eq('client_id', client.id);
         if (!users || users.length === 0) continue;
-        const scores = [0,1,2,3,4,5,6,7,8,9,10].map(n =>
-          `<a href="${process.env.REACT_APP_API_URL || 'https://api.aisalesscales.com'}/nps/submit?client_id=${client.id}&score=${n}" style="display:inline-block;width:40px;height:40px;line-height:40px;text-align:center;border:1px solid #e4e9f0;border-radius:8px;color:#0a1628;font-size:14px;font-weight:700;text-decoration:none;margin:2px">${n}</a>`
-        ).join('');
+        const apiBase = process.env.REACT_APP_API_URL || 'https://api.aisalesscales.com';
+        const scores = [0,1,2,3,4,5,6,7,8,9,10].map(n => {
+          const bg = n <= 6 ? (n <= 3 ? '#fee2e2' : '#fef3c7') : '#dcfce7';
+          const color = n <= 6 ? (n <= 3 ? '#dc2626' : '#d97706') : '#059669';
+          const border = n <= 6 ? (n <= 3 ? '#fecaca' : '#fde68a') : '#a7f3d0';
+          return `<a href="${apiBase}/nps/submit?client_id=${client.id}&score=${n}" style="display:inline-block;width:46px;height:46px;line-height:46px;text-align:center;background:${bg};border:2px solid ${border};border-radius:10px;color:${color};font-size:16px;font-weight:800;text-decoration:none;margin:3px;font-family:Arial,sans-serif">${n}</a>`;
+        }).join('');
         for (const u of users) {
           await sgMail.send({
             to: u.email,
             from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
-            subject: 'Quick question — how are we doing?',
-            html: `<div style="font-family:Arial,sans-serif;max-width:580px;margin:0 auto">
-              <div style="background:#0a1628;padding:24px;border-radius:8px 8px 0 0">
-                <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase">Sales Scales</div>
+            subject: `${u.name?.split(' ')[0] || 'Quick question'} — how is Sales Scales working for you?`,
+            html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f0f3f8;padding:24px">
+              <div style="background:#0a1628;padding:22px 28px;border-radius:12px 12px 0 0;display:flex;align-items:center;justify-content:space-between">
+                <div>
+                  <div style="color:#c9a84c;font-size:10px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;margin-bottom:2px">Sales Scales</div>
+                  <div style="color:rgba(255,255,255,0.4);font-size:10px">AI Revenue System</div>
+                </div>
+                <div style="background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.3);border-radius:20px;padding:4px 12px;color:#c9a84c;font-size:10px;font-weight:700">Monthly Survey</div>
               </div>
-              <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 8px 8px;padding:28px">
-                <p style="font-size:16px;font-weight:700;color:#0a1628;margin:0 0 8px">Hi ${u.name || 'there'} 👋</p>
-                <p style="font-size:13px;color:#4a5568;line-height:1.7;margin:0 0 24px">How likely are you to recommend Sales Scales to another ecommerce brand?</p>
-                <div style="text-align:center;margin-bottom:12px">${scores}</div>
-                <div style="display:flex;justify-content:space-between;font-size:10px;color:#8896a8;margin-bottom:24px"><span>Not at all likely</span><span>Extremely likely</span></div>
-                <p style="font-size:11px;color:#8896a8;text-align:center;margin:0">Your feedback helps us improve. This takes 5 seconds.</p>
+              <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 12px 12px;padding:32px 28px">
+                <div style="font-size:18px;font-weight:700;color:#0a1628;margin:0 0 6px">Hi ${u.name?.split(' ')[0] || 'there'} 👋</div>
+                <div style="font-size:13px;color:#4a5568;line-height:1.7;margin:0 0 28px">We want to make sure Sales Scales is delivering real value for ${client.name}. One quick question:</div>
+                <div style="background:#f8fafc;border-radius:10px;padding:20px 24px;margin-bottom:24px;border:1px solid #f0f3f8">
+                  <div style="font-size:14px;font-weight:700;color:#0a1628;text-align:center;margin-bottom:20px">How likely are you to recommend Sales Scales to another ecommerce brand?</div>
+                  <div style="text-align:center;margin-bottom:10px">${scores}</div>
+                  <div style="display:flex;justify-content:space-between;font-size:10px;color:#8896a8;padding:0 4px">
+                    <span>🙁 Not at all</span><span>😐 Neutral</span><span>😍 Extremely likely</span>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;margin-bottom:24px">
+                  <div style="flex:1;background:#fee2e2;border-radius:8px;padding:8px;text-align:center"><div style="font-size:9px;color:#dc2626;font-weight:700;letter-spacing:1px">0–6</div><div style="font-size:10px;color:#dc2626">Detractor</div></div>
+                  <div style="flex:1;background:#fef3c7;border-radius:8px;padding:8px;text-align:center"><div style="font-size:9px;color:#d97706;font-weight:700;letter-spacing:1px">7–8</div><div style="font-size:10px;color:#d97706">Passive</div></div>
+                  <div style="flex:1;background:#dcfce7;border-radius:8px;padding:8px;text-align:center"><div style="font-size:9px;color:#059669;font-weight:700;letter-spacing:1px">9–10</div><div style="font-size:10px;color:#059669">Promoter</div></div>
+                </div>
+                <div style="border-top:1px solid #f0f3f8;padding-top:18px;font-size:11px;color:#8896a8;line-height:1.6;text-align:center">This takes 5 seconds. Your honest feedback helps us improve.<br>Your score is anonymous and never shared.</div>
               </div>
+              <div style="text-align:center;padding:16px;font-size:10px;color:#8896a8">Sales Scales · AI Revenue System · <a href="${apiBase}/nps/submit?client_id=${client.id}&score=9" style="color:#c9a84c">Unsubscribe</a></div>
             </div>`,
           });
         }
@@ -4627,10 +4646,32 @@ app.get('/nps/submit', async (req, res) => {
         html: `<p><strong>${client?.name || client_id}</strong> submitted an NPS score of <strong>${scoreInt}/10</strong>.</p>${comment ? `<p>Comment: "${comment}"</p>` : ''}<p>Follow up promptly to resolve their concern.</p>`,
       }).catch(e => console.error('NPS alert email failed:', e.message));
     }
-    res.send(`<html><body style="font-family:Arial;text-align:center;padding:60px"><h2 style="color:#0a1628">Thank you for your feedback!</h2><p style="color:#8896a8">We appreciate you taking the time to share your thoughts.</p></body></html>`);
+    const label = scoreInt >= 9 ? 'Promoter' : scoreInt >= 7 ? 'Passive' : 'Detractor';
+    const color = scoreInt >= 9 ? '#059669' : scoreInt >= 7 ? '#d97706' : '#dc2626';
+    const msg = scoreInt >= 9 ? "We're thrilled you're happy! Consider referring us to another brand." : scoreInt >= 7 ? "Thanks for your feedback. We're always working to improve." : "We're sorry to hear that. Our team will reach out shortly.";
+    res.send(`<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font-family:Arial,sans-serif;background:#f0f3f8;margin:0;padding:40px 20px;min-height:100vh;display:flex;align-items:center;justify-content:center"><div style="max-width:480px;margin:0 auto;background:white;border-radius:16px;overflow:hidden;box-shadow:0 8px 40px rgba(10,22,40,0.12)"><div style="background:#0a1628;padding:28px;text-align:center"><div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px">Sales Scales</div><div style="width:60px;height:60px;border-radius:50%;background:${color}22;border:2px solid ${color}66;margin:0 auto;display:flex;align-items:center;justify-content:center;font-size:24px">${scoreInt >= 9 ? '🎉' : scoreInt >= 7 ? '👍' : '💛'}</div></div><div style="padding:32px;text-align:center"><div style="font-size:20px;font-weight:700;color:#0a1628;margin-bottom:8px">Thank you for your feedback!</div><div style="display:inline-block;background:${color}15;color:${color};border:1px solid ${color}40;border-radius:20px;padding:4px 16px;font-size:11px;font-weight:700;margin-bottom:16px">Score: ${scoreInt}/10 · ${label}</div><p style="font-size:13px;color:#4a5568;line-height:1.7;margin:0 0 24px">${msg}</p><div style="background:#f8fafc;border-radius:8px;padding:14px;font-size:11px;color:#8896a8;line-height:1.6">Your response has been recorded. We review every score and use them to improve your experience.</div></div></div></body></html>`);
   } catch (e) {
     console.error('NPS submit error:', e.message);
     res.status(500).send('Error saving response');
+  }
+});
+
+// ─── FIX 6: CONTACT MERGE ─────────────────────────────────
+app.post('/contacts/merge', async (req, res) => {
+  const { primary_contact_id, duplicate_contact_id } = req.body;
+  if (!primary_contact_id || !duplicate_contact_id) return res.status(400).json({ error: 'primary_contact_id and duplicate_contact_id required' });
+  if (primary_contact_id === duplicate_contact_id) return res.status(400).json({ error: 'Cannot merge a contact with itself' });
+  try {
+    await Promise.all([
+      supabase.from('messages').update({ contact_id: primary_contact_id }).eq('contact_id', duplicate_contact_id),
+      supabase.from('workflow_enrollments').update({ contact_id: primary_contact_id }).eq('contact_id', duplicate_contact_id),
+      supabase.from('activity').update({ contact_id: primary_contact_id }).eq('contact_id', duplicate_contact_id),
+    ]);
+    await supabase.from('contacts').delete().eq('id', duplicate_contact_id);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('/contacts/merge error:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 

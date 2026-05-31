@@ -53,6 +53,8 @@ export default function ClientDashboard({ user, onLogout }) {
   const bellRef = useRef(null);
   const [aov, setAov] = useState(75);
   const [workflowStepsMap, setWorkflowStepsMap] = useState({});
+  const [onboardingSteps, setOnboardingSteps] = useState(null);
+  const [daysSinceJoined, setDaysSinceJoined] = useState(null);
 
   useEffect(() => { fetchData(); }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -171,6 +173,27 @@ export default function ClientDashboard({ user, onLogout }) {
       setAov(aov);
       const completedTotal = allEnrollments.filter(e => e.status === 'completed').length;
 
+      // Fix 9: onboarding progress
+      const [shopifyRes, approvedRes, enrolledRes, emailSentRes, clientUserRes] = await Promise.all([
+        supabase.from('shopify_connections').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId),
+        supabase.from('approvals').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId).eq('status', 'approved'),
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId),
+        supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId).eq('channel', 'email').eq('direction', 'outbound'),
+        supabase.from('client_users').select('created_at').eq('client_id', user.clientId).maybeSingle(),
+      ]);
+      const steps = {
+        account: true,
+        store: (shopifyRes.count || 0) > 0,
+        sequences: (approvedRes.count || 0) > 0,
+        enrolled: (enrolledRes.count || 0) > 0,
+        email: (emailSentRes.count || 0) > 0,
+      };
+      setOnboardingSteps(steps);
+      if (clientUserRes.data?.created_at) {
+        const days = Math.floor((Date.now() - new Date(clientUserRes.data.created_at)) / 86400000);
+        setDaysSinceJoined(days);
+      }
+
       setContacts(cts);
       setWorkflows(wfs);
       setMessages(msgs);
@@ -280,13 +303,66 @@ export default function ClientDashboard({ user, onLogout }) {
   };
 
   // ─── DASHBOARD ────────────────────────────────────────
-  const ClientHome = () => (
+  const ClientHome = () => {
+    const onbItems = [
+      { key: 'account', label: 'Account created' },
+      { key: 'store', label: 'Store connected' },
+      { key: 'sequences', label: 'Sequences approved' },
+      { key: 'enrolled', label: 'First contact enrolled' },
+      { key: 'email', label: 'First email sent' },
+    ];
+    const onbDone = onboardingSteps ? onbItems.filter(i => onboardingSteps[i.key]).length : 0;
+    const onbPct = Math.round((onbDone / onbItems.length) * 100);
+    const allDone = onbDone === onbItems.length;
+
+    const emailsReceived = messages.filter(m => (m.channel === 'email' || m.channel === 'Email') && m.direction === 'inbound').length;
+    const smsReceived = messages.filter(m => (m.channel === 'sms' || m.channel === 'SMS') && m.direction === 'inbound').length;
+
+    return (
     <div>
-      <div style={{ marginBottom: '24px' }}>
+      <div style={{ marginBottom: '20px' }}>
         <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Welcome back</div>
-        <div style={{ fontSize: '22px', fontWeight: 700, color: '#0a1628', letterSpacing: '-0.5px' }}>Good to see you, {user.name.split(' ')[0]}</div>
+        <div style={{ fontSize: '22px', fontWeight: 700, color: '#0a1628', letterSpacing: '-0.5px' }}>Good to see you, {user.name.split(' ')[0]} 👋</div>
         <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>Your AI revenue system is working for you 24/7</div>
       </div>
+
+      {/* Fix 3: Quick stats strip */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
+        {[
+          { label: 'Days with Sales Scales', value: daysSinceJoined !== null ? daysSinceJoined : '—', sub: 'since joining', color: '#c9a84c' },
+          { label: 'Emails Received', value: emailsReceived, sub: 'customer replies', color: '#3b82f6' },
+          { label: 'SMS Received', value: smsReceived, sub: 'SMS replies', color: '#10b981' },
+          { label: 'Est. Revenue Recovered', value: `$${stats.revenueRecovered.toLocaleString()}`, sub: 'all time estimate', color: '#c9a84c' },
+        ].map(s => (
+          <div key={s.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '14px 16px', borderLeft: `3px solid ${s.color}` }}>
+            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '6px' }}>{s.label}</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: '#0a1628', marginBottom: '2px' }}>{s.value}</div>
+            <div style={{ fontSize: '10px', color: s.color, fontWeight: 500 }}>{s.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Fix 9: Onboarding progress bar — hide when all complete */}
+      {onboardingSteps && !allDone && (
+        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '18px 20px', marginBottom: '20px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: '#0a1628' }}>Getting started — {onbDone}/{onbItems.length} steps complete</div>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: '#c9a84c' }}>{onbPct}%</div>
+          </div>
+          <div style={{ height: '5px', background: '#f0f3f8', borderRadius: '3px', marginBottom: '14px', overflow: 'hidden' }}>
+            <div style={{ width: `${onbPct}%`, height: '100%', background: 'linear-gradient(90deg, #c9a84c, #a07234)', borderRadius: '3px', transition: 'width 0.5s' }} />
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {onbItems.map(item => (
+              <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: onboardingSteps[item.key] ? '#059669' : '#8896a8', background: onboardingSteps[item.key] ? '#ecfdf5' : '#f8fafc', border: `1px solid ${onboardingSteps[item.key] ? '#a7f3d0' : '#e4e9f0'}`, borderRadius: '20px', padding: '3px 10px' }}>
+                <span>{onboardingSteps[item.key] ? '✓' : '○'}</span>
+                {item.label}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
 
       {/* Revenue Recovered Hero Card */}
       <div style={{ background: 'linear-gradient(135deg, #0a1628 0%, #112240 100%)', border: '1px solid rgba(201,168,76,0.3)', borderRadius: '14px', padding: '24px 28px', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 4px 20px rgba(10,22,40,0.15)' }}>
@@ -450,7 +526,8 @@ export default function ClientDashboard({ user, onLogout }) {
         </button>
       </div>
     </div>
-  );
+    );
+  };
 
   // ─── REFER & EARN ─────────────────────────────────────
   const ClientReferrals = () => {

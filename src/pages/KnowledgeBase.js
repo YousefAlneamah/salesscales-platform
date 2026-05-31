@@ -33,6 +33,8 @@ export default function KnowledgeBase() {
   const [searchResults, setSearchResults] = useState(null);
   const [searching, setSearching] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
+  const [localSearch, setLocalSearch] = useState('');
+  const [filterSource, setFilterSource] = useState('All');
 
   // ─── bulk import tab state ────────────────────────────────
   const [activeTab, setActiveTab] = useState('documents');
@@ -88,11 +90,14 @@ export default function KnowledgeBase() {
   const fetchDocuments = async () => {
     setLoading(true);
     try {
-      const { data } = await axios.get(`${API_BASE}/knowledge/count`);
-      setTotalCount(data.count || 0);
-      setDocuments([]);
+      const [countRes, docsRes] = await Promise.all([
+        axios.get(`${API_BASE}/knowledge/count`),
+        supabase.from('knowledge_base').select('id,title,content,type,source,client_id,status,notes,embedding,created_at').order('created_at', { ascending: false }).limit(200),
+      ]);
+      setTotalCount(countRes.data?.count || 0);
+      setDocuments(docsRes.data || []);
     } catch (e) {
-      console.error('Failed to fetch knowledge count:', e.message);
+      console.error('Failed to fetch knowledge base:', e.message);
     }
     setLoading(false);
   };
@@ -229,8 +234,21 @@ export default function KnowledgeBase() {
   const filtered = documents.filter(d => {
     const matchClient = filterClient === 'All' || d.client_id === filterClient;
     const matchType = filterType === 'All' || d.type === filterType;
-    return matchClient && matchType;
+    const matchSource = filterSource === 'All' || (d.source || '').toLowerCase().includes(filterSource.toLowerCase());
+    const q = localSearch.trim().toLowerCase();
+    const matchSearch = !q || (d.title || '').toLowerCase().includes(q) || (d.content || '').toLowerCase().includes(q);
+    return matchClient && matchType && matchSource && matchSearch;
   });
+
+  const highlight = (text, q) => {
+    if (!q || !text) return text;
+    const parts = text.split(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
+    return parts.map((part, i) =>
+      part.toLowerCase() === q.toLowerCase()
+        ? <mark key={i} style={{ background: 'rgba(201,168,76,0.3)', color: '#0a1628', borderRadius: '2px', padding: '0 2px' }}>{part}</mark>
+        : part
+    );
+  };
 
   const inputStyle = {
     width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px',
@@ -422,12 +440,18 @@ export default function KnowledgeBase() {
           )}
 
           {/* FILTERS */}
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>
-            <select value={filterClient} onChange={e => setFilterClient(e.target.value)} style={{ ...inputStyle, width: '160px' }}>
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', flex: '1 1 200px' }}>
+              <i className="ti ti-search" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '13px', color: '#8896a8', pointerEvents: 'none' }} />
+              <input type="text" value={localSearch} onChange={e => setLocalSearch(e.target.value)}
+                placeholder="Search by title or content..."
+                style={{ ...inputStyle, paddingLeft: '32px' }} />
+            </div>
+            <select value={filterClient} onChange={e => setFilterClient(e.target.value)} style={{ ...inputStyle, width: '150px' }}>
               <option value="All">All Stores</option>
               {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <select value={filterType} onChange={e => setFilterType(e.target.value)} style={{ ...inputStyle, width: '140px' }}>
+            <select value={filterType} onChange={e => setFilterType(e.target.value)} style={{ ...inputStyle, width: '130px' }}>
               <option value="All">All Types</option>
               <option value="document">Document</option>
               <option value="website">Website</option>
@@ -438,7 +462,17 @@ export default function KnowledgeBase() {
               <option value="case_study">Case Study</option>
               <option value="video">Video</option>
             </select>
-            <div style={{ marginLeft: 'auto', fontSize: '11px', color: '#8896a8' }}>Showing {filtered.length} of {totalCount.toLocaleString()} total</div>
+            <select value={filterSource} onChange={e => setFilterSource(e.target.value)} style={{ ...inputStyle, width: '160px' }}>
+              <option value="All">All Sources</option>
+              <option value="winning_sequence">Winning Sequence</option>
+              <option value="call_transcript">Call Transcript</option>
+              <option value="monthly_insight">Monthly Insight</option>
+              <option value="Manual">Manual</option>
+              <option value="YouTube">YouTube</option>
+            </select>
+            <div style={{ fontSize: '11px', color: '#8896a8', whiteSpace: 'nowrap' }}>
+              {filtered.length} shown{localSearch ? ` · matching "${localSearch}"` : ''}
+            </div>
           </div>
 
           {/* DOCUMENT DETAIL */}
@@ -498,7 +532,7 @@ export default function KnowledgeBase() {
                   onMouseLeave={e => { if (selectedDoc?.id !== doc.id) e.currentTarget.style.background = 'white'; }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <div style={{ fontSize: '20px', flexShrink: 0 }}>{typeIcon(doc.type)}</div>
-                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title}</div>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{highlight(doc.title, localSearch.trim())}</div>
                   </div>
                   <div style={{ fontSize: '11px', color: '#4a5568', display: 'flex', alignItems: 'center' }}>{getClientName(doc.client_id)}</div>
                   <div style={{ fontSize: '11px', color: '#4a5568', display: 'flex', alignItems: 'center' }}>{typeLabel(doc.type)}</div>

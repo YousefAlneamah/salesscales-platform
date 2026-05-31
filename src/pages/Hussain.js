@@ -3,8 +3,16 @@ import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
+const MEMBER_NAME = 'hussain';
+
 export default function Hussain() {
   const [activeTab, setActiveTab] = useState('briefing');
+  const [memberStats, setMemberStats] = useState({ weekActions: 0, allTimeActions: 0 });
+  const [recentActivity, setRecentActivity] = useState([]);
+  const [showConfig, setShowConfig] = useState(false);
+  const [focusArea, setFocusArea] = useState('');
+  const [personality, setPersonality] = useState('');
+  const [savingConfig, setSavingConfig] = useState(false);
   const [loading, setLoading] = useState(false);
   const [briefing, setBriefing] = useState(null);
   const [weeklyInsights, setWeeklyInsights] = useState(null);
@@ -13,7 +21,32 @@ export default function Hussain() {
   const [recommendations, setRecommendations] = useState(null);
   const [platformData, setPlatformData] = useState(null);
 
-  useEffect(() => { fetchPlatformData(); }, []);
+  useEffect(() => {
+    fetchPlatformData();
+    const weekAgo = new Date(Date.now() - 7*86400000).toISOString();
+    Promise.all([
+      supabase.from('team_briefings').select('id',{count:'exact',head:true}).eq('from_member',MEMBER_NAME),
+      supabase.from('team_briefings').select('id',{count:'exact',head:true}).eq('from_member',MEMBER_NAME).gte('created_at',weekAgo),
+      supabase.from('team_briefings').select('subject,created_at,to_member,priority').eq('from_member',MEMBER_NAME).order('created_at',{ascending:false}).limit(10),
+      supabase.from('platform_settings').select('key,value').in('key',[`${MEMBER_NAME}_focus`,`${MEMBER_NAME}_personality`]),
+    ]).then(([all, week, recent, cfg]) => {
+      setMemberStats({ allTimeActions: all.count||0, weekActions: week.count||0 });
+      setRecentActivity(recent.data||[]);
+      const settings = (cfg.data||[]).reduce((m,r)=>{m[r.key]=r.value;return m;},{});
+      setFocusArea(settings[`${MEMBER_NAME}_focus`]||'');
+      setPersonality(settings[`${MEMBER_NAME}_personality`]||'');
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveConfig = async () => {
+    setSavingConfig(true);
+    await supabase.from('platform_settings').upsert([
+      {key:`${MEMBER_NAME}_focus`,value:focusArea,updated_at:new Date().toISOString()},
+      {key:`${MEMBER_NAME}_personality`,value:personality,updated_at:new Date().toISOString()},
+    ],{onConflict:'key'});
+    setSavingConfig(false);
+    setShowConfig(false);
+  };
 
   const fetchPlatformData = async () => {
     const [clientsRes, contactsRes, workflowsRes, messagesRes, approvalsRes] = await Promise.all([
@@ -156,14 +189,68 @@ Rank everything by impact. Be direct.`;
             <div style={{ fontSize: '18px', fontWeight: 700, color: 'white', marginBottom: '3px' }}>Hussain</div>
             <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>Intelligence & Strategy AI · Sales Scales</div>
           </div>
-          <div style={{ marginLeft: 'auto' }}>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
             <span style={{ fontSize: '9px', padding: '4px 12px', borderRadius: '20px', background: 'rgba(16,185,129,0.15)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', fontWeight: 600 }}>● Active</span>
+            <button onClick={() => setShowConfig(v=>!v)} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.6)', borderRadius: '7px', padding: '5px 12px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>Configure</button>
           </div>
         </div>
         <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginTop: '14px', lineHeight: '1.6' }}>
           Hussain analyzes all platform data and gives you sharp, actionable intelligence. He thinks like a founder — no fluff, only what matters.
         </div>
       </div>
+
+      {/* Configure modal */}
+      {showConfig && (
+        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', marginBottom: '16px', boxShadow: '0 4px 12px rgba(10,22,40,0.08)' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '14px' }}>Configure Hussain</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
+            <div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>Focus Area</div>
+              <input type="text" value={focusArea} onChange={e=>setFocusArea(e.target.value)} placeholder="e.g. Revenue growth, Client retention..."
+                style={{ width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '9px 12px', fontSize: '12px', color: '#0a1628', outline: 'none', boxSizing: 'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>Personality/Tone</div>
+              <input type="text" value={personality} onChange={e=>setPersonality(e.target.value)} placeholder="e.g. More direct, data-heavy..."
+                style={{ width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '9px 12px', fontSize: '12px', color: '#0a1628', outline: 'none', boxSizing: 'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button onClick={saveConfig} disabled={savingConfig} style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>{savingConfig ? 'Saving...' : 'Save'}</button>
+            <button onClick={()=>setShowConfig(false)} style={{ background: 'white', border: '1px solid #e4e9f0', color: '#8896a8', borderRadius: '8px', padding: '9px 16px', fontSize: '12px', cursor: 'pointer' }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Stats row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
+        {[
+          { label: 'Actions This Week', value: memberStats.weekActions, color: '#c9a84c' },
+          { label: 'Actions All Time', value: memberStats.allTimeActions, color: '#3b82f6' },
+          { label: 'Recent Activity', value: recentActivity.length + ' briefings', color: '#10b981' },
+        ].map(s => (
+          <div key={s.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '14px 16px', borderLeft: `3px solid ${s.color}` }}>
+            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '6px' }}>{s.label}</div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Recent activity */}
+      {recentActivity.length > 0 && (
+        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '16px 20px', marginBottom: '20px' }}>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '12px' }}>Recent Activity</div>
+          {recentActivity.map(b => (
+            <div key={b.created_at+b.subject} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f8fafc' }}>
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: 500, color: '#0a1628' }}>{b.subject}</div>
+                <div style={{ fontSize: '10px', color: '#8896a8' }}>To: {b.to_member} · {b.priority}</div>
+              </div>
+              <div style={{ fontSize: '9px', color: '#8896a8' }}>{new Date(b.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: '6px', marginBottom: '20px' }}>
         {tabs.map(tab => (

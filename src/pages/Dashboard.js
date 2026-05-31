@@ -15,6 +15,9 @@ export default function Dashboard() {
     totalMessages: 0,
     unreadMessages: 0,
     knowledgeDocs: 0,
+    revenueRecoveredMonth: 0,
+    enrolledThisWeek: 0,
+    avgHealthScore: 0,
   });
   const [clients, setClients] = useState([]);
   const [recentContacts, setRecentContacts] = useState([]);
@@ -31,14 +34,21 @@ export default function Dashboard() {
   const fetchAllData = async () => {
     setLoading(true);
     try {
-      const [clientsRes, contactsRes, workflowsRes, dealsRes, approvalsRes, messagesRes, knowledgeRes] = await Promise.all([
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const weekStart = new Date(now.getTime() - 7 * 86400000).toISOString();
+
+      const [clientsRes, contactsRes, workflowsRes, dealsRes, approvalsRes, messagesRes, knowledgeRes,
+        completedMonthRes, enrolledWeekRes] = await Promise.all([
         supabase.from('clients').select('*'),
         supabase.from('contacts').select('*').order('created_at', { ascending: false }).limit(4),
         supabase.from('workflows').select('*'),
         supabase.from('pipeline_deals').select('*'),
         supabase.from('approvals').select('*').eq('status', 'pending').order('created_at', { ascending: false }).limit(3),
         supabase.from('messages').select('*'),
-        supabase.from('knowledge_base').select('*'),
+        supabase.from('knowledge_base').select('id', { count: 'exact', head: true }),
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('status', 'completed').gte('completed_at', monthStart),
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).gte('enrolled_at', weekStart),
       ]);
 
       setClients(clientsRes.data || []);
@@ -48,9 +58,13 @@ export default function Dashboard() {
       const deals = dealsRes.data || [];
       const workflows = workflowsRes.data || [];
       const messages = messagesRes.data || [];
+      const clients = clientsRes.data || [];
+      const avgHealthScore = clients.length > 0
+        ? Math.round(clients.reduce((sum, c) => sum + (c.health_score || 0), 0) / clients.length)
+        : 0;
 
       setStats({
-        totalClients: clientsRes.data?.length || 0,
+        totalClients: clients.length,
         totalContacts: contactsRes.data?.length || 0,
         activeWorkflows: workflows.filter(w => w.status === 'active').length,
         totalWorkflows: workflows.length,
@@ -59,7 +73,10 @@ export default function Dashboard() {
         pendingApprovals: approvalsRes.data?.length || 0,
         totalMessages: messages.length,
         unreadMessages: messages.filter(m => m.status === 'unread').length,
-        knowledgeDocs: knowledgeRes.data?.length || 0,
+        knowledgeDocs: knowledgeRes.count || 0,
+        revenueRecoveredMonth: (completedMonthRes.count || 0) * 75,
+        enrolledThisWeek: enrolledWeekRes.count || 0,
+        avgHealthScore,
       });
     } catch (e) {
       console.error('Dashboard error:', e);
@@ -103,6 +120,25 @@ export default function Dashboard() {
 
   return (
     <div>
+      {/* NEW TOP METRICS */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '14px' }}>
+        {[
+          { label: 'Revenue Recovered', value: `$${stats.revenueRecoveredMonth.toLocaleString()}`, sub: 'this month (est.)', accent: '#10b981', icon: 'ti-currency-dollar' },
+          { label: 'Active Sequences', value: stats.activeWorkflows, sub: `of ${stats.totalWorkflows} built`, accent: '#c9a84c', icon: 'ti-bolt' },
+          { label: 'Enrolled This Week', value: stats.enrolledThisWeek, sub: 'new enrollments', accent: '#3b82f6', icon: 'ti-user-plus' },
+          { label: 'Avg Health Score', value: `${stats.avgHealthScore}/100`, sub: 'across all clients', accent: stats.avgHealthScore >= 60 ? '#10b981' : '#d97706', icon: 'ti-heart-rate-monitor' },
+        ].map(stat => (
+          <div key={stat.label} style={{ background: '#0a1628', border: '1px solid rgba(201,168,76,0.15)', borderRadius: '12px', padding: '18px 20px', borderLeft: `3px solid ${stat.accent}`, boxShadow: '0 2px 8px rgba(10,22,40,0.15)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+              <i className={`ti ${stat.icon}`} style={{ fontSize: '14px', color: stat.accent }} />
+              <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase' }}>{stat.label}</div>
+            </div>
+            <div style={{ fontSize: '26px', fontWeight: 700, color: stat.accent, letterSpacing: '-0.5px', lineHeight: 1, marginBottom: '5px' }}>{stat.value}</div>
+            <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.35)', fontWeight: 500 }}>{stat.sub}</div>
+          </div>
+        ))}
+      </div>
+
       {/* PRIMARY STATS */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '14px' }}>
         {primaryStats.map(stat => (

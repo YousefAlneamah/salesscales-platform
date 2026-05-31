@@ -58,6 +58,7 @@ import Tasks from "./pages/Tasks";
 import PlatformSettings from "./pages/PlatformSettings";
 import TeamPerformance from "./pages/TeamPerformance";
 import LandingPage from "./pages/LandingPage";
+import SequenceTemplates from "./pages/SequenceTemplates";
 
 const navItems = [
   { group: "MAIN", items: [
@@ -107,6 +108,7 @@ const navItems = [
     { id: "revenue-dashboard", label: "Revenue Dashboard", icon: "ti-currency-dollar" },
     { id: "store-audit", label: "Store Audit", icon: "ti-search" },
     { id: "competitive-intelligence", label: "Competitive Intel", icon: "ti-radar" },
+    { id: "sequence-templates", label: "Sequence Templates", icon: "ti-template" },
   ]},
   { group: "PLATFORM", items: [
     { id: "transcribe", label: "Transcribe", icon: "ti-microphone-2" },
@@ -166,6 +168,7 @@ const pageTitles = {
   "revenue-dashboard": "Revenue Dashboard",
   "store-audit": "Store Audit Tool",
   "competitive-intelligence": "Competitive Intelligence",
+  "sequence-templates": "Sequence Templates",
   transcribe: "Call Transcription",
   onboarding: "Onboarding",
   marketplace: "Marketplace",
@@ -188,6 +191,12 @@ function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchHighlight, setSearchHighlight] = useState(null);
   const searchRef = useRef(null);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [readIds, setReadIds] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('notif_read') || '[]')); } catch { return new Set(); }
+  });
+  const notifRef = useRef(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("user");
@@ -240,6 +249,43 @@ function App() {
     const interval = setInterval(fetchUnread, 60000);
     return () => clearInterval(interval);
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!user || user.role === 'client') return;
+    const fetchNotifs = async () => {
+      try {
+        const [approvalsRes, contactsRes, completedRes] = await Promise.all([
+          supabase.from('approvals').select('id,title,priority,status,created_at').eq('status','pending').order('created_at',{ascending:false}).limit(8),
+          supabase.from('contacts').select('id,first_name,last_name,source,created_at').order('created_at',{ascending:false}).limit(6),
+          supabase.from('workflow_enrollments').select('id,workflow_id,completed_at').eq('status','completed').order('completed_at',{ascending:false}).limit(6),
+        ]);
+        const notifs = [
+          ...(approvalsRes.data||[]).map(a => ({ id:'a'+a.id, type:'approval', title: a.title, sub: `${a.priority} priority — needs review`, time: a.created_at, icon:'ti-bell', color:'#d97706' })),
+          ...(contactsRes.data||[]).map(c => ({ id:'c'+c.id, type:'contact', title:`${c.first_name||''} ${c.last_name||''}`.trim() || 'New contact', sub:`Added via ${c.source||'unknown'}`, time: c.created_at, icon:'ti-user-plus', color:'#10b981' })),
+          ...(completedRes.data||[]).map(e => ({ id:'e'+e.id, type:'enrollment', title:'Sequence completed', sub:'A contact finished a workflow', time: e.completed_at, icon:'ti-circle-check', color:'#3b82f6' })),
+        ].sort((a,b) => new Date(b.time) - new Date(a.time)).slice(0,20);
+        setNotifications(notifs);
+      } catch {}
+    };
+    fetchNotifs();
+    const t = setInterval(fetchNotifs, 60000);
+    return () => clearInterval(t);
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!notifOpen) return;
+    const h = (e) => { if (notifRef.current && !notifRef.current.contains(e.target)) setNotifOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [notifOpen]);
+
+  const markNotifRead = (id) => {
+    setReadIds(prev => {
+      const next = new Set(prev); next.add(id);
+      localStorage.setItem('notif_read', JSON.stringify([...next]));
+      return next;
+    });
+  };
 
   const handleLogin = (userData) => setUser(userData);
 
@@ -363,6 +409,7 @@ function App() {
       case "revenue-dashboard": return <RevenueDashboard />;
       case "store-audit": return <AuditTool />;
       case "competitive-intelligence": return <CompetitiveIntelligence />;
+      case "sequence-templates": return <SequenceTemplates />;
       case "transcribe": return <Transcribe />;
       case "onboarding": return <Onboarding />;
       case "marketplace": return <Marketplace />;
@@ -522,6 +569,54 @@ function App() {
             {pendingApprovals > 0 && (
               <div className="top-badge">{pendingApprovals} approval{pendingApprovals !== 1 ? 's' : ''} waiting</div>
             )}
+
+            {/* Fix 10: Notification Bell */}
+            <div ref={notifRef} style={{ position: 'relative' }}>
+              <button onClick={() => setNotifOpen(v => !v)}
+                style={{ position: 'relative', background: notifOpen ? 'rgba(201,168,76,0.15)' : 'rgba(255,255,255,0.06)', border: `1px solid ${notifOpen ? 'rgba(201,168,76,0.4)' : 'rgba(255,255,255,0.1)'}`, borderRadius: '8px', width: '34px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.15s' }}>
+                <i className="ti ti-bell" style={{ fontSize: '15px', color: notifOpen ? '#c9a84c' : 'rgba(255,255,255,0.6)' }} />
+                {notifications.filter(n => !readIds.has(n.id)).length > 0 && (
+                  <div style={{ position: 'absolute', top: '-4px', right: '-4px', background: '#dc2626', borderRadius: '50%', width: '16px', height: '16px', fontSize: '9px', fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #0a1628' }}>
+                    {notifications.filter(n => !readIds.has(n.id)).length}
+                  </div>
+                )}
+              </button>
+
+              {notifOpen && (
+                <div style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0, width: '320px', background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', boxShadow: '0 12px 40px rgba(10,22,40,0.15)', zIndex: 1001, overflow: 'hidden' }}>
+                  <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f3f8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#0a1628' }}>Notifications</div>
+                    <button onClick={() => { notifications.forEach(n => markNotifRead(n.id)); }}
+                      style={{ fontSize: '10px', color: '#8896a8', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>Mark all read</button>
+                  </div>
+                  <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                    {notifications.length === 0 ? (
+                      <div style={{ padding: '32px', textAlign: 'center', color: '#8896a8', fontSize: '12px' }}>No notifications yet</div>
+                    ) : notifications.map(n => {
+                      const isRead = readIds.has(n.id);
+                      const diff = Math.floor((Date.now() - new Date(n.time)) / 60000);
+                      const timeStr = diff < 60 ? `${diff}m ago` : diff < 1440 ? `${Math.floor(diff/60)}h ago` : `${Math.floor(diff/1440)}d ago`;
+                      return (
+                        <div key={n.id} onClick={() => { markNotifRead(n.id); setNotifOpen(false); if (n.type==='approval') setCurrentPage('approvals'); else if (n.type==='contact') setCurrentPage('contacts'); }}
+                          style={{ display: 'flex', gap: '10px', padding: '12px 16px', cursor: 'pointer', background: isRead ? 'white' : 'rgba(201,168,76,0.04)', borderBottom: '1px solid #f8fafc', transition: 'background 0.1s' }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                          onMouseLeave={e => e.currentTarget.style.background = isRead ? 'white' : 'rgba(201,168,76,0.04)'}>
+                          <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: n.color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <i className={`ti ${n.icon}`} style={{ fontSize: '14px', color: n.color }} />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '12px', fontWeight: isRead ? 500 : 700, color: '#0a1628', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.title}</div>
+                            <div style={{ fontSize: '10px', color: '#8896a8', marginTop: '1px' }}>{n.sub}</div>
+                          </div>
+                          <div style={{ fontSize: '9px', color: '#8896a8', flexShrink: 0, paddingTop: '2px' }}>{timeStr}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="avatar">{user.name ? user.name[0].toUpperCase() : "Y"}</div>
           </div>
         </div>
