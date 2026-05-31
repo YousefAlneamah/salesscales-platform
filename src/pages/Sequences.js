@@ -1,62 +1,245 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
 
+// ─── NODE COLOURS BY STEP TYPE ────────────────────────────
+const NODE_COLOR = {
+  email:    '#3b82f6',
+  sms:      '#10b981',
+  whatsapp: '#0d9488',
+  wait:     '#6b7280',
+  voice:    '#8b5cf6',
+  tag:      '#c9a84c',
+  pipeline: '#7c3aed',
+  notify:   '#f59e0b',
+};
+
+const NODE_ICON = {
+  email:    '✉',
+  sms:      '💬',
+  whatsapp: '📱',
+  wait:     '⏱',
+  voice:    '🎙',
+  tag:      '🏷',
+  pipeline: '🎯',
+  notify:   '🔔',
+};
+
+// ─── CANVAS DIMENSIONS ───────────────────────────────────
+const TRIG_W    = 260;
+const TRIG_H    = 88;
+const NODE_W    = 200;
+const NODE_H    = 136;
+const CONN_H    = 52;
+
+// ─── SVG CONNECTOR ────────────────────────────────────────
+function Connector({ width = NODE_W, color = 'rgba(255,255,255,0.2)' }) {
+  const id = `ah-${width}`;
+  return (
+    <svg width={width} height={CONN_H} style={{ display: 'block', margin: '0 auto', flexShrink: 0 }} overflow="visible">
+      <defs>
+        <marker id={id} markerWidth="8" markerHeight="6" refX="4" refY="3" orient="auto">
+          <polygon points="0 0,8 3,0 6" fill={color} />
+        </marker>
+      </defs>
+      <line x1={width / 2} y1="0" x2={width / 2} y2={CONN_H - 6}
+        stroke={color} strokeWidth="1.5" markerEnd={`url(#${id})`} />
+    </svg>
+  );
+}
+
+// ─── TRIGGER NODE ─────────────────────────────────────────
+function TriggerNode({ triggerType }) {
+  return (
+    <div style={{
+      width: TRIG_W,
+      background: 'linear-gradient(135deg, #0f1f35, #142840)',
+      border: '1.5px solid rgba(201,168,76,0.45)',
+      borderRadius: 14,
+      overflow: 'hidden',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(201,168,76,0.1)',
+    }}>
+      <div style={{ padding: '10px 16px', background: 'rgba(201,168,76,0.08)', borderBottom: '1px solid rgba(201,168,76,0.2)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(201,168,76,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>⚡</div>
+        <div>
+          <div style={{ fontSize: 8, color: 'rgba(201,168,76,0.7)', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 700, fontFamily: 'DM Mono, monospace', marginBottom: 1 }}>Trigger</div>
+          <div style={{ fontSize: 13, color: '#f0f4f8', fontWeight: 700 }}>{triggerType}</div>
+        </div>
+        <div style={{ marginLeft: 'auto', fontSize: 9, color: 'rgba(201,168,76,0.5)', fontWeight: 600, background: 'rgba(201,168,76,0.08)', padding: '2px 8px', borderRadius: 20, border: '1px solid rgba(201,168,76,0.2)' }}>START</div>
+      </div>
+      <div style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 6px #10b981' }} />
+        <span style={{ fontSize: 11, color: '#8896a8' }}>Listening for this event…</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── STEP NODE ────────────────────────────────────────────
+function StepNode({ step, index, onEdit, onDelete, isBuilder }) {
+  const color  = NODE_COLOR[step.step_type] || '#6b7280';
+  const icon   = NODE_ICON[step.step_type]  || '📋';
+  const label  = step.label || step.step_type;
+  const preview = step.step_type === 'wait'
+    ? `Wait ${step.wait_hours || 1}h before next step`
+    : step.step_type === 'tag'     ? `Tag: ${step.content || '—'}`
+    : step.step_type === 'pipeline'? `Move to: ${step.content || '—'}`
+    : step.step_type === 'notify'  ? `Notify: ${step.content || '—'}`
+    : (step.subject ? `${step.subject} — ` : '') + (step.content || '(no content)');
+
+  return (
+    <div style={{
+      width: NODE_W,
+      background: '#0f1f35',
+      border: `1px solid rgba(255,255,255,0.07)`,
+      borderRadius: 12,
+      overflow: 'hidden',
+      boxShadow: '0 4px 20px rgba(0,0,0,0.45)',
+      transition: 'box-shadow 0.2s',
+    }}
+      onMouseEnter={e => e.currentTarget.style.boxShadow = `0 8px 28px rgba(0,0,0,0.6), 0 0 0 1px ${color}55`}
+      onMouseLeave={e => e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.45)'}>
+
+      {/* Coloured header */}
+      <div style={{ background: color, padding: '7px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 14 }}>{icon}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', letterSpacing: 0.3 }}>{label}</span>
+        </div>
+        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.65)', fontWeight: 700, fontFamily: 'DM Mono, monospace' }}>#{index + 1}</span>
+      </div>
+
+      {/* Content body */}
+      <div style={{ padding: '10px 12px' }}>
+        <div style={{
+          fontSize: 11, color: 'rgba(255,255,255,0.65)', lineHeight: 1.55,
+          overflow: 'hidden', display: '-webkit-box',
+          WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+          minHeight: 34, marginBottom: isBuilder ? 10 : 0,
+        }}>
+          {preview || '—'}
+        </div>
+
+        {isBuilder && (
+          <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+            <button
+              onClick={e => { e.stopPropagation(); onEdit(step); }}
+              style={{ padding: '4px 10px', fontSize: 10, fontWeight: 600, borderRadius: 6, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.06)', color: '#f0f4f8', cursor: 'pointer', fontFamily: 'Inter, sans-serif' }}>
+              Edit
+            </button>
+            <button
+              onClick={e => { e.stopPropagation(); onDelete(step.id); }}
+              style={{ padding: '4px 8px', fontSize: 10, borderRadius: 6, border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.07)', color: '#ef4444', cursor: 'pointer', fontFamily: 'Inter, sans-serif' }}>
+              ✕
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── MINI-MAP ─────────────────────────────────────────────
+function MiniMap({ steps, transform, triggerType }) {
+  const mmW = 160, mmH = 120;
+  const totalNodes = 1 + steps.length;
+  const totalH = TRIG_H + totalNodes * (NODE_H * 0.4 + CONN_H * 0.4);
+  const scl = Math.min(mmW / (TRIG_W * 1.1), mmH / Math.max(totalH, 1));
+  const cxOff = (mmW - TRIG_W * scl) / 2;
+
+  return (
+    <div style={{
+      position: 'absolute', bottom: 20, right: 20,
+      width: mmW, height: mmH,
+      background: 'rgba(5,13,26,0.92)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: 10,
+      overflow: 'hidden',
+      backdropFilter: 'blur(6px)',
+      boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+    }}>
+      <div style={{ position: 'absolute', top: 4, left: 8, fontSize: 7, color: 'rgba(255,255,255,0.25)', letterSpacing: 1.5, textTransform: 'uppercase', fontFamily: 'DM Mono, monospace', fontWeight: 700 }}>Overview</div>
+      <svg width={mmW} height={mmH} style={{ position: 'absolute', inset: 0 }}>
+        {/* Trigger */}
+        <rect x={cxOff} y={14} width={TRIG_W * scl} height={TRIG_H * scl * 0.7}
+          rx={4} fill="rgba(201,168,76,0.3)" stroke="rgba(201,168,76,0.5)" strokeWidth={0.8} />
+        {steps.map((step, i) => {
+          const y = 14 + (TRIG_H * scl * 0.7) + (i + 1) * (NODE_H * scl * 0.55 + CONN_H * scl * 0.4);
+          const cx = cxOff + (TRIG_W - NODE_W) / 2 * scl;
+          const col = NODE_COLOR[step.step_type] || '#6b7280';
+          return (
+            <g key={step.id}>
+              <line x1={cxOff + TRIG_W * scl / 2} y1={y - CONN_H * scl * 0.4}
+                x2={cx + NODE_W * scl / 2}   y2={y}
+                stroke="rgba(255,255,255,0.18)" strokeWidth={0.8} />
+              <rect x={cx} y={y} width={NODE_W * scl} height={NODE_H * scl * 0.55}
+                rx={3} fill={col + '55'} stroke={col + '88'} strokeWidth={0.6} />
+            </g>
+          );
+        })}
+        {/* Viewport indicator */}
+        <rect
+          x={cxOff + Math.max(0, -transform.x) * scl / transform.scale}
+          y={14 + Math.max(0, -transform.y) * scl / transform.scale}
+          width={mmW / transform.scale}
+          height={mmH / transform.scale}
+          rx={2}
+          fill="none" stroke="rgba(201,168,76,0.5)" strokeWidth={1} strokeDasharray="3,2" />
+      </svg>
+    </div>
+  );
+}
+
+// ─── MAIN COMPONENT ───────────────────────────────────────
 export default function Sequences() {
-  const [workflows, setWorkflows] = useState([]);
-  const [clients, setClients] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
+  const [workflows, setWorkflows]               = useState([]);
+  const [clients, setClients]                   = useState([]);
+  const [loading, setLoading]                   = useState(true);
+  const [showForm, setShowForm]                 = useState(false);
   const [selectedWorkflow, setSelectedWorkflow] = useState(null);
-  const [showBuilder, setShowBuilder] = useState(false);
-  const [name, setName] = useState('');
-  const [clientId, setClientId] = useState('');
-  const [triggerType, setTriggerType] = useState('Cart Abandoned');
-  const [steps, setSteps] = useState([]);
-  const [filterClient, setFilterClient] = useState('All');
-  const [feedbackId, setFeedbackId] = useState(null);
-  const [feedbackLoading, setFeedbackLoading] = useState(false);
-  const [feedbackResult, setFeedbackResult] = useState(null);
-  const [feedbackStats, setFeedbackStats] = useState(null);
+  const [showBuilder, setShowBuilder]           = useState(false);
+  const [name, setName]                         = useState('');
+  const [clientId, setClientId]                 = useState('');
+  const [triggerType, setTriggerType]           = useState('Cart Abandoned');
+  const [steps, setSteps]                       = useState([]);
+  const [filterClient, setFilterClient]         = useState('All');
+  const [feedbackId, setFeedbackId]             = useState(null);
+  const [feedbackLoading, setFeedbackLoading]   = useState(false);
+  const [feedbackResult, setFeedbackResult]     = useState(null);
+  const [feedbackStats, setFeedbackStats]       = useState(null);
   const [expandedWorkflowId, setExpandedWorkflowId] = useState(null);
-  const [expandedSteps, setExpandedSteps] = useState([]);
-  const [stepsLoading, setStepsLoading] = useState(false);
-  const [editingStep, setEditingStep] = useState(null);
-  const [schedulingId, setSchedulingId] = useState(null);
-  const [scheduleDate, setScheduleDate] = useState('');
-  const [duplicating, setDuplicating] = useState(null);
-  const [editSaving, setEditSaving] = useState(false);
+  const [expandedSteps, setExpandedSteps]       = useState([]);
+  const [stepsLoading, setStepsLoading]         = useState(false);
+  const [editingStep, setEditingStep]           = useState(null);
+  const [schedulingId, setSchedulingId]         = useState(null);
+  const [scheduleDate, setScheduleDate]         = useState('');
+  const [duplicating, setDuplicating]           = useState(null);
+  const [editSaving, setEditSaving]             = useState(false);
+
+  // Canvas transform state (pure visual — no functionality)
+  const [transform, setTransform] = useState({ scale: 1, x: 0, y: 0 });
+  const isDragging  = useRef(false);
+  const dragOrigin  = useRef({ x: 0, y: 0 });
+  const canvasRef   = useRef(null);
 
   const triggers = [
-    'Cart Abandoned',
-    'Order Placed',
-    'Order Fulfilled',
-    'Payment Failed',
-    'New Customer',
-    'Win-Back',
-    'Browse Abandonment',
-    'Price Drop',
-    'Back In Stock',
-    'New Product Launch',
-    'Post Purchase',
-    'Manual'
+    'Cart Abandoned','Order Placed','Order Fulfilled','Payment Failed',
+    'New Customer','Win-Back','Browse Abandonment','Price Drop',
+    'Back In Stock','New Product Launch','Post Purchase','Manual',
   ];
 
   const stepTypes = [
-    { type: 'email', label: 'Send Email', icon: '✉' },
-    { type: 'sms', label: 'Send SMS', icon: '💬' },
-    { type: 'whatsapp', label: 'WhatsApp', icon: '📱' },
-    { type: 'wait', label: 'Wait', icon: '⏱' },
-    { type: 'tag', label: 'Add Tag', icon: '🏷' },
-    { type: 'pipeline', label: 'Move Stage', icon: '🎯' },
-    { type: 'notify', label: 'Notify Me', icon: '🔔' },
+    { type: 'email',    label: 'Send Email',  icon: '✉' },
+    { type: 'sms',      label: 'Send SMS',    icon: '💬' },
+    { type: 'whatsapp', label: 'WhatsApp',    icon: '📱' },
+    { type: 'wait',     label: 'Wait',        icon: '⏱' },
+    { type: 'tag',      label: 'Add Tag',     icon: '🏷' },
+    { type: 'pipeline', label: 'Move Stage',  icon: '🎯' },
+    { type: 'notify',   label: 'Notify Me',   icon: '🔔' },
   ];
 
-  useEffect(() => {
-    fetchWorkflows();
-    fetchClients();
-  }, []);
+  useEffect(() => { fetchWorkflows(); fetchClients(); }, []);
 
   const fetchWorkflows = async () => {
     setLoading(true);
@@ -82,6 +265,7 @@ export default function Sequences() {
       setSelectedWorkflow(data[0]);
       setSteps([]);
       setShowBuilder(true);
+      setTransform({ scale: 1, x: 0, y: 0 });
     }
   };
 
@@ -93,15 +277,11 @@ export default function Sequences() {
       content: '',
       wait_hours: stepType.type === 'wait' ? 1 : 0,
       label: stepType.label,
-      icon: stepType.icon
+      icon: stepType.icon,
     }]);
   };
 
-  const updateStep = (id, field, value) => {
-    setSteps(steps.map(s => s.id === id ? { ...s, [field]: value } : s));
-  };
-
-  const removeStep = (id) => setSteps(steps.filter(s => s.id !== id));
+  const removeStep   = (id) => setSteps(steps.filter(s => s.id !== id));
 
   const saveWorkflow = async () => {
     if (!selectedWorkflow) return;
@@ -113,7 +293,7 @@ export default function Sequences() {
         step_type: steps[i].step_type,
         subject: steps[i].subject,
         content: steps[i].content,
-        wait_hours: steps[i].wait_hours
+        wait_hours: steps[i].wait_hours,
       }]);
     }
     await supabase.from('workflows').update({ status: 'active', updated_at: new Date().toISOString() }).eq('id', selectedWorkflow.id);
@@ -129,9 +309,10 @@ export default function Sequences() {
     if (data) setSteps(data.map(s => ({
       ...s,
       label: stepTypes.find(t => t.type === s.step_type)?.label || s.step_type,
-      icon: stepTypes.find(t => t.type === s.step_type)?.icon || '📋'
+      icon:  stepTypes.find(t => t.type === s.step_type)?.icon  || '📋',
     })));
     setShowBuilder(true);
+    setTransform({ scale: 1, x: 0, y: 0 });
   };
 
   const toggleStatus = async (workflow) => {
@@ -156,8 +337,7 @@ export default function Sequences() {
     if (!scheduleDate) return;
     try {
       const res = await axios.patch(`${API_BASE}/workflows/${workflowId}/schedule`, { scheduled_start: scheduleDate });
-      setSchedulingId(null);
-      setScheduleDate('');
+      setSchedulingId(null); setScheduleDate('');
       fetchWorkflows();
       alert(`Workflow will activate on ${new Date(scheduleDate).toLocaleDateString()} (${res.data.status})`);
     } catch (e) { alert(e.response?.data?.error || 'Schedule failed'); }
@@ -165,9 +345,7 @@ export default function Sequences() {
 
   const toggleExpand = async (workflow) => {
     if (expandedWorkflowId === workflow.id) {
-      setExpandedWorkflowId(null);
-      setExpandedSteps([]);
-      return;
+      setExpandedWorkflowId(null); setExpandedSteps([]); return;
     }
     setExpandedWorkflowId(workflow.id);
     setExpandedSteps([]);
@@ -187,350 +365,455 @@ export default function Sequences() {
         wait_hours: editingStep.wait_hours,
       });
       setExpandedSteps(prev => prev.map(s => s.id === editingStep.id ? { ...s, ...editingStep } : s));
+      if (showBuilder) setSteps(prev => prev.map(s => s.id === editingStep.id ? { ...s, ...editingStep } : s));
       setEditingStep(null);
-    } catch (_) { alert('Failed to save step.'); }
+    } catch { alert('Failed to save step.'); }
     setEditSaving(false);
   };
 
-  const stepIcon = (type) => stepTypes.find(t => t.type === type)?.icon || '📋';
+  const stepIcon = (type) => NODE_ICON[type] || '📋';
 
   const getFeedback = async (workflow) => {
     if (feedbackId === workflow.id && feedbackResult) {
       setFeedbackId(null); setFeedbackResult(null); setFeedbackStats(null); return;
     }
     setFeedbackId(workflow.id);
-    setFeedbackResult(null);
-    setFeedbackStats(null);
+    setFeedbackResult(null); setFeedbackStats(null);
     setFeedbackLoading(true);
     try {
       const { data } = await axios.post(`${API_BASE}/sequences/feedback`, { workflow_id: workflow.id });
       setFeedbackResult(data.analysis);
       setFeedbackStats(data.stats);
-    } catch (_) {
-      setFeedbackResult('Failed to load feedback. Please try again.');
-    }
+    } catch { setFeedbackResult('Failed to load feedback. Please try again.'); }
     setFeedbackLoading(false);
   };
 
+  // ─── CANVAS INTERACTION ──────────────────────────────────
+  const handleWheel = useCallback((e) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.08 : 0.93;
+    setTransform(t => ({ ...t, scale: Math.max(0.25, Math.min(2.5, t.scale * factor)) }));
+  }, []);
+
+  const handleCanvasMouseDown = useCallback((e) => {
+    if (e.button !== 0) return;
+    // Only start drag if click is on background, not a button/input/node
+    const tag = e.target.tagName.toLowerCase();
+    if (tag === 'button' || tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    if (e.target.closest('button') || e.target.closest('input')) return;
+    isDragging.current = true;
+    dragOrigin.current = { x: e.clientX - transform.x, y: e.clientY - transform.y };
+    e.preventDefault();
+  }, [transform.x, transform.y]);
+
+  const handleMouseMove = useCallback((e) => {
+    if (!isDragging.current) return;
+    setTransform(t => ({ ...t, x: e.clientX - dragOrigin.current.x, y: e.clientY - dragOrigin.current.y }));
+  }, []);
+
+  const handleMouseUp = useCallback(() => { isDragging.current = false; }, []);
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [handleWheel]);
+
+  // ─── SHARED STYLES ────────────────────────────────────────
   const inputStyle = {
-    width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px',
-    padding: '9px 12px', fontSize: '12px', color: '#0a1628',
-    outline: 'none', background: 'white', boxSizing: 'border-box',
-    fontFamily: 'DM Sans, sans-serif'
+    width: '100%',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: 8,
+    padding: '8px 12px',
+    fontSize: 12,
+    color: '#f0f4f8',
+    outline: 'none',
+    background: 'rgba(255,255,255,0.05)',
+    boxSizing: 'border-box',
+    fontFamily: 'Inter, sans-serif',
   };
 
+  // ═══════════════════════════════════════════════════════════
+  // VISUAL FLOW BUILDER
+  // ═══════════════════════════════════════════════════════════
   if (showBuilder && selectedWorkflow) {
+    const canvasContentWidth = Math.max(TRIG_W, NODE_W) + 80;
+
     return (
-      <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <div>
-            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Workflow Builder</div>
-            <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628' }}>{selectedWorkflow.name}</div>
-            <div style={{ fontSize: '11px', color: '#8896a8', marginTop: '2px' }}>Trigger: {selectedWorkflow.trigger_type} · {getClientName(selectedWorkflow.client_id)}</div>
+      <div style={{ margin: '-28px -32px', height: 'calc(100vh - 56px)', display: 'flex', flexDirection: 'column', background: '#050d1a', overflow: 'hidden' }}>
+
+        {/* ── TOOLBAR ── */}
+        <div style={{ height: 56, background: '#0a1628', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', padding: '0 20px', gap: 16, flexShrink: 0 }}>
+          <button onClick={() => { setShowBuilder(false); setSelectedWorkflow(null); setSteps([]); }}
+            style={{ ...inputStyle, width: 'auto', padding: '7px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#8896a8' }}>
+            ← Back
+          </button>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#f0f4f8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedWorkflow.name}</div>
+            <div style={{ fontSize: 10, color: '#8896a8' }}>Trigger: {selectedWorkflow.trigger_type} · {getClientName(selectedWorkflow.client_id)}</div>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button onClick={() => { setShowBuilder(false); setSelectedWorkflow(null); setSteps([]); }}
-              style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '9px 16px', fontSize: '12px', cursor: 'pointer', color: '#8896a8' }}>
-              ← Back
-            </button>
-            <button onClick={saveWorkflow}
-              style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
-              Save & Activate
-            </button>
+          {/* Zoom controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button onClick={() => setTransform(t => ({ ...t, scale: Math.max(0.25, t.scale * 0.85) }))}
+              style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#f0f4f8', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>−</button>
+            <span style={{ fontSize: 11, color: '#8896a8', minWidth: 40, textAlign: 'center' }}>{Math.round(transform.scale * 100)}%</span>
+            <button onClick={() => setTransform(t => ({ ...t, scale: Math.min(2.5, t.scale * 1.15) }))}
+              style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#f0f4f8', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button>
+            <button onClick={() => setTransform({ scale: 1, x: 0, y: 0 })}
+              style={{ height: 28, padding: '0 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#8896a8', cursor: 'pointer', fontSize: 10 }}>Reset</button>
           </div>
+          <div style={{ fontSize: 11, color: '#8896a8', background: 'rgba(255,255,255,0.04)', padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.06)' }}>
+            {steps.length} step{steps.length !== 1 ? 's' : ''}
+          </div>
+          <button onClick={saveWorkflow}
+            style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter, sans-serif', flexShrink: 0 }}>
+            Save & Activate
+          </button>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: '16px' }}>
-          {/* STEP TYPES */}
-          <div>
-            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '10px' }}>Add Step</div>
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+
+          {/* ── STEP PALETTE ── */}
+          <div style={{ width: 176, background: '#0a1628', borderRight: '1px solid rgba(255,255,255,0.06)', padding: '16px 12px', overflowY: 'auto', flexShrink: 0 }}>
+            <div style={{ fontSize: 8, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono, monospace', marginBottom: 12 }}>Add Step</div>
             {stepTypes.map(st => (
               <div key={st.type} onClick={() => addStep(st)}
-                style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '10px 12px', marginBottom: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#0a1628', fontWeight: 500, transition: 'all 0.15s' }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = '#c9a84c'; e.currentTarget.style.background = '#fffdf5'; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = '#e4e9f0'; e.currentTarget.style.background = 'white'; }}>
-                <span style={{ fontSize: '16px' }}>{st.icon}</span>
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderLeft: `3px solid ${NODE_COLOR[st.type] || '#6b7280'}`, borderRadius: 8, padding: '9px 11px', marginBottom: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#8896a8', fontWeight: 500, transition: 'all 0.15s', userSelect: 'none' }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.color = '#f0f4f8'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#8896a8'; }}>
+                <span style={{ fontSize: 15 }}>{st.icon}</span>
                 <span>{st.label}</span>
               </div>
             ))}
+            <div style={{ marginTop: 20, padding: '10px', background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 8 }}>
+              <div style={{ fontSize: 9, color: '#c9a84c', fontWeight: 600, marginBottom: 4 }}>Canvas Controls</div>
+              <div style={{ fontSize: 10, color: '#4a5568', lineHeight: 1.6 }}>Scroll to zoom · Drag background to pan</div>
+            </div>
           </div>
 
-          {/* CANVAS */}
-          <div>
-            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '10px' }}>Workflow Steps</div>
+          {/* ── CANVAS ── */}
+          <div ref={canvasRef}
+            style={{ flex: 1, position: 'relative', overflow: 'hidden', cursor: isDragging.current ? 'grabbing' : 'default' }}
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}>
 
-            {/* TRIGGER NODE */}
-            <div style={{ background: 'linear-gradient(135deg, #0a1628, #112240)', borderRadius: '10px', padding: '14px 16px', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '12px', border: '1px solid rgba(201,168,76,0.2)' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'rgba(201,168,76,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px' }}>⚡</div>
-              <div>
-                <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '2px' }}>Trigger</div>
-                <div style={{ fontSize: '12px', color: 'white', fontWeight: 600 }}>{selectedWorkflow.trigger_type}</div>
-              </div>
+            {/* Dot-grid background */}
+            <div style={{ position: 'absolute', inset: 0, backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.12) 1px, transparent 1px)', backgroundSize: '28px 28px', pointerEvents: 'none' }} />
+
+            {/* Transform wrapper — centered horizontally, 60px from top */}
+            <div style={{
+              position: 'absolute',
+              left: '50%',
+              top: 60,
+              transform: `translate(calc(-50% + ${transform.x}px), ${transform.y}px) scale(${transform.scale})`,
+              transformOrigin: 'top center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              width: canvasContentWidth,
+              userSelect: 'none',
+            }}>
+              {/* Trigger node */}
+              <TriggerNode triggerType={selectedWorkflow.trigger_type} />
+
+              {/* Steps + connectors */}
+              {steps.length === 0 ? (
+                <div style={{ marginTop: 40, width: NODE_W, padding: '32px 20px', background: 'rgba(255,255,255,0.02)', border: '1.5px dashed rgba(255,255,255,0.1)', borderRadius: 14, textAlign: 'center', pointerEvents: 'none' }}>
+                  <div style={{ fontSize: 24, marginBottom: 8 }}>⚡</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 4 }}>No steps yet</div>
+                  <div style={{ fontSize: 11, color: '#4a5568' }}>Click a step type on the left</div>
+                </div>
+              ) : (
+                steps.map((step, index) => (
+                  <React.Fragment key={step.id}>
+                    <Connector width={Math.max(TRIG_W, NODE_W)} />
+                    <StepNode
+                      step={step}
+                      index={index}
+                      onEdit={s => setEditingStep({ ...s })}
+                      onDelete={removeStep}
+                      isBuilder
+                    />
+                  </React.Fragment>
+                ))
+              )}
+
+              {/* End cap */}
+              {steps.length > 0 && (
+                <>
+                  <Connector width={NODE_W} color="rgba(255,255,255,0.1)" />
+                  <div style={{ width: NODE_W, padding: '12px 16px', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 10, textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: '#10b981', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', fontFamily: 'DM Mono, monospace' }}>✓ Sequence End</div>
+                  </div>
+                </>
+              )}
             </div>
 
-            {steps.length > 0 && <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '4px' }}><div style={{ width: '1px', height: '14px', background: '#e4e9f0' }}></div></div>}
-
-            {steps.map((step, index) => (
-              <div key={step.id}>
-                <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '14px 16px', marginBottom: '4px', boxShadow: '0 1px 3px rgba(10,22,40,0.04)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: step.step_type !== 'wait' && step.step_type !== 'tag' && step.step_type !== 'pipeline' && step.step_type !== 'notify' ? '12px' : '0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', border: '1px solid #e4e9f0' }}>{step.icon}</div>
-                      <div>
-                        <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '0.5px', textTransform: 'uppercase' }}>Step {index + 1}</div>
-                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628' }}>{step.label}</div>
-                      </div>
-                    </div>
-                    <button onClick={() => removeStep(step.id)}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '18px', lineHeight: 1 }}>×</button>
-                  </div>
-
-                  {step.step_type === 'wait' && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
-                      <span style={{ fontSize: '12px', color: '#8896a8' }}>Wait</span>
-                      <input type="number" value={step.wait_hours} onChange={e => updateStep(step.id, 'wait_hours', e.target.value)}
-                        style={{ ...inputStyle, width: '80px' }} />
-                      <span style={{ fontSize: '12px', color: '#8896a8' }}>hours before next step</span>
-                    </div>
-                  )}
-
-                  {(step.step_type === 'email' || step.step_type === 'sms' || step.step_type === 'whatsapp') && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {step.step_type === 'email' && (
-                        <input type="text" value={step.subject} onChange={e => updateStep(step.id, 'subject', e.target.value)}
-                          placeholder="Subject line..." style={inputStyle} />
-                      )}
-                      <textarea value={step.content} onChange={e => updateStep(step.id, 'content', e.target.value)}
-                        placeholder={`Write your ${step.step_type} message... Use {{first_name}} for personalization`}
-                        rows={3} style={{ ...inputStyle, resize: 'none' }} />
-                    </div>
-                  )}
-
-                  {step.step_type === 'tag' && (
-                    <input type="text" value={step.content} onChange={e => updateStep(step.id, 'content', e.target.value)}
-                      placeholder="Tag name..." style={{ ...inputStyle, marginTop: '10px' }} />
-                  )}
-
-                  {step.step_type === 'pipeline' && (
-                    <select value={step.content} onChange={e => updateStep(step.id, 'content', e.target.value)}
-                      style={{ ...inputStyle, marginTop: '10px' }}>
-                      <option>New Lead</option>
-                      <option>Contacted</option>
-                      <option>Nurturing</option>
-                      <option>Hot Lead</option>
-                      <option>Converted</option>
-                    </select>
-                  )}
-
-                  {step.step_type === 'notify' && (
-                    <input type="text" value={step.content} onChange={e => updateStep(step.id, 'content', e.target.value)}
-                      placeholder="Notification message..." style={{ ...inputStyle, marginTop: '10px' }} />
-                  )}
-                </div>
-
-                {index < steps.length - 1 && (
-                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '4px' }}>
-                    <div style={{ width: '1px', height: '14px', background: '#e4e9f0' }}></div>
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {steps.length === 0 && (
-              <div style={{ background: '#f8fafc', border: '1px dashed #e4e9f0', borderRadius: '10px', padding: '40px', textAlign: 'center', color: '#8896a8' }}>
-                <div style={{ fontSize: '24px', marginBottom: '8px' }}>⚡</div>
-                <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', marginBottom: '4px' }}>No steps yet</div>
-                <div style={{ fontSize: '11px' }}>Click a step type on the left to add it</div>
-              </div>
-            )}
+            {/* Mini-map */}
+            <MiniMap steps={steps} transform={transform} triggerType={selectedWorkflow.trigger_type} />
           </div>
         </div>
+
+        {/* ── EDIT STEP MODAL (builder context) ── */}
+        {editingStep && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ background: '#0f1f35', borderRadius: 14, padding: 24, width: 480, maxWidth: '90vw', boxShadow: '0 24px 80px rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <div>
+                  <div style={{ fontSize: 8, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono, monospace', marginBottom: 4 }}>Edit Step</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#f0f4f8', textTransform: 'capitalize' }}>{editingStep.step_type}</div>
+                </div>
+                <button onClick={() => setEditingStep(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4a5568', fontSize: 22 }}>×</button>
+              </div>
+              {editingStep.step_type === 'wait' ? (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 10, color: '#8896a8', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase' }}>Wait hours</div>
+                  <input type="number" value={editingStep.wait_hours} min={0}
+                    onChange={e => setEditingStep(s => ({ ...s, wait_hours: parseInt(e.target.value, 10) || 0 }))}
+                    style={inputStyle} />
+                </div>
+              ) : (
+                <>
+                  {editingStep.step_type === 'email' && (
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 10, color: '#8896a8', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase' }}>Subject line</div>
+                      <input type="text" value={editingStep.subject || ''} placeholder="Subject..."
+                        onChange={e => setEditingStep(s => ({ ...s, subject: e.target.value }))} style={inputStyle} />
+                    </div>
+                  )}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 10, color: '#8896a8', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase' }}>Content</div>
+                    <textarea rows={5} value={editingStep.content || ''} placeholder="Message content..."
+                      onChange={e => setEditingStep(s => ({ ...s, content: e.target.value }))}
+                      style={{ ...inputStyle, resize: 'vertical' }} />
+                  </div>
+                </>
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={saveStepEdit} disabled={editSaving}
+                  style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: 8, padding: '9px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter, sans-serif' }}>
+                  {editSaving ? 'Saving…' : 'Save Changes'}
+                </button>
+                <button onClick={() => setEditingStep(null)}
+                  style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: '#8896a8', borderRadius: 8, padding: '9px 16px', fontSize: 12, cursor: 'pointer', fontFamily: 'Inter, sans-serif' }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // WORKFLOW LIST VIEW
+  // ═══════════════════════════════════════════════════════════
   return (
     <div>
       {/* HEADER */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Automation Sequences</div>
-          <div style={{ fontSize: '13px', color: '#0a1628', fontWeight: 600 }}>{workflows.length} workflow{workflows.length !== 1 ? 's' : ''} · {workflows.filter(w => w.status === 'active').length} active</div>
+          <div style={{ fontSize: 9, color: '#8896a8', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4, fontFamily: 'DM Mono, monospace' }}>Automation Sequences</div>
+          <div style={{ fontSize: 13, color: '#f0f4f8', fontWeight: 600 }}>{workflows.length} workflow{workflows.length !== 1 ? 's' : ''} · {workflows.filter(w => w.status === 'active').length} active</div>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <select value={filterClient} onChange={e => setFilterClient(e.target.value)} style={{ ...inputStyle, width: '160px' }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <select value={filterClient} onChange={e => setFilterClient(e.target.value)} style={{ ...inputStyle, width: 160 }}>
             <option value="All">All Stores</option>
             {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           <button onClick={() => setShowForm(!showForm)}
-            style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+            style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: 8, padding: '9px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter, sans-serif' }}>
             + New Workflow
           </button>
         </div>
       </div>
 
-      {/* CREATE WORKFLOW FORM */}
+      {/* CREATE FORM */}
       {showForm && (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', marginBottom: '20px', boxShadow: '0 4px 6px rgba(10,22,40,0.05)' }}>
-          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '16px' }}>New Workflow</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '16px' }}>
+        <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: 20, marginBottom: 20 }}>
+          <div style={{ fontSize: 9, color: '#8896a8', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', marginBottom: 16, fontFamily: 'DM Mono, monospace' }}>New Workflow</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
             <div>
-              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Workflow Name</div>
+              <div style={{ fontSize: 10, color: '#8896a8', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Workflow Name</div>
               <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Cart Recovery Sequence" style={inputStyle} />
             </div>
             <div>
-              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Client Store</div>
+              <div style={{ fontSize: 10, color: '#8896a8', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Client Store</div>
               <select value={clientId} onChange={e => setClientId(e.target.value)} style={inputStyle}>
                 <option value="">Select store</option>
                 {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
-              <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Trigger — What starts this workflow</div>
+              <div style={{ fontSize: 10, color: '#8896a8', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Trigger — What starts this workflow</div>
               <select value={triggerType} onChange={e => setTriggerType(e.target.value)} style={inputStyle}>
                 {triggers.map(t => <option key={t}>{t}</option>)}
               </select>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={createWorkflow}
-              style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+              style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: 8, padding: '9px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter, sans-serif' }}>
               Create & Build
             </button>
             <button onClick={() => setShowForm(false)}
-              style={{ background: 'white', border: '1px solid #e4e9f0', color: '#8896a8', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', cursor: 'pointer' }}>
+              style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: '#8896a8', borderRadius: 8, padding: '9px 18px', fontSize: 12, cursor: 'pointer', fontFamily: 'Inter, sans-serif' }}>
               Cancel
             </button>
           </div>
         </div>
       )}
 
-      {/* WORKFLOWS LIST */}
+      {/* WORKFLOW LIST */}
       {loading ? (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '40px', textAlign: 'center', color: '#8896a8' }}>Loading workflows...</div>
+        <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: 40, textAlign: 'center', color: '#4a5568' }}>Loading workflows…</div>
       ) : filtered.length === 0 ? (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '60px', textAlign: 'center' }}>
-          <div style={{ fontSize: '32px', marginBottom: '12px' }}>⚡</div>
-          <div style={{ fontWeight: 600, color: '#0a1628', marginBottom: '6px', fontSize: '14px' }}>No workflows yet</div>
-          <div style={{ fontSize: '12px', color: '#8896a8' }}>Create your first automation sequence</div>
+        <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: 60, textAlign: 'center' }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>⚡</div>
+          <div style={{ fontWeight: 600, color: '#f0f4f8', marginBottom: 6, fontSize: 14 }}>No workflows yet</div>
+          <div style={{ fontSize: 12, color: '#4a5568' }}>Create your first automation sequence</div>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {filtered.map(workflow => (
             <div key={workflow.id}>
-            <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: expandedWorkflowId === workflow.id ? '12px 12px 0 0' : '12px', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 1px 3px rgba(10,22,40,0.04)', cursor: 'pointer' }}
-              onClick={() => toggleExpand(workflow)}>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '5px' }}>
-                  <span style={{ fontSize: '11px', color: expandedWorkflowId === workflow.id ? '#c9a84c' : '#8896a8' }}>{expandedWorkflowId === workflow.id ? '▾' : '▸'}</span>
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628' }}>{workflow.name}</div>
-                  <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 600, background: workflow.status === 'active' ? '#ecfdf5' : workflow.status === 'paused' ? '#fffbeb' : '#f8fafc', color: workflow.status === 'active' ? '#059669' : workflow.status === 'paused' ? '#d97706' : '#8896a8', border: `1px solid ${workflow.status === 'active' ? '#a7f3d0' : workflow.status === 'paused' ? '#fde68a' : '#e4e9f0'}` }}>
-                    {workflow.status.charAt(0).toUpperCase() + workflow.status.slice(1)}
-                  </span>
-                </div>
-                <div style={{ fontSize: '11px', color: '#8896a8' }}>
-                  {getClientName(workflow.client_id)} · Trigger: {workflow.trigger_type} · Created {new Date(workflow.created_at).toLocaleDateString()}
-                </div>
-              </div>
+              {/* ROW */}
+              <div
+                style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: expandedWorkflowId === workflow.id ? '14px 14px 0 0' : 14, padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', transition: 'border-color 0.15s' }}
+                onMouseEnter={e => { if (expandedWorkflowId !== workflow.id) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; }}
+                onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'}
+                onClick={() => toggleExpand(workflow)}>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 56px)', gap: '12px', marginRight: '20px', textAlign: 'center' }}>
-                {[
-                  { label: 'Enrolled', value: workflow.enrolled_count },
-                  { label: 'Active', value: workflow.active_count },
-                  { label: 'Converted', value: workflow.converted_count },
-                ].map(stat => (
-                  <div key={stat.label}>
-                    <div style={{ fontSize: '16px', fontWeight: 700, color: '#0a1628' }}>{stat.value}</div>
-                    <div style={{ fontSize: '9px', color: '#8896a8' }}>{stat.label}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, color: expandedWorkflowId === workflow.id ? '#c9a84c' : '#4a5568' }}>{expandedWorkflowId === workflow.id ? '▾' : '▸'}</span>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#f0f4f8' }}>{workflow.name}</div>
+                    <span style={{ fontSize: 9, padding: '3px 10px', borderRadius: 20, fontWeight: 600,
+                      background: workflow.status === 'active' ? 'rgba(16,185,129,0.1)' : workflow.status === 'paused' ? 'rgba(217,119,6,0.1)' : 'rgba(255,255,255,0.04)',
+                      color:      workflow.status === 'active' ? '#34d399' : workflow.status === 'paused' ? '#f59e0b' : '#4a5568',
+                      border:     `1px solid ${workflow.status === 'active' ? 'rgba(16,185,129,0.25)' : workflow.status === 'paused' ? 'rgba(217,119,6,0.25)' : 'rgba(255,255,255,0.08)'}`,
+                    }}>
+                      {workflow.status.charAt(0).toUpperCase() + workflow.status.slice(1)}
+                    </span>
                   </div>
-                ))}
+                  <div style={{ fontSize: 11, color: '#4a5568' }}>{getClientName(workflow.client_id)} · {workflow.trigger_type} · {new Date(workflow.created_at).toLocaleDateString()}</div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,52px)', gap: 12, marginRight: 18, textAlign: 'center' }}>
+                  {[{ label: 'Enrolled', value: workflow.enrolled_count }, { label: 'Active', value: workflow.active_count }, { label: 'Converted', value: workflow.converted_count }].map(st => (
+                    <div key={st.label}>
+                      <div style={{ fontSize: 17, fontWeight: 700, color: '#f0f4f8' }}>{st.value || 0}</div>
+                      <div style={{ fontSize: 9, color: '#4a5568' }}>{st.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: 'flex', gap: 5 }} onClick={e => e.stopPropagation()}>
+                  {[
+                    { label: 'Edit', action: () => openBuilder(workflow), style: { background: 'rgba(201,168,76,0.12)', color: '#c9a84c', border: '1px solid rgba(201,168,76,0.25)' } },
+                    { label: workflow.status === 'active' ? 'Pause' : 'Activate', action: () => toggleStatus(workflow), style: { background: workflow.status === 'active' ? 'rgba(217,119,6,0.1)' : 'rgba(16,185,129,0.1)', color: workflow.status === 'active' ? '#f59e0b' : '#34d399', border: `1px solid ${workflow.status === 'active' ? 'rgba(217,119,6,0.25)' : 'rgba(16,185,129,0.25)'}` } },
+                    { label: 'Pause All', action: async () => { if (!window.confirm(`Pause all active enrollments in "${workflow.name}"?`)) return; await axios.post(`${API_BASE}/workflows/pause`, { workflow_id: workflow.id, client_id: workflow.client_id }); fetchWorkflows(); }, style: { background: 'rgba(239,68,68,0.07)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)' } },
+                    { label: 'Resume All', action: async () => { await axios.post(`${API_BASE}/workflows/resume`, { workflow_id: workflow.id, client_id: workflow.client_id }); fetchWorkflows(); }, style: { background: 'rgba(16,185,129,0.07)', color: '#34d399', border: '1px solid rgba(16,185,129,0.2)' } },
+                    { label: 'Feedback', action: () => getFeedback(workflow), style: feedbackId === workflow.id ? { background: 'rgba(201,168,76,0.12)', color: '#c9a84c', border: '1px solid rgba(201,168,76,0.3)' } : { background: 'rgba(255,255,255,0.04)', color: '#4a5568', border: '1px solid rgba(255,255,255,0.07)' } },
+                    { label: duplicating === workflow.id ? '…' : '⊕ Duplicate', action: () => duplicateWorkflow(workflow), style: { background: 'rgba(255,255,255,0.04)', color: '#4a5568', border: '1px solid rgba(255,255,255,0.07)' } },
+                    { label: workflow.status === 'scheduled' ? '🕐 Scheduled' : '📅 Schedule', action: () => { setSchedulingId(schedulingId === workflow.id ? null : workflow.id); setScheduleDate(''); }, style: workflow.status === 'scheduled' ? { background: 'rgba(201,168,76,0.1)', color: '#c9a84c', border: '1px solid rgba(201,168,76,0.25)' } : { background: 'rgba(255,255,255,0.04)', color: '#4a5568', border: '1px solid rgba(255,255,255,0.07)' } },
+                  ].map(btn => (
+                    <button key={btn.label} onClick={btn.action} disabled={duplicating === workflow.id && btn.label.includes('Duplicate')}
+                      style={{ ...btn.style, borderRadius: 7, padding: '6px 11px', fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter, sans-serif', whiteSpace: 'nowrap' }}>
+                      {btn.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '6px' }} onClick={e => e.stopPropagation()}>
-                <button onClick={() => openBuilder(workflow)}
-                  style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
-                  Edit
-                </button>
-                <button onClick={() => toggleStatus(workflow)}
-                  style={{ background: workflow.status === 'active' ? '#fffbeb' : '#ecfdf5', color: workflow.status === 'active' ? '#d97706' : '#059669', border: `1px solid ${workflow.status === 'active' ? '#fde68a' : '#a7f3d0'}`, borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
-                  {workflow.status === 'active' ? 'Pause' : 'Activate'}
-                </button>
-                <button onClick={async () => {
-                  if (!window.confirm(`Pause all active enrollments in "${workflow.name}"?`)) return;
-                  await axios.post(`${API_BASE}/workflows/pause`, { workflow_id: workflow.id, client_id: workflow.client_id });
-                  fetchWorkflows();
-                }} style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
-                  Pause All
-                </button>
-                <button onClick={async () => {
-                  await axios.post(`${API_BASE}/workflows/resume`, { workflow_id: workflow.id, client_id: workflow.client_id });
-                  fetchWorkflows();
-                }} style={{ background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
-                  Resume All
-                </button>
-                <button onClick={() => getFeedback(workflow)}
-                  style={{ background: feedbackId === workflow.id ? 'rgba(201,168,76,0.1)' : '#f8fafc', color: feedbackId === workflow.id ? '#c9a84c' : '#8896a8', border: `1px solid ${feedbackId === workflow.id ? '#c9a84c' : '#e4e9f0'}`, borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
-                  Feedback
-                </button>
-                <button onClick={() => duplicateWorkflow(workflow)} disabled={duplicating === workflow.id}
-                  style={{ background: '#f8fafc', color: '#8896a8', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
-                  {duplicating === workflow.id ? '...' : '⊕ Duplicate'}
-                </button>
-                <button onClick={() => { setSchedulingId(schedulingId === workflow.id ? null : workflow.id); setScheduleDate(''); }}
-                  style={{ background: workflow.status === 'scheduled' ? 'rgba(201,168,76,0.1)' : '#f8fafc', color: workflow.status === 'scheduled' ? '#c9a84c' : '#8896a8', border: `1px solid ${workflow.status === 'scheduled' ? '#c9a84c' : '#e4e9f0'}`, borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
-                  {workflow.status === 'scheduled' ? '🕐 Scheduled' : '📅 Schedule'}
-                </button>
-              </div>
-            </div>
+              {/* SCHEDULE PICKER */}
+              {schedulingId === workflow.id && (
+                <div style={{ background: 'rgba(217,119,6,0.07)', border: '1px solid rgba(217,119,6,0.2)', borderTop: 'none', borderRadius: '0 0 14px 14px', padding: '11px 18px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 11, color: '#f59e0b', fontWeight: 600 }}>Schedule start:</span>
+                  <input type="datetime-local" value={scheduleDate} onChange={e => setScheduleDate(e.target.value)}
+                    style={{ ...inputStyle, width: 'auto', fontSize: 11, padding: '5px 10px' }} />
+                  <button onClick={() => scheduleWorkflow(workflow.id)} disabled={!scheduleDate}
+                    style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: 7, padding: '6px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter, sans-serif' }}>
+                    Set
+                  </button>
+                  <button onClick={() => setSchedulingId(null)} style={{ background: 'none', border: 'none', color: '#f59e0b', cursor: 'pointer', fontSize: 16 }}>×</button>
+                </div>
+              )}
 
-            {/* SCHEDULE DATE PICKER */}
-            {schedulingId === workflow.id && (
-              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderTop: 'none', borderRadius: '0 0 12px 12px', padding: '12px 20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '11px', color: '#d97706', fontWeight: 600 }}>Schedule start date:</span>
-                <input type="datetime-local" value={scheduleDate} onChange={e => setScheduleDate(e.target.value)}
-                  style={{ border: '1px solid #fde68a', borderRadius: '7px', padding: '6px 10px', fontSize: '11px', color: '#0a1628', outline: 'none', background: 'white' }} />
-                <button onClick={() => scheduleWorkflow(workflow.id)} disabled={!scheduleDate}
-                  style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '7px', padding: '6px 14px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
-                  Set Schedule
-                </button>
-                <button onClick={() => setSchedulingId(null)} style={{ background: 'none', border: 'none', color: '#d97706', cursor: 'pointer', fontSize: '14px' }}>×</button>
-              </div>
-            )}
-
-            {/* INLINE STEPS PANEL */}
-            {expandedWorkflowId === workflow.id && (
-              <div style={{ background: '#f8fafc', border: '1px solid #e4e9f0', borderTop: 'none', borderRadius: '0 0 12px 12px', padding: '12px 20px' }}>
-                {stepsLoading ? (
-                  <div style={{ fontSize: '11px', color: '#8896a8', padding: '8px 0' }}>Loading steps...</div>
-                ) : expandedSteps.length === 0 ? (
-                  <div style={{ fontSize: '11px', color: '#8896a8', padding: '8px 0' }}>No steps — click Edit to build this workflow.</div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>{expandedSteps.length} Step{expandedSteps.length !== 1 ? 's' : ''}</div>
-                    {expandedSteps.map((step, idx) => (
-                      <div key={step.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span style={{ fontSize: '16px', flexShrink: 0 }}>{stepIcon(step.step_type)}</span>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '10px', color: '#8896a8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '1px' }}>Step {idx + 1} — {step.step_type}</div>
-                          {step.step_type === 'wait' ? (
-                            <div style={{ fontSize: '11px', color: '#4a5568' }}>Wait {step.wait_hours || 0}h</div>
-                          ) : (
-                            <div style={{ fontSize: '11px', color: '#4a5568', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {step.subject ? <span style={{ fontWeight: 600 }}>{step.subject} — </span> : null}
-                              {(step.content || '').slice(0, 80) || '(no content)'}
+              {/* EXPANDED FLOW PREVIEW */}
+              {expandedWorkflowId === workflow.id && (
+                <div style={{ background: '#050d1a', border: '1px solid rgba(255,255,255,0.07)', borderTop: 'none', borderRadius: '0 0 14px 14px', padding: '20px', overflowX: 'auto' }}>
+                  {/* Dot grid */}
+                  <div style={{ background: 'radial-gradient(circle, rgba(255,255,255,0.08) 1px, transparent 1px)', backgroundSize: '22px 22px', borderRadius: 10, padding: '20px 0', minHeight: 120 }}>
+                    {stepsLoading ? (
+                      <div style={{ fontSize: 11, color: '#4a5568', textAlign: 'center', padding: 20 }}>Loading flow…</div>
+                    ) : expandedSteps.length === 0 ? (
+                      <div style={{ fontSize: 11, color: '#4a5568', textAlign: 'center', padding: 20 }}>No steps — click Edit to build this workflow.</div>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, overflowX: 'auto', padding: '0 20px', justifyContent: 'flex-start' }}>
+                        {/* Trigger chip */}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                          <div style={{ background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.3)', borderRadius: 10, padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                            <span style={{ fontSize: 14 }}>⚡</span>
+                            <div>
+                              <div style={{ fontSize: 8, color: 'rgba(201,168,76,0.6)', letterSpacing: 1.5, fontFamily: 'DM Mono, monospace', fontWeight: 700, textTransform: 'uppercase' }}>Trigger</div>
+                              <div style={{ fontSize: 11, color: '#c9a84c', fontWeight: 700 }}>{workflow.trigger_type}</div>
                             </div>
-                          )}
+                          </div>
                         </div>
-                        <button onClick={() => setEditingStep({ ...step })}
-                          style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '6px', padding: '5px 12px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>
-                          Edit
-                        </button>
+
+                        {expandedSteps.map((step, idx) => {
+                          const col = NODE_COLOR[step.step_type] || '#6b7280';
+                          const preview = step.step_type === 'wait' ? `${step.wait_hours || 0}h wait` : ((step.content || '').slice(0, 40) || '—');
+                          return (
+                            <React.Fragment key={step.id}>
+                              {/* Arrow connector */}
+                              <div style={{ display: 'flex', alignItems: 'center', paddingTop: 18 }}>
+                                <svg width="36" height="12" style={{ flexShrink: 0 }}>
+                                  <defs><marker id={`mh-${step.id}`} markerWidth="6" markerHeight="5" refX="0" refY="2.5" orient="auto"><polygon points="0 0,6 2.5,0 5" fill="rgba(255,255,255,0.2)" /></marker></defs>
+                                  <line x1="0" y1="6" x2="30" y2="6" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" markerEnd={`url(#mh-${step.id})`} />
+                                </svg>
+                              </div>
+
+                              {/* Step card */}
+                              <div style={{ flexShrink: 0, width: 150 }}>
+                                <div style={{ background: '#0f1f35', border: `1px solid ${col}44`, borderTop: `2px solid ${col}`, borderRadius: 10, overflow: 'hidden' }}>
+                                  <div style={{ background: col + '18', padding: '7px 10px', display: 'flex', alignItems: 'center', gap: 5 }}>
+                                    <span style={{ fontSize: 12 }}>{stepIcon(step.step_type)}</span>
+                                    <span style={{ fontSize: 10, fontWeight: 700, color: col }}>{step.step_type}</span>
+                                    <span style={{ marginLeft: 'auto', fontSize: 9, color: '#4a5568' }}>#{idx + 1}</span>
+                                  </div>
+                                  <div style={{ padding: '8px 10px' }}>
+                                    <div style={{ fontSize: 10, color: '#8896a8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 6 }}>{preview}</div>
+                                    <button onClick={() => setEditingStep({ ...step })}
+                                      style={{ width: '100%', padding: '4px 0', fontSize: 9, fontWeight: 600, borderRadius: 5, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', color: '#8896a8', cursor: 'pointer', fontFamily: 'Inter, sans-serif' }}>
+                                      Edit
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </React.Fragment>
+                          );
+                        })}
+
+                        {/* End cap */}
+                        <div style={{ display: 'flex', alignItems: 'center', paddingTop: 18 }}>
+                          <svg width="28" height="12" style={{ flexShrink: 0 }}>
+                            <line x1="0" y1="6" x2="24" y2="6" stroke="rgba(16,185,129,0.3)" strokeWidth="1.5" />
+                          </svg>
+                        </div>
+                        <div style={{ flexShrink: 0, padding: '7px 12px', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 8, marginTop: 8 }}>
+                          <div style={{ fontSize: 9, color: '#10b981', fontWeight: 700, fontFamily: 'DM Mono, monospace', letterSpacing: 1 }}>✓ END</div>
+                        </div>
                       </div>
-                    ))}
+                    )}
                   </div>
-                )}
-              </div>
-            )}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -538,18 +821,18 @@ export default function Sequences() {
 
       {/* STEP EDIT MODAL */}
       {editingStep && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,22,40,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: '12px', padding: '24px', width: '480px', maxWidth: '90vw', boxShadow: '0 20px 60px rgba(10,22,40,0.2)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#0f1f35', borderRadius: 14, padding: 24, width: 480, maxWidth: '90vw', boxShadow: '0 24px 80px rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <div>
-                <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Edit Step</div>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628', textTransform: 'capitalize' }}>{editingStep.step_type} — Step {(expandedSteps.findIndex(s => s.id === editingStep.id) + 1)}</div>
+                <div style={{ fontSize: 8, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono, monospace', marginBottom: 4 }}>Edit Step</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#f0f4f8', textTransform: 'capitalize' }}>{editingStep.step_type} — Step {expandedSteps.findIndex(s => s.id === editingStep.id) + 1}</div>
               </div>
-              <button onClick={() => setEditingStep(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8896a8', fontSize: '22px', lineHeight: 1 }}>×</button>
+              <button onClick={() => setEditingStep(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4a5568', fontSize: 22 }}>×</button>
             </div>
             {editingStep.step_type === 'wait' ? (
-              <div style={{ marginBottom: '16px' }}>
-                <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>Wait hours</div>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10, color: '#8896a8', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase' }}>Wait hours</div>
                 <input type="number" value={editingStep.wait_hours} min={0}
                   onChange={e => setEditingStep(s => ({ ...s, wait_hours: parseInt(e.target.value, 10) || 0 }))}
                   style={inputStyle} />
@@ -557,28 +840,27 @@ export default function Sequences() {
             ) : (
               <>
                 {editingStep.step_type === 'email' && (
-                  <div style={{ marginBottom: '12px' }}>
-                    <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>Subject line</div>
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 10, color: '#8896a8', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase' }}>Subject line</div>
                     <input type="text" value={editingStep.subject || ''} placeholder="Subject..."
-                      onChange={e => setEditingStep(s => ({ ...s, subject: e.target.value }))}
-                      style={inputStyle} />
+                      onChange={e => setEditingStep(s => ({ ...s, subject: e.target.value }))} style={inputStyle} />
                   </div>
                 )}
-                <div style={{ marginBottom: '16px' }}>
-                  <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>Content</div>
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 10, color: '#8896a8', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase' }}>Content</div>
                   <textarea rows={5} value={editingStep.content || ''} placeholder="Message content..."
                     onChange={e => setEditingStep(s => ({ ...s, content: e.target.value }))}
                     style={{ ...inputStyle, resize: 'vertical' }} />
                 </div>
               </>
             )}
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={saveStepEdit} disabled={editSaving}
-                style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
-                {editSaving ? 'Saving...' : 'Save Changes'}
+                style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: 8, padding: '9px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter, sans-serif' }}>
+                {editSaving ? 'Saving…' : 'Save Changes'}
               </button>
               <button onClick={() => setEditingStep(null)}
-                style={{ background: 'white', border: '1px solid #e4e9f0', color: '#8896a8', borderRadius: '8px', padding: '9px 16px', fontSize: '12px', cursor: 'pointer' }}>
+                style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: '#8896a8', borderRadius: 8, padding: '9px 16px', fontSize: 12, cursor: 'pointer', fontFamily: 'Inter, sans-serif' }}>
                 Cancel
               </button>
             </div>
@@ -588,38 +870,31 @@ export default function Sequences() {
 
       {/* FEEDBACK PANEL */}
       {feedbackId && (
-        <div style={{ marginTop: '16px', background: '#0a1628', borderRadius: '12px', overflow: 'hidden', border: '1px solid rgba(201,168,76,0.2)' }}>
+        <div style={{ marginTop: 16, background: '#0a1628', borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(201,168,76,0.2)' }}>
           <div style={{ padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '2px' }}>Hussain — Sequence Analysis</div>
-              <div style={{ fontSize: '12px', color: 'white', fontWeight: 600 }}>{workflows.find(w => w.id === feedbackId)?.name}</div>
+              <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.3)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 2, fontFamily: 'DM Mono, monospace', fontWeight: 700 }}>Hussain — Sequence Analysis</div>
+              <div style={{ fontSize: 12, color: 'white', fontWeight: 600 }}>{workflows.find(w => w.id === feedbackId)?.name}</div>
             </div>
-            <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
               {feedbackStats && (
                 <>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '18px', fontWeight: 700, color: '#c9a84c' }}>{feedbackStats.completionRate}%</div>
-                    <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)' }}>Completion</div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '18px', fontWeight: 700, color: 'white' }}>{feedbackStats.total}</div>
-                    <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)' }}>Enrolled</div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '18px', fontWeight: 700, color: '#ef4444' }}>{feedbackStats.dropOffRate}%</div>
-                    <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)' }}>Drop-off</div>
-                  </div>
+                  {[{ label: 'Completion', value: `${feedbackStats.completionRate}%`, color: '#c9a84c' }, { label: 'Enrolled', value: feedbackStats.total, color: '#f0f4f8' }, { label: 'Drop-off', value: `${feedbackStats.dropOffRate}%`, color: '#ef4444' }].map(st => (
+                    <div key={st.label} style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: st.color }}>{st.value}</div>
+                      <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)' }}>{st.label}</div>
+                    </div>
+                  ))}
                 </>
               )}
               <button onClick={() => { setFeedbackId(null); setFeedbackResult(null); setFeedbackStats(null); }}
-                style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: '20px', lineHeight: 1, padding: '0 4px' }}>×</button>
+                style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', fontSize: 20 }}>×</button>
             </div>
           </div>
-          <div style={{ padding: '20px', fontSize: '12px', color: 'rgba(255,255,255,0.8)', lineHeight: '1.8', whiteSpace: 'pre-wrap', maxHeight: '380px', overflowY: 'auto' }}>
+          <div style={{ padding: 20, fontSize: 12, color: 'rgba(255,255,255,0.75)', lineHeight: 1.8, whiteSpace: 'pre-wrap', maxHeight: 380, overflowY: 'auto' }}>
             {feedbackLoading
-              ? <div style={{ color: 'rgba(255,255,255,0.3)', textAlign: 'center', padding: '40px 0' }}>Hussain is analyzing this sequence...</div>
-              : feedbackResult
-            }
+              ? <div style={{ color: 'rgba(255,255,255,0.25)', textAlign: 'center', padding: '40px 0' }}>Hussain is analyzing this sequence…</div>
+              : feedbackResult}
           </div>
         </div>
       )}
