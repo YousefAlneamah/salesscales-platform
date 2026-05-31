@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { API_BASE } from '../config';
 import axios from 'axios';
 import { supabase } from '../supabase';
+import { AIMemberLayout } from '../components/AIMemberLayout';
 
 const MEMBER_NAME = 'fatima';
 
@@ -181,33 +182,27 @@ Format as a clear actionable checklist. Be specific.`;
   );
 
   return (
-    <div>
-      {/* HEADER */}
-      <div style={{ background: 'linear-gradient(135deg, #0a1628, #112240)', borderRadius: '12px', padding: '24px', marginBottom: '24px', border: '1px solid rgba(124,58,237,0.2)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(124,58,237,0.15)', border: '1.5px solid rgba(124,58,237,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#7c3aed', fontWeight: 700 }}>F</div>
-          <div>
-            <div style={{ fontSize: '18px', fontWeight: 700, color: 'white', marginBottom: '3px' }}>Fatima</div>
-            <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>Operations Manager AI · Sales Scales</div>
+    <AIMemberLayout memberSlug={MEMBER_NAME} role="Operations Manager AI"
+      description="Fatima keeps everything running. She monitors workflows, tracks KPIs, and alerts you when something needs attention."
+      memberStats={memberStats} recentActivity={recentActivity}>
+
+      {/* Configure panel */}
+      {showConfig && (
+        <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: 20, marginBottom: 16 }}>
+          <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 14 }}>Configure Fatima</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+            <div><div style={{ fontSize: 10, color: '#8896a8', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase' }}>Focus Area</div><input type="text" value={focusArea} onChange={e=>setFocusArea(e.target.value)} placeholder="e.g. Client health, deliverability..." style={{ width: '100%', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '9px 12px', fontSize: 12, color: '#f0f4f8', outline: 'none', background: 'rgba(255,255,255,0.05)', boxSizing: 'border-box' }} /></div>
+            <div><div style={{ fontSize: 10, color: '#8896a8', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase' }}>Personality</div><input type="text" value={personality} onChange={e=>setPersonality(e.target.value)} placeholder="e.g. More proactive, urgent..." style={{ width: '100%', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '9px 12px', fontSize: 12, color: '#f0f4f8', outline: 'none', background: 'rgba(255,255,255,0.05)', boxSizing: 'border-box' }} /></div>
           </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <span style={{ fontSize: '9px', padding: '4px 12px', borderRadius: '20px', background: 'rgba(16,185,129,0.15)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', fontWeight: 600 }}>● Active</span>
-            <button onClick={() => setShowConfig(v=>!v)} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.6)', borderRadius: '7px', padding: '5px 12px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>Configure</button>
-          </div>
+          <div style={{ display: 'flex', gap: 8 }}><button onClick={saveConfig} disabled={savingConfig} style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 8, padding: '9px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{savingConfig?'Saving...':'Save'}</button><button onClick={()=>setShowConfig(false)} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: '#8896a8', borderRadius: 8, padding: '9px 16px', fontSize: 12, cursor: 'pointer' }}>Cancel</button></div>
         </div>
-        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginTop: '14px', lineHeight: '1.6' }}>
-          Fatima monitors all platform operations, tracks client health scores, manages workflow performance, and keeps Sales Scales running at full capacity.
-        </div>
-      </div>
-      {showConfig && (<div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}><div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '14px' }}>Configure Fatima</div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}><div><div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>Focus Area</div><input type="text" value={focusArea} onChange={e=>setFocusArea(e.target.value)} placeholder="e.g. Client health, deliverability..." style={{ width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '9px 12px', fontSize: '12px', color: '#0a1628', outline: 'none', boxSizing: 'border-box' }} /></div><div><div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>Personality</div><input type="text" value={personality} onChange={e=>setPersonality(e.target.value)} placeholder="e.g. More proactive, urgent..." style={{ width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '9px 12px', fontSize: '12px', color: '#0a1628', outline: 'none', boxSizing: 'border-box' }} /></div></div><div style={{ display: 'flex', gap: '8px' }}><button onClick={saveConfig} disabled={savingConfig} style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>{savingConfig?'Saving...':'Save'}</button><button onClick={()=>setShowConfig(false)} style={{ background: 'white', border: '1px solid #e4e9f0', color: '#8896a8', borderRadius: '8px', padding: '9px 16px', fontSize: '12px', cursor: 'pointer' }}>Cancel</button></div></div>)}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>{[{label:'Actions This Week',value:memberStats.weekActions,color:'#f59e0b'},{label:'Actions All Time',value:memberStats.allTimeActions,color:'#c9a84c'},{label:'Recent Activity',value:recentActivity.length+' briefings',color:'#10b981'}].map(s=>(<div key={s.label} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '14px 16px', borderLeft: `3px solid ${s.color}` }}><div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '6px' }}>{s.label}</div><div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>{s.value}</div></div>))}</div>
-      {recentActivity.length > 0 && (<div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '16px 20px', marginBottom: '20px' }}><div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '12px' }}>Recent Activity</div>{recentActivity.map(b=>(<div key={b.created_at+b.subject} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f8fafc' }}><div><div style={{ fontSize: '12px', fontWeight: 500, color: '#0a1628' }}>{b.subject}</div><div style={{ fontSize: '10px', color: '#8896a8' }}>To: {b.to_member} · {b.priority}</div></div><div style={{ fontSize: '9px', color: '#8896a8' }}>{new Date(b.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div></div>))}</div>)}
+      )}
 
       {/* TABS */}
       <div style={{ display: 'flex', gap: '6px', marginBottom: '20px', flexWrap: 'wrap' }}>
         {tabs.map(tab => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-            style={{ padding: '9px 18px', borderRadius: '8px', border: '1px solid', fontSize: '12px', cursor: 'pointer', fontWeight: activeTab === tab.id ? 600 : 400, background: activeTab === tab.id ? '#0a1628' : 'white', color: activeTab === tab.id ? 'white' : '#8896a8', borderColor: activeTab === tab.id ? '#0a1628' : '#e4e9f0', transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            style={{ padding: '9px 18px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)', fontSize: '12px', cursor: 'pointer', fontWeight: activeTab === tab.id ? 600 : 400, background: activeTab === tab.id ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)', color: activeTab === tab.id ? '#fff' : '#8896a8', transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span>{tab.icon}</span>
             <span>{tab.label}</span>
           </button>
@@ -329,7 +324,7 @@ Format as a clear actionable checklist. Be specific.`;
 
       {/* OPERATIONS ANALYSIS */}
       {activeTab === 'analysis' && (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+        <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '12px', padding: '20px' }}>
           <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '6px' }}>AI Operations Review</div>
           <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628', marginBottom: '6px' }}>Operations Analysis</div>
           <div style={{ fontSize: '12px', color: '#8896a8', marginBottom: '16px' }}>Fatima analyzes all platform operations and tells you exactly what needs attention.</div>
@@ -343,7 +338,7 @@ Format as a clear actionable checklist. Be specific.`;
 
       {/* DAILY CHECKLIST */}
       {activeTab === 'checklist' && (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
+        <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '12px', padding: '20px' }}>
           <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '6px' }}>Daily Operations</div>
           <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628', marginBottom: '6px' }}>Daily Checklist</div>
           <div style={{ fontSize: '12px', color: '#8896a8', marginBottom: '16px' }}>Fatima generates a prioritized daily operations checklist based on current platform status.</div>
@@ -354,6 +349,6 @@ Format as a clear actionable checklist. Be specific.`;
           {checklistResult && <ResultCard content={checklistResult} />}
         </div>
       )}
-    </div>
+    </AIMemberLayout>
   );
 }

@@ -1,11 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { API_BASE } from '../config';
 
 export default function Retention() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [checkinState, setCheckinState] = useState({}); // { [clientId]: { loading, message } }
+  const [checkinState, setCheckinState] = useState({});
+  const [colOverride, setColOverride] = useState({});
+  const dragRef = useRef(null);
+  const [dragOver, setDragOver] = useState(null);
 
   useEffect(() => {
     axios.get(`${API_BASE}/retention/dashboard`)
@@ -27,18 +30,6 @@ export default function Retention() {
   const dismissCheckin = (clientId) =>
     setCheckinState(prev => ({ ...prev, [clientId]: {} }));
 
-  const healthBar = (score) => {
-    const pct = Math.min(100, Math.max(0, score ?? 0));
-    const color = pct < 50 ? '#dc2626' : pct < 80 ? '#d97706' : '#10b981';
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <div style={{ width: '72px', height: '6px', background: '#f0f3f8', borderRadius: '3px', overflow: 'hidden', flexShrink: 0 }}>
-          <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: '3px', transition: 'width 0.4s' }} />
-        </div>
-        <span style={{ fontSize: '12px', fontWeight: 700, color, minWidth: '28px' }}>{score ?? '—'}</span>
-      </div>
-    );
-  };
 
   const daysSince = (d) => {
     if (d === null || d === undefined) return '—';
@@ -47,80 +38,6 @@ export default function Retention() {
     return `${d} days`;
   };
 
-  const ClientRow = ({ client, isAtRisk }) => {
-    const ci = checkinState[client.id] || {};
-    return (
-      <>
-        <div className="table-row" style={{ gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1fr auto', borderLeft: isAtRisk && client.churn_risk ? '3px solid #dc2626' : '3px solid transparent' }}>
-          <div className="td">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ fontWeight: 600, fontSize: '13px', color: '#0a1628' }}>{client.name}</div>
-              {client.churn_risk && (
-                <span style={{ fontSize: '9px', padding: '2px 8px', borderRadius: '20px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca', fontWeight: 700, whiteSpace: 'nowrap' }}>HIGH CHURN RISK</span>
-              )}
-            </div>
-            <div style={{ fontSize: '10px', color: '#8896a8', marginTop: '2px', textTransform: 'capitalize' }}>{client.tier || '—'}</div>
-          </div>
-          <div className="td">{healthBar(client.health_score)}</div>
-          <div className="td" style={{ fontSize: '12px', color: client.days_since_activity !== null && client.days_since_activity > 14 ? '#dc2626' : '#4a5568', fontWeight: client.days_since_activity !== null && client.days_since_activity > 14 ? 600 : 400 }}>
-            {daysSince(client.days_since_activity)}
-          </div>
-          <div className="td" style={{ fontSize: '12px', color: '#0a1628' }}>
-            ${(client.revenue_recovered || 0).toLocaleString()}
-          </div>
-          <div className="td" style={{ fontSize: '12px', color: client.recent_enrollments_14d === 0 ? '#dc2626' : '#4a5568', fontWeight: client.recent_enrollments_14d === 0 ? 600 : 400 }}>
-            {client.recent_enrollments_14d}
-          </div>
-          <div className="td">
-            {isAtRisk && (
-              <button
-                onClick={() => generateCheckin(client.id)}
-                disabled={ci.loading}
-                style={{ background: ci.loading ? '#e4e9f0' : '#0a1628', color: ci.loading ? '#8896a8' : '#c9a84c', border: 'none', borderRadius: '8px', padding: '7px 13px', fontSize: '11px', fontWeight: 600, cursor: ci.loading ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}>
-                {ci.loading ? 'Writing...' : 'Check-in'}
-              </button>
-            )}
-          </div>
-        </div>
-        {(ci.message || ci.error) && (
-          <div style={{ background: ci.error ? '#fef2f2' : '#f0fdf4', border: `1px solid ${ci.error ? '#fecaca' : '#bbf7d0'}`, borderRadius: '8px', margin: '0 0 8px', padding: '14px 16px', position: 'relative' }}>
-            {ci.error
-              ? <div style={{ fontSize: '12px', color: '#dc2626' }}>{ci.error}</div>
-              : <>
-                  <div style={{ fontSize: '9px', color: '#166534', fontWeight: 700, letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '8px' }}>Zainab's Check-In Message</div>
-                  <div style={{ fontSize: '13px', color: '#0a1628', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>{ci.message}</div>
-                </>
-            }
-            <button onClick={() => dismissCheckin(client.id)} style={{ position: 'absolute', top: '10px', right: '12px', background: 'none', border: 'none', fontSize: '16px', color: '#8896a8', cursor: 'pointer', lineHeight: 1 }}>×</button>
-          </div>
-        )}
-      </>
-    );
-  };
-
-  const Section = ({ title, color, dotColor, clients: list, isAtRisk }) => (
-    <div style={{ marginBottom: '28px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
-        <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
-        <div style={{ fontSize: '12px', fontWeight: 700, color: '#0a1628' }}>{title}</div>
-        <span style={{ fontSize: '11px', fontWeight: 500, color: '#8896a8' }}>({list.length} client{list.length !== 1 ? 's' : ''})</span>
-      </div>
-      {list.length === 0 ? (
-        <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '28px', textAlign: 'center', color: '#8896a8', fontSize: '12px' }}>
-          No clients in this category
-        </div>
-      ) : (
-        <div className="table-wrap">
-          <div className="table-header" style={{ gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1fr auto', background: color }}>
-            {['Client', 'Health Score', 'Last Activity', 'Revenue Recovered', '14d Enrollments', ''].map(h => (
-              <div key={h} className="th">{h}</div>
-            ))}
-          </div>
-          {list.map(c => <ClientRow key={c.id} client={c} isAtRisk={isAtRisk} />)}
-        </div>
-      )}
-    </div>
-  );
 
   if (loading) {
     return (
@@ -134,76 +51,144 @@ export default function Retention() {
   const total = at_risk.length + needs_attention.length + healthy.length;
   const highChurn = [...at_risk, ...needs_attention].filter(c => c.churn_risk).length;
 
+
+
+  const colClients = (col) => {
+    const base = col === 'healthy' ? healthy : col === 'needs_attention' ? needs_attention : at_risk;
+    const added = Object.entries(colOverride)
+      .filter(([, c]) => c === col)
+      .map(([id]) => [...healthy, ...needs_attention, ...at_risk].find(c => c.id === id))
+      .filter(Boolean);
+    const removed = new Set(Object.entries(colOverride).filter(([, c]) => c !== col).map(([id]) => id));
+    return [...base.filter(c => !removed.has(c.id)), ...added.filter(c => !base.find(b => b.id === c.id))];
+  };
+
+  const HealthRing = ({ score }) => {
+    const R = 22, sw = 4, circ = 2 * Math.PI * R;
+    const col = score >= 80 ? '#10b981' : score >= 50 ? '#f59e0b' : '#ef4444';
+    const offset = circ * (1 - Math.min(100, Math.max(0, score || 0)) / 100);
+    return (
+      <svg width="52" height="52" viewBox="0 0 52 52" style={{ flexShrink: 0 }}>
+        <circle cx="26" cy="26" r={R} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={sw} />
+        <circle cx="26" cy="26" r={R} fill="none" stroke={col} strokeWidth={sw}
+          strokeDasharray={circ} strokeDashoffset={offset}
+          transform="rotate(-90 26 26)" strokeLinecap="round" />
+        <text x="26" y="30" textAnchor="middle" fontSize="11" fontWeight="800" fill={col}>{score ?? '—'}</text>
+      </svg>
+    );
+  };
+
+  const KanbanCard = ({ client, col }) => {
+    const ci = checkinState[client.id] || {};
+    return (
+      <div draggable
+        onDragStart={() => { dragRef.current = { client, fromCol: col }; }}
+        onDragEnd={() => { dragRef.current = null; }}
+        style={{ background: '#0f1f35', border: `1px solid ${client.churn_risk ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.07)'}`, borderRadius: 12, padding: '14px 16px', marginBottom: 8, cursor: 'grab', userSelect: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+          <HealthRing score={client.health_score} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#f0f4f8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 2 }}>{client.name}</div>
+            {client.churn_risk && <span style={{ fontSize: 8, padding: '2px 8px', borderRadius: 20, background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)', fontWeight: 700, fontFamily: 'DM Mono,monospace' }}>HIGH RISK</span>}
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
+          {[
+            { label: 'Last activity', value: daysSince(client.days_since_activity), warn: client.days_since_activity > 14 },
+            { label: 'Enrollments 14d', value: client.recent_enrollments_14d, warn: client.recent_enrollments_14d === 0 },
+          ].map(s => (
+            <div key={s.label} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ fontSize: 9, color: '#4a5568', marginBottom: 2, fontFamily: 'DM Mono,monospace', letterSpacing: 1 }}>{s.label.toUpperCase()}</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: s.warn ? '#ef4444' : '#f0f4f8' }}>{s.value}</div>
+            </div>
+          ))}
+        </div>
+        <button onClick={() => generateCheckin(client.id)} disabled={ci.loading}
+          style={{ width: '100%', padding: '8px', fontSize: 11, fontWeight: 700, borderRadius: 8, border: '1px solid rgba(201,168,76,0.25)', background: ci.loading ? 'transparent' : 'rgba(201,168,76,0.08)', color: ci.loading ? '#4a5568' : '#c9a84c', cursor: ci.loading ? 'not-allowed' : 'pointer', fontFamily: 'Inter,sans-serif' }}>
+          {ci.loading ? 'Writing check-in…' : 'Generate Check-in'}
+        </button>
+        {(ci.message || ci.error) && (
+          <div style={{ marginTop: 8, background: ci.error ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.08)', border: `1px solid ${ci.error ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)'}`, borderRadius: 8, padding: '10px 12px', position: 'relative' }}>
+            {ci.error
+              ? <div style={{ fontSize: 11, color: '#f87171' }}>{ci.error}</div>
+              : <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.75)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{ci.message}</div>}
+            <button onClick={() => dismissCheckin(client.id)} style={{ position: 'absolute', top: 6, right: 8, background: 'none', border: 'none', color: '#4a5568', cursor: 'pointer', fontSize: 14 }}>×</button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const COLUMNS = [
+    { key: 'healthy',          label: 'Healthy',         color: '#10b981', bg: 'rgba(16,185,129,0.08)',  border: 'rgba(16,185,129,0.2)',  grad: 'linear-gradient(135deg,rgba(16,185,129,0.15),rgba(16,185,129,0.04))' },
+    { key: 'needs_attention',  label: 'Needs Attention', color: '#f59e0b', bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.2)',  grad: 'linear-gradient(135deg,rgba(245,158,11,0.15),rgba(245,158,11,0.04))' },
+    { key: 'at_risk',          label: 'At Risk',          color: '#ef4444', bg: 'rgba(239,68,68,0.08)',  border: 'rgba(239,68,68,0.2)',   grad: 'linear-gradient(135deg,rgba(239,68,68,0.15),rgba(239,68,68,0.04))' },
+  ];
+
   return (
     <div>
-      {/* HEADER */}
-      <div style={{ marginBottom: '24px' }}>
-        <div className="section-label">Client Health</div>
-        <div style={{ fontSize: '22px', fontWeight: 700, color: '#0a1628', letterSpacing: '-0.5px', marginBottom: '4px' }}>Retention Dashboard</div>
-        <div style={{ fontSize: '12px', color: '#8896a8' }}>Monitor client health, catch at-risk accounts early, and generate personalised check-ins</div>
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 9, color: '#8896a8', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 6 }}>Client Health</div>
+        <div style={{ fontSize: 22, fontWeight: 800, color: '#f0f4f8', marginBottom: 4 }}>Retention Dashboard</div>
+        <div style={{ fontSize: 12, color: '#8896a8' }}>Monitor health, catch at-risk accounts early. Drag cards between columns to reorder.</div>
       </div>
 
-      {/* STAT CARDS */}
-      <div className="stats-row" style={{ marginBottom: '28px' }}>
-        <div className="stat-card navy-top">
-          <div className="stat-label">Total Active</div>
-          <div className="stat-value">{total}</div>
-          <div className="stat-sub">clients monitored</div>
-        </div>
-        <div className="stat-card" style={{ borderTop: '2px solid #dc2626' }}>
-          <div className="stat-label">At Risk</div>
-          <div className="stat-value" style={{ color: '#dc2626' }}>{at_risk.length}</div>
-          <div className="stat-sub" style={{ color: '#dc2626' }}>health score below 50</div>
-        </div>
-        <div className="stat-card" style={{ borderTop: '2px solid #d97706' }}>
-          <div className="stat-label">Needs Attention</div>
-          <div className="stat-value" style={{ color: '#d97706' }}>{needs_attention.length}</div>
-          <div className="stat-sub" style={{ color: '#d97706' }}>score 50–79</div>
-        </div>
-        <div className="stat-card" style={{ borderTop: '2px solid #10b981' }}>
-          <div className="stat-label">Healthy</div>
-          <div className="stat-value" style={{ color: '#10b981' }}>{healthy.length}</div>
-          <div className="stat-sub" style={{ color: '#10b981' }}>score 80+</div>
-        </div>
+      <div className="stats-row" style={{ marginBottom: 24 }}>
+        {[
+          { label: 'Total Clients', value: total, color: 'var(--gold)', top: 'gold-top' },
+          { label: 'Healthy',       value: healthy.length, color: '#10b981', top: 'green-top' },
+          { label: 'Needs Attention', value: needs_attention.length, color: '#f59e0b', top: '' },
+          { label: 'At Risk',       value: at_risk.length, color: '#ef4444', top: '' },
+        ].map(s => (
+          <div key={s.label} className={`stat-card ${s.top}`} style={s.top ? {} : { borderTop: `2px solid ${s.color}` }}>
+            <div className="stat-label">{s.label}</div>
+            <div className="stat-value" style={{ color: s.color }}>{s.value}</div>
+            <div className="stat-sub">{s.label === 'Total Clients' ? 'monitored' : s.value === 1 ? 'client' : 'clients'}</div>
+          </div>
+        ))}
       </div>
 
-      {/* HIGH CHURN BANNER */}
       {highChurn > 0 && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '14px 18px', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ fontSize: '18px' }}>⚠</div>
+        <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 12, padding: '14px 18px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 20 }}>⚠</span>
           <div>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: '#dc2626', marginBottom: '2px' }}>
-              {highChurn} client{highChurn !== 1 ? 's' : ''} flagged as high churn risk
-            </div>
-            <div style={{ fontSize: '11px', color: '#b91c1c' }}>
-              Zero enrollments in the last 14 days — these accounts are disengaged and need immediate attention.
-            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#f87171', marginBottom: 2 }}>{highChurn} client{highChurn !== 1 ? 's' : ''} flagged as high churn risk</div>
+            <div style={{ fontSize: 11, color: 'rgba(239,68,68,0.6)' }}>Zero enrollments in 14 days — disengaged accounts need immediate attention.</div>
           </div>
         </div>
       )}
 
-      {/* SECTIONS */}
-      <Section
-        title="At Risk"
-        color="#7f1d1d"
-        dotColor="#dc2626"
-        clients={at_risk}
-        isAtRisk={true}
-      />
-      <Section
-        title="Needs Attention"
-        color="#78350f"
-        dotColor="#d97706"
-        clients={needs_attention}
-        isAtRisk={false}
-      />
-      <Section
-        title="Healthy"
-        color="#064e3b"
-        dotColor="#10b981"
-        clients={healthy}
-        isAtRisk={false}
-      />
+      {/* KANBAN COLUMNS */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16 }}>
+        {COLUMNS.map(col => {
+          const clients = colClients(col.key);
+          const isOver = dragOver === col.key;
+          return (
+            <div key={col.key}
+              onDragOver={e => { e.preventDefault(); setDragOver(col.key); }}
+              onDragLeave={() => setDragOver(null)}
+              onDrop={e => {
+                e.preventDefault();
+                setDragOver(null);
+                if (dragRef.current && dragRef.current.fromCol !== col.key) {
+                  setColOverride(prev => ({ ...prev, [dragRef.current.client.id]: col.key }));
+                }
+              }}
+              style={{ background: isOver ? col.bg : 'rgba(255,255,255,0.01)', border: `1px solid ${isOver ? col.border : 'rgba(255,255,255,0.06)'}`, borderRadius: 18, padding: 16, transition: 'all 0.15s', minHeight: 200 }}>
+              <div style={{ background: col.grad, borderRadius: 12, padding: '12px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: col.color, boxShadow: `0 0 6px ${col.color}` }} />
+                  <div style={{ fontSize: 13, fontWeight: 700, color: col.color }}>{col.label}</div>
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 800, color: col.color, background: `${col.color}18`, padding: '3px 10px', borderRadius: 20, border: `1px solid ${col.border}` }}>{clients.length}</span>
+              </div>
+              {clients.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '32px 16px', color: '#4a5568', fontSize: 12 }}>No clients</div>
+              ) : clients.map(c => <KanbanCard key={c.id} client={c} col={col.key} />)}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

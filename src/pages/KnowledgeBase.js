@@ -508,43 +508,45 @@ export default function KnowledgeBase() {
             </div>
           )}
 
-          {/* DOCUMENTS LIST */}
+          {/* DOCUMENT CARD GRID */}
           {loading ? (
-            <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '40px', textAlign: 'center', color: '#8896a8' }}>Loading...</div>
+            <div style={{ textAlign: 'center', padding: 40, color: '#4a5568', fontSize: 13 }}>Loading knowledge base…</div>
           ) : filtered.length === 0 ? (
-            <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '60px', textAlign: 'center' }}>
-              <div style={{ fontSize: '32px', marginBottom: '12px' }}>🧠</div>
-              <div style={{ fontWeight: 600, color: '#0a1628', marginBottom: '6px', fontSize: '14px' }}>Knowledge base is empty</div>
-              <div style={{ fontSize: '12px', color: '#8896a8' }}>Upload PDFs, paste content, or use Bulk Import to train the AI team</div>
+            <div style={{ background: '#0f1f35', border: '2px dashed rgba(255,255,255,0.08)', borderRadius: 20, padding: 60, textAlign: 'center' }}>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>🧠</div>
+              <div style={{ fontWeight: 700, color: '#f0f4f8', marginBottom: 8, fontSize: 18 }}>Knowledge base is empty</div>
+              <div style={{ fontSize: 13, color: '#8896a8', marginBottom: 24, lineHeight: 1.7 }}>Upload PDFs, paste content, or import YouTube channels to train your AI team.<br/>The more context they have, the better every email, reply, and recommendation becomes.</div>
+              <button onClick={() => setShowForm(true)} style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: 10, padding: '12px 28px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>+ Add First Document</button>
             </div>
           ) : (
-            <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 1.2fr 1fr 1fr 1fr 1fr', padding: '12px 18px', background: '#0a1628' }}>
-                {['DOCUMENT', 'STORE', 'TYPE', 'AI MEMBER', 'RAG', 'ADDED'].map(h => (
-                  <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px', fontWeight: 700 }}>{h}</div>
-                ))}
-              </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
               {filtered.map(doc => (
                 <div key={doc.id}
                   onClick={() => setSelectedDoc(selectedDoc?.id === doc.id ? null : doc)}
-                  style={{ display: 'grid', gridTemplateColumns: '2.5fr 1.2fr 1fr 1fr 1fr 1fr', padding: '13px 18px', borderBottom: '1px solid #f4f6fa', cursor: 'pointer', background: selectedDoc?.id === doc.id ? '#fafbfd' : 'white', transition: 'background 0.1s' }}
-                  onMouseEnter={e => { if (selectedDoc?.id !== doc.id) e.currentTarget.style.background = '#fafbfd'; }}
-                  onMouseLeave={e => { if (selectedDoc?.id !== doc.id) e.currentTarget.style.background = 'white'; }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ fontSize: '20px', flexShrink: 0 }}>{typeIcon(doc.type)}</div>
-                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#0a1628', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{highlight(doc.title, localSearch.trim())}</div>
+                  style={{ background: selectedDoc?.id === doc.id ? 'rgba(201,168,76,0.06)' : '#0f1f35', border: `1px solid ${selectedDoc?.id === doc.id ? 'rgba(201,168,76,0.35)' : 'rgba(255,255,255,0.07)'}`, borderRadius: 14, padding: '18px 20px', cursor: 'pointer', transition: 'border-color 0.15s, background 0.15s', display: 'flex', flexDirection: 'column', gap: 10 }}
+                  onMouseEnter={e => { if (selectedDoc?.id !== doc.id) { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'; e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}}
+                  onMouseLeave={e => { if (selectedDoc?.id !== doc.id) { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'; e.currentTarget.style.background = '#0f1f35'; }}}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                    <div style={{ fontSize: 28, flexShrink: 0 }}>{typeIcon(doc.type)}</div>
+                    <span style={{ fontSize: 8, padding: '3px 9px', borderRadius: 20, background: doc.embedding ? 'rgba(16,185,129,0.12)' : 'rgba(217,119,6,0.12)', color: doc.embedding ? '#34d399' : '#f59e0b', border: `1px solid ${doc.embedding ? 'rgba(16,185,129,0.25)' : 'rgba(217,119,6,0.25)'}`, fontWeight: 700, fontFamily: 'DM Mono,monospace', flexShrink: 0 }}>
+                      {doc.embedding ? 'RAG READY' : 'PENDING'}
+                    </span>
                   </div>
-                  <div style={{ fontSize: '11px', color: '#4a5568', display: 'flex', alignItems: 'center' }}>{getClientName(doc.client_id)}</div>
-                  <div style={{ fontSize: '11px', color: '#4a5568', display: 'flex', alignItems: 'center' }}>{typeLabel(doc.type)}</div>
-                  <div style={{ fontSize: '11px', color: '#c9a84c', fontWeight: 500, display: 'flex', alignItems: 'center' }}>{doc.notes || 'All Team'}</div>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    {doc.embedding ? (
-                      <span style={{ fontSize: '9px', color: '#10b981', fontWeight: 600 }}>● Ready</span>
-                    ) : (
-                      <span style={{ fontSize: '9px', color: '#d97706', fontWeight: 600 }}>○ Pending</span>
-                    )}
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#f0f4f8', lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                    {highlight(doc.title, localSearch.trim())}
                   </div>
-                  <div style={{ fontSize: '10px', color: '#8896a8', display: 'flex', alignItems: 'center' }}>{formatDate(doc.created_at)}</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 9, padding: '3px 9px', borderRadius: 20, background: 'rgba(201,168,76,0.1)', color: '#c9a84c', border: '1px solid rgba(201,168,76,0.2)', fontWeight: 600 }}>{typeLabel(doc.type)}</span>
+                    {doc.notes && <span style={{ fontSize: 9, padding: '3px 9px', borderRadius: 20, background: 'rgba(139,92,246,0.1)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.2)', fontWeight: 600 }}>{doc.notes}</span>}
+                    <span style={{ fontSize: 9, padding: '3px 9px', borderRadius: 20, background: 'rgba(255,255,255,0.05)', color: '#8896a8', border: '1px solid rgba(255,255,255,0.08)', fontWeight: 600 }}>{doc.source || 'Manual'}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
+                    <div style={{ fontSize: 10, color: '#4a5568' }}>{getClientName(doc.client_id)}</div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      {doc.content && <span style={{ fontSize: 10, color: '#4a5568' }}>{(doc.content.length / 1000).toFixed(1)}k chars</span>}
+                      <span style={{ fontSize: 10, color: '#4a5568' }}>{formatDate(doc.created_at)}</span>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>

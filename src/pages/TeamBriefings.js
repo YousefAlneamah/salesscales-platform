@@ -11,13 +11,6 @@ const MEMBERS = [
   { id: 'zainab', name: 'Zainab', role: 'Client Partner' },
 ];
 
-const PRIORITY_BADGE = {
-  urgent: 'badge-red',
-  high: 'badge-yellow',
-  normal: 'badge-blue',
-  low: 'badge-green',
-};
-
 const PRIORITY_COLOR = {
   urgent: '#dc2626',
   high: '#d97706',
@@ -334,90 +327,60 @@ export default function TeamBriefings() {
             <div style={{ color: 'var(--muted)', fontSize: '13px' }}>No briefings found. Use the form above to create the first one.</div>
           </div>
         ) : (
-          <div className="table-wrap">
-            <div className="table-header">
-              <div className="th" style={{ flex: '0 0 110px' }}>From</div>
-              <div className="th" style={{ flex: '0 0 110px' }}>To</div>
-              <div className="th" style={{ flex: 1 }}>Subject &amp; Preview</div>
-              <div className="th" style={{ flex: '0 0 80px' }}>Priority</div>
-              <div className="th" style={{ flex: '0 0 72px' }}>Status</div>
-              <div className="th" style={{ flex: '0 0 130px' }}>Date</div>
-              <div className="th" style={{ flex: '0 0 80px' }}></div>
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {briefings.filter(b => showArchived ? b.is_archived : !b.is_archived).map(b => {
               const isExpanded = expandedId === b.id;
               const isCopied = copiedId === b.id;
+              const mc = PRIORITY_COLOR[b.priority] || '#8896a8';
+              const memberCol = { hussain:'#3b82f6', hassan:'#10b981', ali:'#f59e0b', mahdi:'#c9a84c', fatima:'#ef4444', zainab:'#8b5cf6' };
+              const fromColor = memberCol[b.from_member] || '#8896a8';
               return (
-                <div
-                  key={b.id}
-                  className="table-row"
-                  style={{ background: !b.is_read ? 'rgba(201,168,76,0.04)' : undefined, alignItems: 'flex-start' }}
-                >
-                  <div className="td" style={{ flex: '0 0 110px' }}>
-                    <div style={{ fontWeight: 600, fontSize: '13px' }}>{getMemberName(b.from_member)}</div>
-                    <div style={{ fontSize: '10px', color: 'var(--muted)' }}>{MEMBERS.find(m => m.id === b.from_member)?.role}</div>
+                <div key={b.id} style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderLeft: `4px solid ${fromColor}`, borderRadius: 14, padding: '18px 20px', position: 'relative', transition: 'border-color 0.15s' }}>
+                  {/* Unread gold dot */}
+                  {!b.is_read && <div style={{ position: 'absolute', top: 16, right: 16, width: 8, height: 8, borderRadius: '50%', background: '#c9a84c', boxShadow: '0 0 6px #c9a84c' }} />}
+
+                  {/* Header row */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, background: `${fromColor}20`, border: `1px solid ${fromColor}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, color: fromColor, flexShrink: 0 }}>
+                        {getMemberName(b.from_member)[0]}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: fromColor }}>{getMemberName(b.from_member)}</div>
+                        <div style={{ fontSize: 10, color: '#4a5568' }}>→ {getMemberName(b.to_member)} · {MEMBERS.find(m => m.id === b.to_member)?.role}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginRight: 16 }}>
+                      <span style={{ fontSize: 8, padding: '3px 9px', borderRadius: 20, fontWeight: 700, background: `${mc}15`, color: mc, border: `1px solid ${mc}30`, fontFamily: 'DM Mono,monospace', letterSpacing: 1 }}>{b.priority}</span>
+                      <span style={{ fontSize: 10, color: '#4a5568' }}>{formatDate(b.created_at)}</span>
+                    </div>
                   </div>
-                  <div className="td" style={{ flex: '0 0 110px' }}>
-                    <div style={{ fontWeight: 500, fontSize: '13px' }}>{getMemberName(b.to_member)}</div>
-                    <div style={{ fontSize: '10px', color: 'var(--muted)' }}>{MEMBERS.find(m => m.id === b.to_member)?.role}</div>
-                  </div>
-                  <div className="td" style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}>{b.subject}</div>
-                    {isExpanded ? (
-                      <>
-                        <div style={{
-                          fontSize: '12px', color: 'var(--slate)', lineHeight: '1.75',
-                          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                          background: 'var(--bg)', border: '1px solid var(--border)',
-                          borderRadius: '8px', padding: '12px 14px', marginBottom: '10px',
-                        }}>
-                          {b.content}
-                        </div>
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                          <button
-                            onClick={() => setExpandedId(null)}
-                            style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: '11px', fontWeight: 600, cursor: 'pointer', padding: 0, fontFamily: 'DM Sans, sans-serif' }}>
-                            ↑ Collapse
-                          </button>
-                          <button
-                            onClick={() => copyBriefing(b)}
-                            style={{
-                              background: isCopied ? 'var(--green)' : 'var(--navy)',
-                              color: isCopied ? 'white' : 'var(--gold)',
-                              border: 'none', borderRadius: '6px', padding: '4px 12px',
-                              fontSize: '11px', fontWeight: 700, cursor: 'pointer',
-                              fontFamily: 'DM Sans, sans-serif', transition: 'background 0.2s',
-                            }}>
-                            {isCopied ? '✓ Copied' : '⎘ Copy'}
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div style={{ fontSize: '11px', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '4px' }}>
-                          {b.content}
-                        </div>
-                        <button
-                          onClick={() => setExpandedId(b.id)}
-                          style={{ background: 'none', border: 'none', color: 'var(--gold)', fontSize: '11px', fontWeight: 600, cursor: 'pointer', padding: 0, fontFamily: 'DM Sans, sans-serif' }}>
-                          View full →
-                        </button>
-                      </>
-                    )}
-                  </div>
-                  <div className="td" style={{ flex: '0 0 80px' }}>
-                    <span className={PRIORITY_BADGE[b.priority] || 'badge-blue'}>{b.priority}</span>
-                  </div>
-                  <div className="td" style={{ flex: '0 0 72px' }}>
-                    <span className={b.is_read ? 'badge-green' : 'badge-gold'}>{b.is_read ? 'read' : 'unread'}</span>
-                  </div>
-                  <div className="td" style={{ flex: '0 0 130px', fontSize: '11px', color: 'var(--muted)' }}>
-                    {formatDate(b.created_at)}
-                  </div>
-                  <div className="td" style={{ flex: '0 0 80px' }}>
+
+                  {/* Subject */}
+                  <div style={{ fontSize: 16, fontWeight: 700, color: '#f0f4f8', marginBottom: 8, lineHeight: 1.4 }}>{b.subject}</div>
+
+                  {/* Content */}
+                  {isExpanded ? (
+                    <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', lineHeight: 1.8, whiteSpace: 'pre-wrap', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
+                      {b.content}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: '#8896a8', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', marginBottom: 12, lineHeight: 1.6 }}>{b.content}</div>
+                  )}
+
+                  {/* Actions */}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <button onClick={() => setExpandedId(isExpanded ? null : b.id)}
+                      style={{ fontSize: 11, fontWeight: 600, color: '#c9a84c', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'Inter,sans-serif' }}>
+                      {isExpanded ? '↑ Collapse' : '↓ Expand'}
+                    </button>
+                    <button onClick={() => copyBriefing(b)}
+                      style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: isCopied ? '#10b981' : 'rgba(255,255,255,0.05)', color: isCopied ? '#fff' : '#8896a8', cursor: 'pointer', fontFamily: 'Inter,sans-serif', transition: 'all 0.2s' }}>
+                      {isCopied ? '✓ Copied' : '⎘ Copy'}
+                    </button>
                     {!b.is_archived && (
                       <button onClick={() => archiveBriefing(b.id)}
-                        style={{ background: 'var(--bg)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: '6px', padding: '4px 8px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+                        style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.07)', background: 'transparent', color: '#4a5568', cursor: 'pointer', fontFamily: 'Inter,sans-serif', marginLeft: 'auto' }}>
                         Archive
                       </button>
                     )}
