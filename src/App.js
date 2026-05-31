@@ -495,24 +495,26 @@ function App() {
           <div className="logo-line"></div>
         </div>
 
-        {navItems.map(group => (
-          <div className="nav-group" key={group.group}>
-            <div className="nav-label">{group.group}</div>
-            {group.items.map(item => (
-              <div
-                key={item.id}
-                className={"nav-item " + (currentPage === item.id ? "active" : "")}
-                onClick={() => { setCurrentPage(item.id); setSidebarOpen(false); }}
-              >
-                <i className={"ti " + item.icon} style={{fontSize:"15px"}} aria-hidden="true"></i>
-                <span>{item.label}</span>
-                {(item.id === "approvals" ? pendingApprovals > 0 : item.id === "inbox" ? unreadInbox > 0 : !!item.badge) && (
-                  <span className="nav-badge">{item.id === "approvals" ? pendingApprovals : item.id === "inbox" ? unreadInbox : item.badge}</span>
-                )}
-              </div>
-            ))}
-          </div>
-        ))}
+        <div className="nav-scroll">
+          {navItems.map(group => (
+            <div className="nav-group" key={group.group}>
+              <div className="nav-label">{group.group}</div>
+              {group.items.map(item => (
+                <div
+                  key={item.id}
+                  className={"nav-item " + (currentPage === item.id ? "active" : "")}
+                  onClick={() => { setCurrentPage(item.id); setSidebarOpen(false); }}
+                >
+                  <i className={"ti " + item.icon} style={{fontSize:"15px"}} aria-hidden="true"></i>
+                  <span>{item.label}</span>
+                  {(item.id === "approvals" ? pendingApprovals > 0 : item.id === "inbox" ? unreadInbox > 0 : !!item.badge) && (
+                    <span className="nav-badge">{item.id === "approvals" ? pendingApprovals : item.id === "inbox" ? unreadInbox : item.badge}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
 
         <div className="sidebar-footer">
           <div className="sidebar-user-name">{user.name}</div>
