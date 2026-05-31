@@ -714,6 +714,21 @@ export default function ClientDashboard({ user, onLogout }) {
 
     return (
     <div>
+      {/* Fix 4: celebration banner when revenue has been recovered */}
+      {stats.revenueRecovered > 0 && (
+        <div style={{ background: 'linear-gradient(90deg, rgba(201,168,76,0.12), rgba(201,168,76,0.06))', border: '1px solid rgba(201,168,76,0.3)', borderRadius: 14, padding: '14px 20px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ fontSize: 24, flexShrink: 0 }}>🏆</div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#c9a84c', marginBottom: 2 }}>
+              Your AI team has recovered ${stats.revenueRecovered.toLocaleString()} in revenue
+            </div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>
+              {stats.completedEnrollments} sequence{stats.completedEnrollments !== 1 ? 's' : ''} completed · keep approving content to maintain momentum
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ marginBottom: 24 }}>
         <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 4 }}>Performance</div>
         <div style={{ fontSize: 22, fontWeight: 800, color: '#f0f4f8' }}>My Results</div>

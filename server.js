@@ -6183,6 +6183,73 @@ const generateSocialNurtureApproval = async (platform, senderId, clientId) => {
   }
 };
 
+// ─── WORKFLOW GENERATE (Mahdi auto-creates full sequence) ─
+const WORKFLOW_TYPE_PROMPTS = {
+  'Cart Recovery':       { trigger: 'Cart Abandoned',     desc: 'abandoned their cart without checking out' },
+  'Lead Nurture':        { trigger: 'New Customer',        desc: 'just signed up or opted in' },
+  'Win Back':            { trigger: 'Win-Back',            desc: 'haven't purchased in 90+ days' },
+  'Post Purchase':       { trigger: 'Order Placed',        desc: 'just completed a purchase' },
+  'Browse Abandonment':  { trigger: 'Browse Abandonment',  desc: 'browsed a product but didn't add to cart' },
+  'VIP Customer':        { trigger: 'Manual',              desc: 'are high-value repeat buyers' },
+  'Re-engagement':       { trigger: 'Win-Back',            desc: 'haven't opened an email in 60+ days' },
+  'Flash Sale':          { trigger: 'Manual',              desc: 'are being targeted with a time-limited offer' },
+  'Back in Stock':       { trigger: 'Back In Stock',       desc: 'previously viewed an out-of-stock product' },
+  'Cross-sell':          { trigger: 'Post Purchase',       desc: 'recently purchased and may want related products' },
+};
+
+app.post('/workflows/generate', async (req, res) => {
+  const { client_id, workflow_type } = req.body;
+  if (!client_id || !workflow_type) return res.status(400).json({ error: 'client_id and workflow_type required' });
+  const typeConfig = WORKFLOW_TYPE_PROMPTS[workflow_type];
+  if (!typeConfig) return res.status(400).json({ error: `Unknown workflow_type: ${workflow_type}` });
+  try {
+    const { data: client } = await supabase.from('clients').select('name, niche').eq('id', client_id).maybeSingle();
+    const ctx = await ragSearch(`${workflow_type} sequence ${client?.niche || 'ecommerce'}`, client_id).catch(() => '');
+
+    const seqRaw = await aiCall(
+      `You are Mahdi, Marketing & Content AI at Sales Scales. Return ONLY valid JSON, no markdown. Write like a thoughtful friend at the brand — short sentences, genuine tone, no exclamation marks, no spam language. Use {{first_name}} for personalization. Never mention Claude.`,
+      `Create a complete ${workflow_type} email/SMS sequence for ${client?.name || 'an ecommerce store'} (${client?.niche || 'ecommerce'}) targeting customers who ${typeConfig.desc}.\n\nWrite 3–5 message steps with appropriate wait steps between them. Mix email and SMS where it makes sense for this type of sequence. Each message should feel personal and serve a clear purpose in the journey.\n\nReturn JSON exactly in this shape:\n{"name":"...","trigger_type":"${typeConfig.trigger}","steps":[{"step_type":"email|sms|wait","subject":"...or empty","content":"...or empty","wait_hours":0}]}\n\nFor wait steps: step_type="wait", content="", subject="", wait_hours=number\nFor email steps: step_type="email", subject="...", content="full email body"\nFor SMS steps: step_type="sms", subject="", content="short SMS text under 160 chars"`,
+      ctx
+    );
+
+    let parsed = { name: `${workflow_type} — ${client?.name || 'Store'}`, trigger_type: typeConfig.trigger, steps: [] };
+    try {
+      const s = seqRaw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+      const m = s.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(m ? m[0] : s);
+    } catch { /* keep defaults */ }
+
+    const steps = Array.isArray(parsed.steps) && parsed.steps.length ? parsed.steps : [];
+    const wfName = parsed.name || `${workflow_type} — ${client?.name || 'Store'}`;
+
+    const { data: workflow, error: wfErr } = await supabase.from('workflows').insert([{
+      name: wfName,
+      client_id,
+      trigger_type: parsed.trigger_type || typeConfig.trigger,
+      status: 'draft',
+      enrolled_count: 0,
+    }]).select().single();
+    if (wfErr) throw wfErr;
+
+    const stepRows = steps.map((s, i) => ({
+      workflow_id: workflow.id,
+      step_order: i + 1,
+      step_type: s.step_type || 'email',
+      subject: s.subject || null,
+      content: s.content || '',
+      wait_hours: s.wait_hours || 0,
+    }));
+    if (stepRows.length > 0) {
+      await supabase.from('workflow_steps').insert(stepRows);
+    }
+
+    res.json({ ok: true, workflow, steps: stepRows });
+  } catch (e) {
+    console.error('/workflows/generate error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── GLOBAL ERROR HANDLER ─────────────────────────────────
 app.use((err, req, res, next) => {
   const endpoint = `${req.method} ${req.path}`;
