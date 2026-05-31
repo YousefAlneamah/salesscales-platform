@@ -315,6 +315,33 @@ const storeKnowledge = async ({ title, content, source, clientId = null, type = 
   }
 };
 
+// ─── FIX 4: HOT LEAD ENGAGEMENT TAGGER ───────────────────
+const checkAndTagHotLead = async (contactId, clientId, newScore) => {
+  if ((newScore || 0) < 80) return;
+  try {
+    const { data: contact } = await supabase.from('contacts').select('tags, first_name, last_name, email').eq('id', contactId).maybeSingle();
+    if (!contact) return;
+    const tags = contact.tags || [];
+    if (tags.includes('hot_lead')) return;
+    await supabase.from('contacts').update({ tags: [...tags, 'hot_lead'] }).eq('id', contactId);
+    const name = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || contact.email || 'A contact';
+    await storeBriefing('fatima', 'hassan',
+      `Hot Lead Detected — ${name}`,
+      `A contact reached engagement score ${newScore} and has been tagged as a hot lead.\n\nContact: ${name}\nEmail: ${contact.email || 'N/A'}\nScore: ${newScore}\n\nHighly engaged — prioritize for personalized outreach.`,
+      'high', clientId
+    ).catch(e => console.error('Hot lead briefing failed:', e.message));
+    console.log(`[Engagement] Hot lead tagged: ${name} (score: ${newScore})`);
+  } catch (e) {
+    console.error('checkAndTagHotLead error:', e.message);
+  }
+};
+
+// ─── FIX 10: VERIFY CLIENT OWNERSHIP ─────────────────────
+const verifyClientOwnership = (req) => {
+  if (!req.user) return false;
+  return req.user.role === 'owner';
+};
+
 // ─── HELPER: TEAM BRIEFINGS CONTEXT ──────────────────────
 const getBriefingsContext = async (memberName) => {
   try {
@@ -427,6 +454,22 @@ const getClientBranding = async (clientId) => {
   } catch {
     return fallback;
   }
+};
+
+// ─── FIX 2: EMAIL PLAIN TEXT VERSION ─────────────────────
+const buildEmailText = (content) => {
+  if (!content) return '';
+  return content
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 };
 
 // ─── HELPER: WHITE-LABEL HTML EMAIL TEMPLATE ─────────────
@@ -772,6 +815,13 @@ const processWebhookEvent = async (topic, shop, payload) => {
       }
     } catch (tagErr) { console.error('Purchase tag error:', tagErr.message); }
 
+    // Fix 4: engagement score +50 for Shopify purchase
+    try {
+      const purchaseScore = (contact.engagement_score || 0) + 50;
+      await supabase.from('contacts').update({ engagement_score: purchaseScore }).eq('id', contact.id);
+      await checkAndTagHotLead(contact.id, clientId, purchaseScore);
+    } catch (scoreErr) { console.error('Purchase engagement score error:', scoreErr.message); }
+
     // Fix 6: VIP detection — 3+ orders → tag contact + generate VIP sequence
     const orderCount = payload.customer?.orders_count || 0;
     if (orderCount >= 3) {
@@ -995,6 +1045,23 @@ cron.schedule('*/15 * * * *', async () => {
         }
 
       } else if (currentStep.step_type === 'whatsapp' && contact.phone && currentStep.content) {
+        // Fix 1: check whatsapp_enabled on client before sending
+        const { data: clientWa } = await supabase.from('clients').select('whatsapp_enabled').eq('id', enrollment.client_id).maybeSingle();
+        if (!clientWa?.whatsapp_enabled) {
+          await supabase.from('messages').insert([{
+            client_id: enrollment.client_id,
+            contact_id: enrollment.contact_id,
+            channel: 'WhatsApp', direction: 'outbound',
+            sender_name: 'Sales Scales AI',
+            content: currentStep.content, status: 'whatsapp_pending'
+          }]);
+          const waSkipNext = steps[enrollment.current_step];
+          const waSkipAt = new Date();
+          if (waSkipNext && waSkipNext.step_type === 'wait') waSkipAt.setHours(waSkipAt.getHours() + (waSkipNext.wait_hours || 1));
+          await supabase.from('workflow_enrollments').update({ current_step: enrollment.current_step + 1, next_step_at: waSkipAt.toISOString() }).eq('id', enrollment.id);
+          console.log(`WhatsApp skipped (not enabled) for ${contact.first_name} — logged as whatsapp_pending`);
+          continue;
+        }
         let stepFailed = false, failureMsg = '';
         try {
           const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -1043,12 +1110,14 @@ cron.schedule('*/15 * * * *', async () => {
           const sender = await getClientSender(enrollment.client_id);
           const branding = await getClientBranding(enrollment.client_id);
           const emailSubject = renderTemplate(currentStep.subject || 'Message for you', contact, cartLink);
+          const emailContent = renderTemplate(currentStep.content, contact, cartLink);
           await sgMail.send({
             to: contact.email,
             from: sender,
             subject: emailSubject,
+            text: buildEmailText(emailContent),
             html: buildEmailHtml({
-              content: renderTemplate(currentStep.content, contact, cartLink),
+              content: emailContent,
               subject: emailSubject,
               clientName: branding.storeName || sender.name,
               cartLink,
@@ -2413,8 +2482,10 @@ app.post('/sms/inbound', async (req, res) => {
         sender_name: contact.first_name + ' ' + contact.last_name,
         sender_phone: From, content: Body, status: 'unread'
       }]);
-      // Fix 8: engagement score — +30 for SMS reply
-      await supabase.from('contacts').update({ engagement_score: (contact.engagement_score || 0) + 30 }).eq('id', contact.id);
+      // Fix 4: engagement score +30 for SMS reply
+      const smsNewScore = (contact.engagement_score || 0) + 30;
+      await supabase.from('contacts').update({ engagement_score: smsNewScore }).eq('id', contact.id);
+      await checkAndTagHotLead(contact.id, contact.client_id, smsNewScore);
       await supabase.from('workflow_enrollments')
         .update({ status: 'paused' })
         .eq('contact_id', contact.id)
@@ -2468,6 +2539,10 @@ app.post('/whatsapp/inbound', async (req, res) => {
         .update({ status: 'paused' })
         .eq('contact_id', contact.id)
         .eq('status', 'active');
+      // Fix 4: engagement score +30 for WhatsApp reply
+      const waNewScore = (contact.engagement_score || 0) + 30;
+      await supabase.from('contacts').update({ engagement_score: waNewScore }).eq('id', contact.id);
+      await checkAndTagHotLead(contact.id, contact.client_id, waNewScore);
       console.log('Inbound WhatsApp saved and workflow paused for:', contact.first_name);
       const { data: waClient } = await supabase.from('clients').select('name').eq('id', contact.client_id).maybeSingle();
       const waAssessment = await assessInboundConfidence('WhatsApp', Body, waClient?.name);
@@ -2564,7 +2639,8 @@ app.get('/workflow-steps/:workflow_id', async (req, res) => {
 });
 
 // ─── FIX 3: WORKFLOW PAUSE / RESUME ENROLLMENTS ───────────
-app.post('/workflows/pause', async (req, res) => {
+app.post('/workflows/pause', verifyToken, async (req, res) => {
+  if (!verifyClientOwnership(req)) return res.status(403).json({ error: 'Forbidden' });
   const { workflow_id, client_id } = req.body;
   if (!workflow_id) return res.status(400).json({ error: 'workflow_id required' });
   try {
@@ -2579,7 +2655,8 @@ app.post('/workflows/pause', async (req, res) => {
   }
 });
 
-app.post('/workflows/resume', async (req, res) => {
+app.post('/workflows/resume', verifyToken, async (req, res) => {
+  if (!verifyClientOwnership(req)) return res.status(403).json({ error: 'Forbidden' });
   const { workflow_id } = req.body;
   if (!workflow_id) return res.status(400).json({ error: 'workflow_id required' });
   try {
@@ -2595,7 +2672,8 @@ app.post('/workflows/resume', async (req, res) => {
 });
 
 // ─── FIX 4: MANUAL CONTACT ENROLLMENT ─────────────────────
-app.post('/contacts/enroll', async (req, res) => {
+app.post('/contacts/enroll', verifyToken, async (req, res) => {
+  if (!verifyClientOwnership(req)) return res.status(403).json({ error: 'Forbidden' });
   const { contact_id, workflow_id, client_id } = req.body;
   if (!contact_id || !workflow_id || !client_id) return res.status(400).json({ error: 'contact_id, workflow_id, and client_id are required' });
   try {
@@ -2729,14 +2807,14 @@ app.post('/email/tracking', async (req, res) => {
           created_at: new Date(timestamp * 1000).toISOString()
         }]);
         if (eventType === 'open' || eventType === 'click') {
-          // Fix 8: update engagement_score
-          // SQL: ALTER TABLE contacts ADD COLUMN IF NOT EXISTS engagement_score integer DEFAULT 0;
+          // Fix 4: update engagement_score (+10 open, +20 click)
           const scoreIncrement = eventType === 'open' ? 10 : 20;
-          const currentScore = contact.engagement_score || 0;
+          const emailNewScore = (contact.engagement_score || 0) + scoreIncrement;
           await supabase.from('contacts').update({
             last_activity: new Date(timestamp * 1000).toISOString(),
-            engagement_score: currentScore + scoreIncrement,
+            engagement_score: emailNewScore,
           }).eq('id', contact.id);
+          await checkAndTagHotLead(contact.id, contact.client_id, emailNewScore);
           // Fix 9: auto-tag based on behaviour
           const behavTag = eventType === 'open' ? 'email_opener' : 'link_clicker';
           const existTags = contact.tags || [];
@@ -5439,7 +5517,8 @@ app.patch('/clients/:id/zapier-url', async (req, res) => {
 });
 
 // ─── FIX 5: SEQUENCE DUPLICATION ─────────────────────────
-app.post('/workflows/duplicate', async (req, res) => {
+app.post('/workflows/duplicate', verifyToken, async (req, res) => {
+  if (!verifyClientOwnership(req)) return res.status(403).json({ error: 'Forbidden' });
   const { workflow_id, client_id } = req.body;
   if (!workflow_id) return res.status(400).json({ error: 'workflow_id required' });
   try {
@@ -5465,7 +5544,8 @@ app.post('/workflows/duplicate', async (req, res) => {
 
 // ─── FIX 6: CONTACT BLACKLIST ─────────────────────────────
 // SQL: CREATE TABLE IF NOT EXISTS contact_blacklist (id uuid default gen_random_uuid() primary key, email text not null, client_id uuid, reason text, created_at timestamptz default now(), UNIQUE(email, client_id));
-app.post('/contacts/blacklist', async (req, res) => {
+app.post('/contacts/blacklist', verifyToken, async (req, res) => {
+  if (!verifyClientOwnership(req)) return res.status(403).json({ error: 'Forbidden' });
   const { email, client_id, reason } = req.body;
   if (!email) return res.status(400).json({ error: 'email required' });
   try {
@@ -5638,6 +5718,204 @@ const logError = (err, endpoint = 'unknown') => {
     }).catch(mailErr => console.error('Error notification email failed:', mailErr.message));
   }
 };
+
+// ─── FIX 5: PLATFORM HEALTH DETAILED ─────────────────────
+app.get('/health/detailed', async (req, res) => {
+  const checks = {};
+  const t = async (name, fn) => {
+    const start = Date.now();
+    try { await fn(); checks[name] = { ok: true, ms: Date.now() - start }; }
+    catch (e) { checks[name] = { ok: false, ms: Date.now() - start, error: e.message }; }
+  };
+  await Promise.all([
+    t('supabase', async () => { const { error } = await supabase.from('clients').select('id').limit(1); if (error) throw error; }),
+    t('sendgrid', async () => {
+      const r = await axios.get('https://api.sendgrid.com/v3/scopes', { headers: { Authorization: `Bearer ${process.env.SENDGRID_API_KEY}` } });
+      if (r.status !== 200) throw new Error('SendGrid status ' + r.status);
+    }),
+    t('twilio', async () => {
+      if (!process.env.TWILIO_ACCOUNT_SID) throw new Error('Not configured');
+      const r = await axios.get(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}.json`, {
+        auth: { username: process.env.TWILIO_ACCOUNT_SID, password: process.env.TWILIO_AUTH_TOKEN }
+      });
+      if (r.status !== 200) throw new Error('Twilio status ' + r.status);
+    }),
+    t('elevenlabs', async () => {
+      if (!process.env.ELEVENLABS_API_KEY) throw new Error('Not configured');
+      const r = await axios.get('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY } });
+      if (r.status !== 200) throw new Error('ElevenLabs status ' + r.status);
+    }),
+  ]);
+  checks.server = { ok: true, uptime: Math.floor(process.uptime()), ms: 0 };
+  const allOk = Object.values(checks).every(c => c.ok);
+  res.json({ ok: allOk, checks, timestamp: new Date().toISOString() });
+});
+
+// ─── FIX 6: CLIENT SUCCESS SCORES ────────────────────────
+const TIER_PRICE = { starter: 997, growth: 1997, scale: 3997, enterprise: 5000 };
+app.get('/clients/success-scores', async (req, res) => {
+  try {
+    const { data: clients } = await supabase.from('clients').select('id, name, tier, health_score, created_at, status');
+    if (!clients) return res.json({ clients: [] });
+    const now = new Date();
+    const scores = await Promise.all(clients.map(async (c) => {
+      const monthsActive = Math.max(1, Math.round((now - new Date(c.created_at)) / (30 * 24 * 3600 * 1000)));
+      const monthlyFee = TIER_PRICE[c.tier?.toLowerCase()] || 997;
+      const totalPaid = monthlyFee * monthsActive;
+
+      const [enrollRes, contactRes, prevContactRes] = await Promise.all([
+        supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('client_id', c.id).eq('status', 'completed'),
+        supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('client_id', c.id),
+        supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('client_id', c.id)
+          .lt('created_at', new Date(now - 30 * 24 * 3600 * 1000).toISOString()),
+      ]);
+      const completedEnrollments = enrollRes.count || 0;
+      const totalContacts = contactRes.count || 0;
+      const prevContacts = prevContactRes.count || 0;
+      const contactGrowthRate = prevContacts > 0 ? Math.round(((totalContacts - prevContacts) / prevContacts) * 100) : 0;
+
+      const totalRevenue = completedEnrollments * 75;
+      const roi = totalPaid > 0 ? Math.round((totalRevenue / totalPaid) * 100) / 100 : 0;
+
+      const totalEnrollRes = await supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('client_id', c.id);
+      const totalEnrollments = totalEnrollRes.count || 0;
+      const completionRate = totalEnrollments > 0 ? Math.round((completedEnrollments / totalEnrollments) * 100) : 0;
+
+      return { ...c, roi, completionRate, contactGrowthRate, totalContacts, completedEnrollments, totalPaid, estimatedRevenue: totalRevenue };
+    }));
+    scores.sort((a, b) => b.roi - a.roi);
+    res.json({ clients: scores });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 3: A/B TEST WINNER AUTO-SELECT (Fridays 8am) ────
+cron.schedule('0 8 * * 5', async () => {
+  console.log('[AUTO] A/B test winner selection starting...');
+  try {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+    const { data: workflows } = await supabase.from('workflows')
+      .select('id, name, client_id, metadata').not('metadata->ab_test_group', 'is', null);
+    if (!workflows || workflows.length === 0) return;
+
+    const groups = {};
+    for (const wf of workflows) {
+      const group = wf.metadata?.ab_test_group;
+      if (!['A', 'B'].includes(group)) continue;
+      const pairId = wf.metadata?.ab_pair_id || wf.name.replace(/ \([AB]\)$/, '');
+      if (!groups[pairId]) groups[pairId] = {};
+      groups[pairId][group] = wf;
+    }
+
+    for (const [pairId, pair] of Object.entries(groups)) {
+      if (!pair.A || !pair.B) continue;
+      if (pair.A.metadata?.ab_winner_selected || pair.B.metadata?.ab_winner_selected) continue;
+
+      const getOpenRate = async (wfId) => {
+        const { count: sent } = await supabase.from('messages').select('id', { count: 'exact', head: true })
+          .eq('workflow_id', wfId).eq('channel', 'email').eq('direction', 'outbound').gte('created_at', sevenDaysAgo);
+        const { count: opened } = await supabase.from('messages').select('id', { count: 'exact', head: true })
+          .eq('workflow_id', wfId).eq('channel', 'email').eq('direction', 'outbound').not('opened_at', 'is', null).gte('created_at', sevenDaysAgo);
+        return sent > 0 ? (opened || 0) / sent : 0;
+      };
+
+      const [rateA, rateB] = await Promise.all([getOpenRate(pair.A.id), getOpenRate(pair.B.id)]);
+      if (rateA === 0 && rateB === 0) continue;
+
+      const winner = rateA >= rateB ? pair.A : pair.B;
+      const loser = rateA >= rateB ? pair.B : pair.A;
+
+      await Promise.all([
+        supabase.from('workflows').update({ metadata: { ...winner.metadata, ab_winner_selected: true, ab_winner: true } }).eq('id', winner.id),
+        supabase.from('workflows').update({ status: 'paused', metadata: { ...loser.metadata, ab_winner_selected: true, ab_winner: false } }).eq('id', loser.id),
+      ]);
+
+      const pct = (r) => `${Math.round(r * 100)}%`;
+      await storeBriefing('hussain', 'yousef',
+        `A/B Test Winner Selected — ${winner.name}`,
+        `A/B test results after 7 days for pair "${pairId}":\n\nVariant A (${pair.A.name}): ${pct(rateA)} open rate\nVariant B (${pair.B.name}): ${pct(rateB)} open rate\n\nWinner: ${winner.name} (${pct(Math.max(rateA, rateB))} open rate)\nLoser: ${loser.name} has been paused.\n\nThe winning variant continues running.`,
+        'normal', winner.client_id
+      ).catch(e => console.error('A/B briefing failed:', e.message));
+      console.log(`[AUTO] A/B winner selected: ${winner.name} over ${loser.name}`);
+    }
+  } catch (e) {
+    console.error('[AUTO] A/B test selection error:', e.message);
+  }
+});
+
+// ─── FIX 7: AUTOMATED TESTIMONIAL REQUEST (daily 10am) ───
+// SQL: CREATE TABLE IF NOT EXISTS testimonial_requests (id uuid DEFAULT gen_random_uuid() PRIMARY KEY, client_id uuid, sent_at timestamptz DEFAULT now(), responded boolean DEFAULT false);
+cron.schedule('0 10 * * *', async () => {
+  console.log('[AUTO] Testimonial request scan starting...');
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+    const windowStart = new Date(thirtyDaysAgo.setHours(0, 0, 0, 0)).toISOString();
+    const windowEnd = new Date(thirtyDaysAgo.setHours(23, 59, 59, 999)).toISOString();
+
+    const { data: clients } = await supabase.from('clients')
+      .select('id, name, from_email, from_name, health_score')
+      .gte('created_at', windowStart)
+      .lte('created_at', windowEnd)
+      .gt('health_score', 70);
+
+    if (!clients || clients.length === 0) return;
+
+    for (const c of clients) {
+      const { count: existing } = await supabase.from('testimonial_requests')
+        .select('id', { count: 'exact', head: true }).eq('client_id', c.id);
+      if (existing && existing > 0) continue;
+
+      const { data: clientUsers } = await supabase.from('client_users').select('email, name').eq('client_id', c.id);
+      const recipients = (clientUsers || []).map(u => u.email).filter(Boolean);
+      if (recipients.length === 0) continue;
+
+      const contactName = clientUsers?.[0]?.name || c.name || 'there';
+      for (const email of recipients) {
+        await sgMail.send({
+          to: email,
+          from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+          subject: 'How has Sales Scales been working for you?',
+          text: `Hi ${contactName},\n\nIt's been 30 days since you joined Sales Scales, and we'd love to hear how things are going.\n\nIf the platform has been delivering value for you, we'd really appreciate a short testimonial — it helps other agency owners understand what's possible.\n\nJust reply to this email with a few sentences about your experience and we'll take care of the rest.\n\nThank you,\nYousef\nSales Scales`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#0a1628"><p>Hi ${contactName},</p><p>It's been 30 days since you joined Sales Scales, and we'd love to hear how things are going.</p><p>If the platform has been delivering value for you, we'd really appreciate a short testimonial — it helps other agency owners understand what's possible.</p><p>Just reply to this email with a few sentences about your experience and we'll take care of the rest.</p><p>Thank you,<br>Yousef<br><strong>Sales Scales</strong></p></div>`,
+        }).catch(e => console.error(`Testimonial email to ${email} failed:`, e.message));
+      }
+
+      await supabase.from('testimonial_requests').insert([{ client_id: c.id, sent_at: new Date().toISOString(), responded: false }]);
+      console.log(`[AUTO] Testimonial request sent for ${c.name}`);
+    }
+  } catch (e) {
+    console.error('[AUTO] Testimonial request error:', e.message);
+  }
+});
+
+// ─── FIX 8: ROADMAP VOTES ENDPOINT ───────────────────────
+// SQL: CREATE TABLE IF NOT EXISTS roadmap_votes (id uuid DEFAULT gen_random_uuid() PRIMARY KEY, feature_id text NOT NULL, ip_address text NOT NULL, created_at timestamptz DEFAULT now(), UNIQUE(feature_id, ip_address));
+app.post('/roadmap/vote', async (req, res) => {
+  const { feature_id } = req.body;
+  if (!feature_id) return res.status(400).json({ error: 'feature_id required' });
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unknown';
+  try {
+    const { error } = await supabase.from('roadmap_votes').insert([{ feature_id, ip_address: ip }]);
+    if (error && error.code === '23505') return res.status(409).json({ error: 'Already voted' });
+    if (error) throw error;
+    const { count } = await supabase.from('roadmap_votes').select('id', { count: 'exact', head: true }).eq('feature_id', feature_id);
+    res.json({ ok: true, votes: count || 1 });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/roadmap/votes', async (req, res) => {
+  try {
+    const { data } = await supabase.from('roadmap_votes').select('feature_id');
+    const counts = {};
+    for (const row of data || []) counts[row.feature_id] = (counts[row.feature_id] || 0) + 1;
+    res.json({ votes: counts });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ─── GLOBAL ERROR HANDLER ─────────────────────────────────
 app.use((err, req, res, next) => {

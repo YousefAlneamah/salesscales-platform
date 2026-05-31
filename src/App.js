@@ -62,6 +62,9 @@ import SequenceTemplates from "./pages/SequenceTemplates";
 import SequenceAnalytics from "./pages/SequenceAnalytics";
 import Changelog from "./pages/Changelog";
 import ApiDocs from "./pages/ApiDocs";
+import PlatformHealth from "./pages/PlatformHealth";
+import SuccessScores from "./pages/SuccessScores";
+import PublicRoadmap from "./pages/PublicRoadmap";
 
 const navItems = [
   { group: "MAIN", items: [
@@ -125,6 +128,8 @@ const navItems = [
     { id: "billing", label: "Billing", icon: "ti-credit-card" },
     { id: "platform-settings", label: "Platform Settings", icon: "ti-adjustments" },
     { id: "settings", label: "Settings", icon: "ti-settings" },
+    { id: "platform-health", label: "Platform Health", icon: "ti-heart-rate-monitor" },
+    { id: "success-scores", label: "Success Scores", icon: "ti-star" },
     { id: "changelog", label: "Changelog", icon: "ti-clipboard-list" },
     { id: "api-docs", label: "API Docs", icon: "ti-code" },
   ]},
@@ -178,6 +183,8 @@ const pageTitles = {
   "sequence-analytics": "Sequence Analytics",
   "changelog": "Platform Changelog",
   "api-docs": "API Documentation",
+  "platform-health": "Platform Health",
+  "success-scores": "Client Success Scores",
   transcribe: "Call Transcription",
   onboarding: "Onboarding",
   marketplace: "Marketplace",
@@ -200,6 +207,8 @@ function App() {
   }, [currentPage]);
   const [clientOnboarded, setClientOnboarded] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Fix 9: owner first-time tour
+  const [tourStep, setTourStep] = useState(-1);
   const [pendingApprovals, setPendingApprovals] = useState(0);
   const [unreadInbox, setUnreadInbox] = useState(0);
   const [showLogin, setShowLogin] = useState(false);
@@ -218,7 +227,13 @@ function App() {
 
   useEffect(() => {
     const saved = localStorage.getItem("user");
-    if (saved) setUser(JSON.parse(saved));
+    if (saved) {
+      const u = JSON.parse(saved);
+      setUser(u);
+      if (u.role === 'owner' && !localStorage.getItem('owner_tour_completed')) {
+        setTimeout(() => setTourStep(0), 800);
+      }
+    }
     const token = localStorage.getItem("token");
     if (token) axios.defaults.headers.common["Authorization"] = "Bearer " + token;
   }, []);
@@ -305,7 +320,12 @@ function App() {
     });
   };
 
-  const handleLogin = (userData) => setUser(userData);
+  const handleLogin = (userData) => {
+    setUser(userData);
+    if (userData.role === 'owner' && !localStorage.getItem('owner_tour_completed')) {
+      setTimeout(() => setTourStep(0), 800);
+    }
+  };
 
   const handleLogout = () => {
     localStorage.removeItem("user");
@@ -366,6 +386,7 @@ function App() {
   if (window.location.pathname === '/terms') return <Terms />;
   if (window.location.pathname === '/privacy') return <Privacy />;
   if (window.location.pathname === '/signup') return <ClientSignup />;
+  if (window.location.pathname === '/roadmap') return <PublicRoadmap />;
 
   if (!user) {
     if (showLogin) return <Login onLogin={(u) => { setShowLogin(false); handleLogin(u); }} />;
@@ -440,6 +461,8 @@ function App() {
       case "auto-reports": return <AutoReports />;
       case "billing": return <Billing />;
       case "platform-settings": return <PlatformSettings />;
+      case "platform-health": return <PlatformHealth />;
+      case "success-scores": return <SuccessScores />;
       case "settings": return <Settings />;
       default: return <Dashboard />;
     }
@@ -652,6 +675,52 @@ function App() {
 
         <div className="content">{renderPage()}</div>
       </div>
+
+      {/* Fix 9: Owner first-time tour */}
+      {tourStep >= 0 && (() => {
+        const TOUR_STEPS = [
+          { nav: 'dashboard',  title: 'Dashboard',      body: 'Your Revenue Command Center — see all key metrics, active sequences, and client health scores at a glance.' },
+          { nav: 'clients',    title: 'Clients',         body: 'Manage all your ecommerce client accounts. Add clients, set tiers, and track their onboarding progress.' },
+          { nav: 'hussain',    title: 'AI Team',         body: 'Your 6 AI specialists are ready to help. Ask Hussain for strategy, Mahdi for content, Ali to close deals — and more.' },
+          { nav: 'approvals',  title: 'Approvals',       body: 'All AI-generated content lands here before it goes live. Review sequences, emails, and outreach — then approve or reject.' },
+          { nav: 'knowledge',  title: 'Knowledge Base',  body: 'Train your AI team with brand documents, PDFs, and YouTube content. The better the context, the better the output.' },
+          { nav: 'analytics',  title: 'Analytics',       body: 'Track emails sent, SMS delivered, contacts added, and workflow enrollments — broken down by month and client.' },
+          { nav: 'retention',  title: 'Retention',       body: 'Spot at-risk contacts before they churn. Engagement scores, activity timelines, and automated win-back triggers.' },
+          { nav: 'settings',   title: 'Settings',        body: 'Configure email senders, client branding, integrations, and your platform preferences. Set it once and it runs itself.' },
+        ];
+        const step = TOUR_STEPS[tourStep];
+        const skipTour = () => { setTourStep(-1); localStorage.setItem('owner_tour_completed', '1'); };
+        const nextTour = () => {
+          if (tourStep >= TOUR_STEPS.length - 1) { skipTour(); return; }
+          setCurrentPage(TOUR_STEPS[tourStep + 1].nav);
+          setTourStep(s => s + 1);
+        };
+        return (
+          <>
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,22,40,0.55)', zIndex: 9998, pointerEvents: 'none' }} />
+            <div style={{ position: 'fixed', bottom: '40px', right: '40px', zIndex: 9999, background: 'white', borderRadius: '16px', boxShadow: '0 24px 60px rgba(10,22,40,0.3)', width: '340px', overflow: 'hidden', fontFamily: 'DM Sans, sans-serif' }}>
+              <div style={{ background: '#0a1628', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {TOUR_STEPS.map((_, i) => (
+                    <div key={i} style={{ width: i === tourStep ? '16px' : '6px', height: '6px', borderRadius: '3px', background: i === tourStep ? '#c9a84c' : 'rgba(255,255,255,0.2)', transition: 'all 0.2s' }} />
+                  ))}
+                </div>
+                <div style={{ marginLeft: 'auto', fontSize: '10px', color: 'rgba(255,255,255,0.4)' }}>{tourStep + 1} of {TOUR_STEPS.length}</div>
+              </div>
+              <div style={{ padding: '20px' }}>
+                <div style={{ fontSize: '16px', fontWeight: 700, color: '#0a1628', marginBottom: '8px' }}>{step.title}</div>
+                <div style={{ fontSize: '13px', color: '#4a5568', lineHeight: '1.7', marginBottom: '20px' }}>{step.body}</div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button onClick={skipTour} className="btn btn-outline" style={{ flex: 1, fontSize: '12px', padding: '8px' }}>Skip Tour</button>
+                  <button onClick={nextTour} className="btn btn-gold" style={{ flex: 2, fontSize: '12px', padding: '8px' }}>
+                    {tourStep >= TOUR_STEPS.length - 1 ? 'Finish →' : 'Next →'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }

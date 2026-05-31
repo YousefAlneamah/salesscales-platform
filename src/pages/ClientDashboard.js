@@ -815,6 +815,8 @@ export default function ClientDashboard({ user, onLogout }) {
   };
 
   // ─── SEQUENCES ────────────────────────────────────────
+  const hasWhatsAppPendingSteps = Object.values(workflowStepsMap).some(steps => steps.some(s => s.step_type === 'whatsapp'));
+
   const ClientSequences = () => (
     <div>
       <div style={{ marginBottom: '24px' }}>
@@ -822,6 +824,17 @@ export default function ClientDashboard({ user, onLogout }) {
         <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Sequences</div>
         <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>{workflows.filter(w => w.status === 'active').length} running · {workflows.length} total · full step-by-step visibility into what your AI team is sending</div>
       </div>
+
+      {/* Fix 1: WhatsApp pending banner */}
+      {hasWhatsAppPendingSteps && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+          <i className="ti ti-brand-whatsapp" style={{ color: '#d97706', fontSize: '16px', marginTop: '1px', flexShrink: 0 }} />
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#92400e', marginBottom: '2px' }}>WhatsApp steps are pending</div>
+            <div style={{ fontSize: '11px', color: '#78350f', lineHeight: '1.6' }}>Some of your sequences include WhatsApp steps that are currently being skipped. WhatsApp requires activation by the Sales Scales team. Email and SMS are fully active.</div>
+          </div>
+        </div>
+      )}
 
       {workflows.length === 0 ? (
         <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '60px', textAlign: 'center' }}>

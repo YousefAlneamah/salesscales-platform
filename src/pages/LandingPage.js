@@ -461,6 +461,7 @@ export default function LandingPage({ onLoginClick }) {
         <div style={{ display: 'flex', justifyContent: 'center', gap: '24px', flexWrap: 'wrap', marginBottom: '16px' }}>
           <a href="https://aisalesscales.com" style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', textDecoration: 'none' }}>aisalesscales.com</a>
           <a href="mailto:yousef@aisalesscales.com" style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', textDecoration: 'none' }}>yousef@aisalesscales.com</a>
+          <a href="/roadmap" style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', textDecoration: 'none' }}>Roadmap</a>
           <a href="/terms" style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', textDecoration: 'none' }}>Terms</a>
           <a href="/privacy" style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', textDecoration: 'none' }}>Privacy</a>
         </div>
