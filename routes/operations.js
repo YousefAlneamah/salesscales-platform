@@ -444,9 +444,13 @@ module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToke
       const { data: client } = await supabase.from('clients').select('id, name, niche, tier').eq('id', client_id).maybeSingle();
       if (!client) return res.status(404).json({ error: 'Client not found' });
 
+      // Fix 10: fetch previous month report for trend comparison
+      const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const prevPeriod = prevMonthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
       const [
         emailRes, smsRes, waRes, contactsRes, enrollRes, seqRes,
-        ragContext, briefingsCtx,
+        ragContext, briefingsCtx, prevReportRes,
       ] = await Promise.all([
         supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', client_id).eq('channel', 'email').eq('direction', 'outbound').gte('created_at', monthStart),
         supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', client_id).eq('channel', 'sms').eq('direction', 'outbound').gte('created_at', monthStart),
@@ -456,19 +460,31 @@ module.exports = ({ supabase, aiCall, ragSearch, getBriefingsContext, verifyToke
         supabase.from('workflows').select('name, enrolled_count').eq('client_id', client_id).eq('status', 'active').order('enrolled_count', { ascending: false }).limit(1),
         ragSearch(`monthly report ${client.name}`, client_id),
         getBriefingsContext('zainab'),
+        supabase.from('reports').select('emails_sent, sms_sent, whatsapp_sent, contacts_added, workflow_enrollments').eq('client_id', client_id).eq('period', prevPeriod).maybeSingle(),
       ]);
 
-      const emailsSent   = emailRes.count   || 0;
-      const smsSent      = smsRes.count     || 0;
-      const whatsappSent = waRes.count      || 0;
+      const emailsSent    = emailRes.count   || 0;
+      const smsSent       = smsRes.count     || 0;
+      const whatsappSent  = waRes.count      || 0;
       const contactsAdded = contactsRes.count || 0;
-      const enrollments  = enrollRes.count  || 0;
-      const topSequence  = seqRes.data?.[0]?.name || 'None';
-      const context = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+      const enrollments   = enrollRes.count  || 0;
+      const topSequence   = seqRes.data?.[0]?.name || 'None';
+      const context       = [ragContext, briefingsCtx].filter(Boolean).join('\n\n');
+
+      // Build MoM trend section
+      const prev = prevReportRes.data;
+      const trendPct = (curr, previous) => {
+        if (!previous || previous === 0) return curr > 0 ? '+100%' : '—';
+        const pct = Math.round(((curr - previous) / previous) * 100);
+        return pct >= 0 ? `↑ ${pct}%` : `↓ ${Math.abs(pct)}%`;
+      };
+      const trendSection = prev
+        ? `\n\nMONTH-OVER-MONTH COMPARISON (vs ${prevPeriod}):\n- Emails sent: ${emailsSent} vs ${prev.emails_sent || 0} — ${trendPct(emailsSent, prev.emails_sent)}\n- SMS sent: ${smsSent} vs ${prev.sms_sent || 0} — ${trendPct(smsSent, prev.sms_sent)}\n- WhatsApp sent: ${whatsappSent} vs ${prev.whatsapp_sent || 0} — ${trendPct(whatsappSent, prev.whatsapp_sent)}\n- Contacts added: ${contactsAdded} vs ${prev.contacts_added || 0} — ${trendPct(contactsAdded, prev.contacts_added)}\n- Enrollments: ${enrollments} vs ${prev.workflow_enrollments || 0} — ${trendPct(enrollments, prev.workflow_enrollments)}`
+        : '';
 
       const summary = await aiCall(
         `You are Zainab, the Client Partner AI at Sales Scales. You are warm, professional, and deeply invested in each client's success. You write monthly performance reports that are honest, insightful, and actionable. You celebrate wins, identify opportunities, and provide clear next steps. Your reports feel like they come from a trusted advisor who knows the client's business deeply. Never break character or mention Claude.`,
-        `Write a comprehensive monthly performance report for ${client.name} (${client.niche || 'ecommerce'}) for ${period}.\n\nPerformance Data:\n- Emails sent: ${emailsSent}\n- SMS sent: ${smsSent}\n- WhatsApp messages sent: ${whatsappSent}\n- New contacts added: ${contactsAdded}\n- Workflow enrollments: ${enrollments}\n- Top performing sequence: ${topSequence}\n\nWrite a 5-section report with these exact headings:\n1. MONTHLY OVERVIEW — 2–3 sentences summarising the month's performance in an honest, encouraging tone\n2. CHANNEL PERFORMANCE — specific breakdown of email, SMS, and WhatsApp activity and what the numbers mean\n3. GROWTH & CONTACTS — analysis of new contacts added and the pipeline impact\n4. SEQUENCE PERFORMANCE — commentary on workflow activity and the top sequence\n5. RECOMMENDATIONS FOR NEXT MONTH — 3–5 specific, actionable recommendations Yousef and the team should execute\n\nUse the numbers directly. Be specific. Make the client feel supported and excited about what's coming next month.`,
+        `Write a comprehensive monthly performance report for ${client.name} (${client.niche || 'ecommerce'}) for ${period}.\n\nPerformance Data:\n- Emails sent: ${emailsSent}\n- SMS sent: ${smsSent}\n- WhatsApp messages sent: ${whatsappSent}\n- New contacts added: ${contactsAdded}\n- Workflow enrollments: ${enrollments}\n- Top performing sequence: ${topSequence}${trendSection}\n\nWrite a 5-section report with these exact headings:\n1. MONTHLY OVERVIEW — 2–3 sentences summarising the month's performance in an honest, encouraging tone\n2. CHANNEL PERFORMANCE — specific breakdown of email, SMS, and WhatsApp activity with trend arrows (↑/↓) vs last month where data is available\n3. GROWTH & CONTACTS — analysis of new contacts added and the pipeline impact, including MoM change\n4. SEQUENCE PERFORMANCE — commentary on workflow activity and the top sequence\n5. RECOMMENDATIONS FOR NEXT MONTH — 3–5 specific, actionable recommendations Yousef and the team should execute\n\nUse the numbers directly. Reference the month-over-month trends where available. Be specific. Make the client feel supported and excited about what's coming next month.`,
         context
       );
 

@@ -393,6 +393,19 @@ export default function Sequences() {
                   style={{ background: workflow.status === 'active' ? '#fffbeb' : '#ecfdf5', color: workflow.status === 'active' ? '#d97706' : '#059669', border: `1px solid ${workflow.status === 'active' ? '#fde68a' : '#a7f3d0'}`, borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
                   {workflow.status === 'active' ? 'Pause' : 'Activate'}
                 </button>
+                <button onClick={async () => {
+                  if (!window.confirm(`Pause all active enrollments in "${workflow.name}"?`)) return;
+                  await axios.post(`${API_BASE}/workflows/pause`, { workflow_id: workflow.id, client_id: workflow.client_id });
+                  fetchWorkflows();
+                }} style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+                  Pause All
+                </button>
+                <button onClick={async () => {
+                  await axios.post(`${API_BASE}/workflows/resume`, { workflow_id: workflow.id, client_id: workflow.client_id });
+                  fetchWorkflows();
+                }} style={{ background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+                  Resume All
+                </button>
                 <button onClick={() => getFeedback(workflow)}
                   style={{ background: feedbackId === workflow.id ? 'rgba(201,168,76,0.1)' : '#f8fafc', color: feedbackId === workflow.id ? '#c9a84c' : '#8896a8', border: `1px solid ${feedbackId === workflow.id ? '#c9a84c' : '#e4e9f0'}`, borderRadius: '8px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
                   Feedback

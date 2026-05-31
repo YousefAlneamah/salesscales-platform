@@ -932,13 +932,67 @@ export default function ClientDashboard({ user, onLogout }) {
   );
 
   // ─── CONTACTS ────────────────────────────────────────
-  const ClientContacts = () => (
+  const ClientContacts = () => {
+    const [enrollModal, setEnrollModal] = useState(null); // contact object
+    const [enrolling, setEnrolling] = useState(false);
+    const [enrollMsg, setEnrollMsg] = useState('');
+    const [selectedWfId, setSelectedWfId] = useState('');
+
+    const openEnroll = (contact) => {
+      setEnrollModal(contact);
+      setEnrollMsg('');
+      setSelectedWfId(workflows.filter(w => w.status === 'active')[0]?.id || '');
+    };
+
+    const doEnroll = async () => {
+      if (!selectedWfId) return;
+      setEnrolling(true);
+      setEnrollMsg('');
+      try {
+        const res = await axios.post(`${API_BASE}/contacts/enroll`, {
+          contact_id: enrollModal.id,
+          workflow_id: selectedWfId,
+          client_id: user.clientId,
+        });
+        setEnrollMsg(res.data.ok ? '✓ Enrolled successfully' : 'Enrollment failed');
+        if (res.data.ok) setTimeout(() => setEnrollModal(null), 1200);
+      } catch (e) {
+        setEnrollMsg(e.response?.data?.error || 'Enrollment failed');
+      }
+      setEnrolling(false);
+    };
+
+    return (
     <div>
       <div style={{ marginBottom: '24px' }}>
         <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Database</div>
         <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Contacts</div>
         <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>{contacts.length} customers in your database</div>
       </div>
+
+      {enrollModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,22,40,0.6)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: '14px', padding: '28px', width: '360px', boxShadow: '0 20px 60px rgba(10,22,40,0.25)' }}>
+            <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628', marginBottom: '6px' }}>Enroll {enrollModal.first_name}</div>
+            <div style={{ fontSize: '11px', color: '#8896a8', marginBottom: '16px' }}>Select a sequence to enroll this contact in</div>
+            <select value={selectedWfId} onChange={e => setSelectedWfId(e.target.value)}
+              style={{ width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '10px 12px', fontSize: '12px', marginBottom: '16px', outline: 'none' }}>
+              {workflows.filter(w => w.status === 'active').map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+            {enrollMsg && <div style={{ fontSize: '11px', color: enrollMsg.startsWith('✓') ? '#059669' : '#dc2626', marginBottom: '12px' }}>{enrollMsg}</div>}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={doEnroll} disabled={enrolling || !selectedWfId}
+                style={{ flex: 1, background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                {enrolling ? 'Enrolling…' : 'Enroll'}
+              </button>
+              <button onClick={() => setEnrollModal(null)}
+                style={{ padding: '10px 16px', background: 'white', border: '1px solid #e4e9f0', borderRadius: '8px', fontSize: '12px', cursor: 'pointer', color: '#8896a8' }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {contacts.length === 0 ? (
         <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '60px', textAlign: 'center' }}>
@@ -948,13 +1002,13 @@ export default function ClientDashboard({ user, onLogout }) {
         </div>
       ) : (
         <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 1fr', padding: '12px 18px', background: '#0a1628' }}>
-            {['CONTACT', 'EMAIL', 'SOURCE', 'ADDED'].map(h => (
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 1fr 80px', padding: '12px 18px', background: '#0a1628' }}>
+            {['CONTACT', 'EMAIL', 'SOURCE', 'ADDED', ''].map(h => (
               <div key={h} style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px', fontWeight: 700 }}>{h}</div>
             ))}
           </div>
           {contacts.map(contact => (
-            <div key={contact.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 1fr', padding: '12px 18px', borderBottom: '1px solid #f4f6fa', alignItems: 'center' }}>
+            <div key={contact.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 1fr 80px', padding: '12px 18px', borderBottom: '1px solid #f4f6fa', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', color: '#c9a84c', fontWeight: 700, flexShrink: 0 }}>
                   {contact.first_name?.[0]}{contact.last_name?.[0]}
@@ -964,12 +1018,21 @@ export default function ClientDashboard({ user, onLogout }) {
               <div style={{ fontSize: '11px', color: '#8896a8' }}>{contact.email}</div>
               <div style={{ fontSize: '11px', color: '#4a5568' }}>{contact.source}</div>
               <div style={{ fontSize: '10px', color: '#8896a8' }}>{formatDate(contact.created_at)}</div>
+              <div>
+                {workflows.some(w => w.status === 'active') && (
+                  <button onClick={() => openEnroll(contact)}
+                    style={{ fontSize: '10px', padding: '4px 10px', background: 'rgba(201,168,76,0.1)', color: '#c9a84c', border: '1px solid rgba(201,168,76,0.3)', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}>
+                    Enroll
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   // ─── ZAINAB ───────────────────────────────────────────
   const ClientZainab = ({ chatMessages, setChatMessages }) => {
@@ -1563,6 +1626,17 @@ export default function ClientDashboard({ user, onLogout }) {
         </div>
         <div style={{ fontSize: '12px', color: '#8896a8', marginBottom: '18px', lineHeight: 1.6 }}>
           Your messaging channels are set up and managed by the Sales Scales team on your behalf. Add your WhatsApp Business number below and we'll handle the rest.
+        </div>
+
+        {/* Fix 8: WhatsApp pending approval warning */}
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px 16px', marginBottom: '16px', display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+          <span style={{ fontSize: '16px', flexShrink: 0 }}>⚠️</span>
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#92400e', marginBottom: '3px' }}>WhatsApp sequences pending Meta approval</div>
+            <div style={{ fontSize: '11px', color: '#b45309', lineHeight: 1.6 }}>
+              WhatsApp is included in your plan but requires Meta Business verification before it can send messages. Your sequences will skip WhatsApp steps until approval is complete. Email and SMS are fully active.
+            </div>
+          </div>
         </div>
 
         {/* WhatsApp Business */}

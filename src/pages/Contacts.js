@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE } from '../config';
 import { supabase } from '../supabase';
 
@@ -8,6 +8,8 @@ export default function Contacts() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
   const [selectedContact, setSelectedContact] = useState(null);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -66,6 +68,30 @@ export default function Contacts() {
     } else {
       alert('Error: ' + error.message);
     }
+  };
+
+  const csvInputRef = useRef(null);
+
+  const handleCSVImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const clientId = clients[0]?.id;
+    if (!clientId) { alert('No clients found — cannot import.'); return; }
+    setImporting(true);
+    setImportResult(null);
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('client_id', clientId);
+    try {
+      const res = await fetch(`${API_BASE}/contacts/import`, { method: 'POST', body: formData });
+      const data = await res.json();
+      setImportResult(data);
+      if (data.imported > 0) fetchContacts();
+    } catch (err) {
+      setImportResult({ error: err.message });
+    }
+    setImporting(false);
+    e.target.value = '';
   };
 
   const enrollContact = async (contact) => {
@@ -177,12 +203,22 @@ export default function Contacts() {
           <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Contact Database</div>
           <div style={{ fontSize: '13px', color: '#0a1628', fontWeight: 600 }}>{contacts.length} contacts across all stores</div>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <input ref={csvInputRef} type="file" accept=".csv" onChange={handleCSVImport} style={{ display: 'none' }} />
+          <button onClick={() => csvInputRef.current?.click()} disabled={importing}
+            style={{ background: 'white', color: '#0a1628', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+            {importing ? 'Importing…' : '↑ Import CSV'}
+          </button>
           <button onClick={() => setShowForm(!showForm)}
             style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
             + Add Contact
           </button>
         </div>
+        {importResult && (
+          <div style={{ marginTop: '10px', padding: '10px 14px', borderRadius: '8px', fontSize: '12px', background: importResult.error ? '#fef2f2' : '#ecfdf5', color: importResult.error ? '#dc2626' : '#059669', border: `1px solid ${importResult.error ? '#fecaca' : '#a7f3d0'}` }}>
+            {importResult.error ? `Import failed: ${importResult.error}` : `✓ Imported ${importResult.imported} of ${importResult.total} contacts${importResult.errors?.length ? ` · ${importResult.errors.length} skipped` : ''}`}
+          </div>
+        )}
       </div>
 
       {/* ADD CONTACT FORM */}

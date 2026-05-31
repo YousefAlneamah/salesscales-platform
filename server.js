@@ -752,6 +752,18 @@ cron.schedule('*/15 * * * *', async () => {
 
       if (!contact) continue;
 
+      // Fix 9: skip_next_step tag — manual branch control
+      if (Array.isArray(contact.tags) && contact.tags.includes('skip_next_step')) {
+        const newTags = contact.tags.filter(t => t !== 'skip_next_step');
+        await supabase.from('contacts').update({ tags: newTags }).eq('id', contact.id);
+        const nextStepRef = steps[enrollment.current_step];
+        const skipAt = new Date();
+        if (nextStepRef && nextStepRef.step_type === 'wait') skipAt.setHours(skipAt.getHours() + (nextStepRef.wait_hours || 1));
+        await supabase.from('workflow_enrollments').update({ current_step: enrollment.current_step + 1, next_step_at: skipAt.toISOString() }).eq('id', enrollment.id);
+        console.log(`Step skipped for ${contact.first_name} — skip_next_step tag removed`);
+        continue;
+      }
+
       const cartLink = await getClientCartLink(enrollment.client_id);
 
       if (currentStep.step_type === 'wait') {
@@ -764,6 +776,15 @@ cron.schedule('*/15 * * * *', async () => {
         console.log(`Wait step processed for ${contact.first_name}`);
 
       } else if (currentStep.step_type === 'sms' && contact.phone && currentStep.content) {
+        // Fix 1: skip SMS for opted-out contacts
+        if (Array.isArray(contact.tags) && contact.tags.includes('opted_out_sms')) {
+          const skipNext = steps[enrollment.current_step];
+          const skipAt = new Date();
+          if (skipNext && skipNext.step_type === 'wait') skipAt.setHours(skipAt.getHours() + (skipNext.wait_hours || 1));
+          await supabase.from('workflow_enrollments').update({ current_step: enrollment.current_step + 1, next_step_at: skipAt.toISOString() }).eq('id', enrollment.id);
+          console.log(`SMS skipped — ${contact.first_name} has opted out of SMS`);
+          continue;
+        }
         let stepFailed = false, failureMsg = '';
         try {
           const { tc: twilioClient, from: twilioFrom } = await getClientTwilio(enrollment.client_id);
@@ -902,6 +923,19 @@ cron.schedule('*/15 * * * *', async () => {
             content: currentStep.content, status: 'sent'
           }]);
         }
+
+      } else if (currentStep.step_type === 'set_tag' && currentStep.content) {
+        // Fix 9: set_tag step — add tag to contact
+        const tagToSet = currentStep.content.trim();
+        const existingTags = contact.tags || [];
+        if (!existingTags.includes(tagToSet)) {
+          await supabase.from('contacts').update({ tags: [...existingTags, tagToSet] }).eq('id', contact.id);
+        }
+        const tagNext = steps[enrollment.current_step];
+        const tagAt = new Date();
+        if (tagNext && tagNext.step_type === 'wait') tagAt.setHours(tagAt.getHours() + (tagNext.wait_hours || 1));
+        await supabase.from('workflow_enrollments').update({ current_step: enrollment.current_step + 1, next_step_at: tagAt.toISOString() }).eq('id', enrollment.id);
+        console.log(`Tag '${tagToSet}' set on ${contact.first_name}`);
 
       } else {
         const nextStepAt = new Date();
@@ -2142,10 +2176,28 @@ cron.schedule('0 16 * * 5', async () => {
 });
 
 // ─── INBOUND SMS WEBHOOK ──────────────────────────────────
+const SMS_OPT_OUT_KEYWORDS = new Set(['STOP', 'UNSUBSCRIBE', 'CANCEL', 'QUIT', 'OPTOUT', 'OPT OUT', 'OPT-OUT']);
+
 app.post('/sms/inbound', async (req, res) => {
   const { From, Body } = req.body;
   console.log('Inbound SMS from:', From, '— Message:', Body);
+  const bodyNorm = (Body || '').trim().toUpperCase();
   try {
+    // Fix 1: SMS opt-out handling
+    if (SMS_OPT_OUT_KEYWORDS.has(bodyNorm)) {
+      const { data: optContact } = await supabase.from('contacts').select('id, tags').eq('phone', From).maybeSingle();
+      if (optContact) {
+        await supabase.from('workflow_enrollments').update({ status: 'cancelled' }).eq('contact_id', optContact.id).eq('status', 'active');
+        const updatedTags = Array.isArray(optContact.tags) ? optContact.tags : [];
+        if (!updatedTags.includes('opted_out_sms')) {
+          await supabase.from('contacts').update({ tags: [...updatedTags, 'opted_out_sms'] }).eq('id', optContact.id);
+        }
+      }
+      res.set('Content-Type', 'text/xml');
+      res.send('<Response><Message>You have been unsubscribed from all messages.</Message></Response>');
+      return;
+    }
+
     const { data: contact } = await supabase
       .from('contacts').select('*').eq('phone', From).single();
     if (contact) {
@@ -2235,6 +2287,164 @@ app.post('/whatsapp/inbound', async (req, res) => {
     console.error('Inbound WhatsApp error:', e.message);
     res.set('Content-Type', 'text/xml');
     res.send('<Response></Response>');
+  }
+});
+
+// ─── FIX 2: EMAIL INBOUND REPLY DETECTION ─────────────────
+// SendGrid inbound parse webhook — configure in SendGrid dashboard:
+// Settings → Inbound Parse → Add Host & URL → https://your-domain.com/email/inbound
+app.post('/email/inbound', upload.any(), async (req, res) => {
+  res.sendStatus(200); // acknowledge immediately
+  try {
+    const from = (req.body.from || '').match(/[\w.+-]+@[\w.-]+\.[a-zA-Z]+/)?.[0];
+    const text  = req.body.text || req.body.html || '';
+    const subject = req.body.subject || '';
+    if (!from) return;
+
+    const { data: contact } = await supabase.from('contacts').select('*').eq('email', from).maybeSingle();
+    if (!contact) return;
+
+    // Pause active enrollments
+    await supabase.from('workflow_enrollments').update({ status: 'paused' })
+      .eq('contact_id', contact.id).eq('status', 'active');
+
+    // Store as inbound message
+    await supabase.from('messages').insert([{
+      client_id: contact.client_id, contact_id: contact.id,
+      channel: 'Email', direction: 'inbound',
+      sender_name: contact.first_name ? `${contact.first_name} ${contact.last_name || ''}`.trim() : from,
+      content: subject ? `Subject: ${subject}\n\n${text.slice(0, 2000)}` : text.slice(0, 2000),
+      status: 'unread',
+    }]);
+
+    // Fatima briefing for manual review
+    await storeBriefing('fatima', 'yousef',
+      `Email Reply — ${contact.first_name || from}`,
+      `${contact.first_name || from} replied to a sequence email. Their active enrollments have been paused pending review.\n\nSubject: ${subject || '(no subject)'}\n\nMessage:\n${text.slice(0, 800)}`,
+      'high', contact.client_id
+    );
+    console.log(`Email reply detected from ${from} — enrollments paused, Fatima briefed`);
+  } catch (e) {
+    console.error('Email inbound error:', e.message);
+  }
+});
+
+// ─── FIX 3: WORKFLOW PAUSE / RESUME ENROLLMENTS ───────────
+app.post('/workflows/pause', async (req, res) => {
+  const { workflow_id, client_id } = req.body;
+  if (!workflow_id) return res.status(400).json({ error: 'workflow_id required' });
+  try {
+    const { count } = await supabase.from('workflow_enrollments')
+      .update({ status: 'paused' })
+      .eq('workflow_id', workflow_id)
+      .eq('status', 'active')
+      .select('id', { count: 'exact', head: true });
+    res.json({ ok: true, paused: count || 0 });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/workflows/resume', async (req, res) => {
+  const { workflow_id } = req.body;
+  if (!workflow_id) return res.status(400).json({ error: 'workflow_id required' });
+  try {
+    const { count } = await supabase.from('workflow_enrollments')
+      .update({ status: 'active' })
+      .eq('workflow_id', workflow_id)
+      .eq('status', 'paused')
+      .select('id', { count: 'exact', head: true });
+    res.json({ ok: true, resumed: count || 0 });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 4: MANUAL CONTACT ENROLLMENT ─────────────────────
+app.post('/contacts/enroll', async (req, res) => {
+  const { contact_id, workflow_id, client_id } = req.body;
+  if (!contact_id || !workflow_id || !client_id) return res.status(400).json({ error: 'contact_id, workflow_id, and client_id are required' });
+  try {
+    const { data: existing } = await supabase.from('workflow_enrollments')
+      .select('id, status').eq('contact_id', contact_id).eq('workflow_id', workflow_id).maybeSingle();
+    if (existing && existing.status === 'active') return res.status(409).json({ error: 'Contact is already actively enrolled in this workflow' });
+
+    const { data: steps } = await supabase.from('workflow_steps').select('*').eq('workflow_id', workflow_id).order('step_order');
+    if (!steps || steps.length === 0) return res.status(400).json({ error: 'Workflow has no steps' });
+
+    const firstStep = steps[0];
+    const nextStepAt = new Date();
+    if (firstStep.step_type === 'wait') nextStepAt.setHours(nextStepAt.getHours() + (firstStep.wait_hours || 1));
+
+    const { data: enrollment, error } = await supabase.from('workflow_enrollments').insert([{
+      workflow_id, contact_id, client_id,
+      status: 'active', current_step: 1,
+      enrolled_at: new Date().toISOString(),
+      next_step_at: nextStepAt.toISOString(),
+    }]).select().single();
+    if (error) throw error;
+    res.json({ ok: true, enrollment });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 5: CSV CONTACT IMPORT ────────────────────────────
+// SQL: no new columns needed — uses existing contacts table
+const parseCSV = (text) => {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim());
+  if (lines.length < 2) return { headers: [], rows: [] };
+  const parseLine = (line) => {
+    const cols = []; let cur = ''; let inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQuote = !inQuote; }
+      else if (ch === ',' && !inQuote) { cols.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    cols.push(cur.trim());
+    return cols;
+  };
+  const headers = parseLine(lines[0]).map(h => h.toLowerCase().replace(/\s+/g, '_'));
+  const rows = lines.slice(1).map(l => {
+    const vals = parseLine(l);
+    return headers.reduce((obj, h, i) => { obj[h] = vals[i] || ''; return obj; }, {});
+  });
+  return { headers, rows };
+};
+
+app.post('/contacts/import', upload.single('file'), async (req, res) => {
+  const { client_id } = req.body;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+  if (!req.file) return res.status(400).json({ error: 'CSV file required' });
+  try {
+    const text = req.file.buffer.toString('utf-8');
+    const { rows } = parseCSV(text);
+    if (rows.length === 0) return res.status(400).json({ error: 'CSV is empty or has no data rows' });
+
+    let imported = 0; const errors = [];
+    for (const [idx, row] of rows.entries()) {
+      const email = (row.email || '').trim().toLowerCase();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errors.push(`Row ${idx + 2}: invalid or missing email`);
+        continue;
+      }
+      const { error } = await supabase.from('contacts').upsert([{
+        first_name: (row.first_name || '').trim(),
+        last_name:  (row.last_name  || '').trim(),
+        email,
+        phone:      (row.phone      || '').trim() || null,
+        client_id,
+        source: 'CSV Import', channel: 'Email',
+        pipeline_stage: 'New Lead',
+        last_activity: new Date().toISOString(),
+      }], { onConflict: 'email,client_id' });
+      if (error) { errors.push(`Row ${idx + 2}: ${error.message}`); }
+      else { imported++; }
+    }
+    res.json({ ok: true, imported, errors, total: rows.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

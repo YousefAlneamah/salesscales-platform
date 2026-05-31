@@ -4,12 +4,39 @@
     <meta charset="utf-8" />
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" />
-    <meta name="description" content="Sales Scales AI Revenue Operating System" />
+    <meta name="theme-color" content="#0a1628" />
+
+    <!-- Fix 6: SEO meta tags -->
+    <title>Sales Scales — AI Revenue System for Ecommerce</title>
+    <meta name="description" content="Done-for-you AI revenue system that recovers abandoned carts, nurtures leads, and grows revenue automatically. Six AI specialists working 24/7 on your Shopify store." />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Sales Scales — AI Revenue System for Ecommerce" />
+    <meta property="og:description" content="Done-for-you AI revenue system that recovers abandoned carts, nurtures leads, and grows revenue automatically." />
+    <meta property="og:image" content="%PUBLIC_URL%/og-image.png" /><!-- REPLACE_WITH_REAL_OG_IMAGE -->
+    <meta property="og:url" content="https://aisalesscales.com" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Sales Scales" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Sales Scales — AI Revenue System for Ecommerce" />
+    <meta name="twitter:description" content="Done-for-you AI revenue system that recovers abandoned carts, nurtures leads, and grows revenue automatically." />
+    <meta name="twitter:image" content="%PUBLIC_URL%/og-image.png" /><!-- REPLACE_WITH_REAL_OG_IMAGE -->
+
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css" />
-    <title>Sales Scales</title>
+
+    <!-- Fix 7: Google Analytics 4 — REPLACE_WITH_YOUR_GA4_MEASUREMENT_ID -->
+    <!-- To activate: replace G-XXXXXXXXXX with your real Measurement ID from Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-XXXXXXXXXX'); /* REPLACE_WITH_YOUR_GA4_MEASUREMENT_ID */
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
