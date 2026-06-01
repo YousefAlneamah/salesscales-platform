@@ -52,20 +52,20 @@
       │  1. Go to https://analytics.google.com                         │
       │  2. Create a property for your site (or open an existing one)  │
       │  3. Copy your GA4 Measurement ID — it looks like: G-ABCD1234   │
-      │  4. Replace ALL 3 instances of G-XXXXXXXXXX in this file with  │
+      │  4. Replace ALL 3 instances of G-3F8GZ0LMS6 in this file with  │
       │     your real ID (two in the script tags below, one in the     │
       │     async src URL).                                             │
       │  Takes about 5 minutes. Data shows up within 24 hours.         │
       └─────────────────────────────────────────────────────────────────┘
     -->
     <!-- Google Analytics 4 — cookie consent: analytics_storage defaults to denied; LandingPage.js grants on accept -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-3F8GZ0LMS6"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
       function gtag(){dataLayer.push(arguments);}
       gtag('consent', 'default', { analytics_storage: 'denied' });
       gtag('js', new Date());
-      gtag('config', 'G-XXXXXXXXXX'); /* ← replace with your GA4 Measurement ID */
+      gtag('config', 'G-3F8GZ0LMS6'); /* ← replace with your GA4 Measurement ID */
       /* Auto-grant if previously accepted */
       if (localStorage.getItem('ss_cookie_consent') === 'accepted') {
         gtag('consent', 'update', { analytics_storage: 'granted' });
