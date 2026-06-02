@@ -226,6 +226,7 @@ const WORKFLOW_TYPES = [
   { type: 'Flash Sale',         icon: '⚡', trigger: 'Manual',            desc: '3 urgency-driven emails over 48 hours for a time-limited discount. Immediate, 24h, and final-hours sends.' },
   { type: 'Back in Stock',      icon: '🔔', trigger: 'Back In Stock',     desc: 'Notifies customers who previously viewed an out-of-stock product that it\'s available again.' },
   { type: 'Cross-sell',         icon: '🎯', trigger: 'Post Purchase',     desc: 'At day 14 of a post-purchase journey — suggests complementary products based on what they bought.' },
+  { type: 'Opt-in Sequence',   icon: '📋', trigger: 'Opt-in',            desc: 'Fires when a contact opts in via web form or is manually added with source Opt-in. 7 emails over 7 days: welcome, lead magnet, our story, best content, soft pitch, social proof, direct offer.' },
 ];
 
 // ─── MAIN COMPONENT ───────────────────────────────────────

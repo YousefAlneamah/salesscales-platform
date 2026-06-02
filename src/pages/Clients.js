@@ -23,6 +23,22 @@ export default function Clients() {
   const [form, setForm] = useState({
     name: "", email: "", niche: "", tier: "starter", status: "onboarding"
   });
+  const [demoCreating, setDemoCreating] = useState(false);
+
+  const createDemo = async () => {
+    if (!window.confirm('This will create a new Demo Store client with pre-filled data. Continue?')) return;
+    setDemoCreating(true);
+    try {
+      const res = await axios.post(`${API_BASE}/clients/create-demo`);
+      const d = res.data;
+      fetchClients();
+      alert(`Demo account created!\n\nClient: ${d.client_name}\nEmail: ${d.demo_email}\nPassword: ${d.demo_password}\n\nRevenue: $${d.stats.revenue_recovered.toLocaleString()} recovered\nContacts: ${d.stats.contacts_enrolled} enrolled\n\nShare these credentials with your prospect.`);
+    } catch (e) {
+      alert('Failed to create demo: ' + (e.response?.data?.error || e.message));
+    } finally {
+      setDemoCreating(false);
+    }
+  };
 
   const defaultFeatures = {
     email_sequences: true,
@@ -266,6 +282,10 @@ export default function Clients() {
         <button onClick={() => window.open(`${API_BASE}/clients/export`, '_blank')}
           style={{ background: 'white', color: '#0a1628', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
           ↓ Export CSV
+        </button>
+        <button onClick={createDemo} disabled={demoCreating}
+          style={{ background: demoCreating ? '#8896a8' : '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 700, cursor: demoCreating ? 'not-allowed' : 'pointer' }}>
+          {demoCreating ? 'Creating…' : '🎬 Create Demo Account'}
         </button>
         <button onClick={() => setShowForm(!showForm)}
           style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>

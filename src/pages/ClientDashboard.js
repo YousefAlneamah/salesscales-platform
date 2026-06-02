@@ -4,6 +4,25 @@ import { supabase } from '../supabase';
 import { API_BASE } from '../config';
 import { t } from '../i18n';
 
+function WhatIsThis({ text, dark }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{ background: dark ? 'rgba(255,255,255,0.08)' : '#f0f3f8', border: `1px solid ${dark ? 'rgba(255,255,255,0.12)' : '#e4e9f0'}`, borderRadius: '20px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, color: dark ? 'rgba(255,255,255,0.5)' : '#8896a8', cursor: 'pointer', fontFamily: 'Inter,sans-serif', whiteSpace: 'nowrap' }}>
+        ? What is this
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, background: '#0a1628', border: '1px solid rgba(201,168,76,0.3)', borderRadius: 10, padding: '12px 14px', width: 260, fontSize: 11, color: 'rgba(255,255,255,0.8)', lineHeight: 1.7, zIndex: 50, boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}>
+          {text}
+          <button onClick={() => setOpen(false)} style={{ display: 'block', marginTop: 8, background: 'none', border: 'none', color: '#c9a84c', fontSize: 10, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Got it ✓</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const parseAov = (text) => {
   if (!text) return 75;
   if (text.includes('Under')) return 25;
@@ -373,6 +392,10 @@ export default function ClientDashboard({ user, onLogout }) {
               <span>{q.icon}</span>{q.label}
             </button>
           ))}
+          <button onClick={openWalkthrough}
+            style={{ padding: '7px 16px', borderRadius: 20, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'Inter,sans-serif' }}>
+            🎓 Welcome Tour
+          </button>
         </div>
       </div>
 
@@ -449,7 +472,10 @@ export default function ClientDashboard({ user, onLogout }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.6fr', gap: 16 }}>
         <div>
-          <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 14 }}>Active Sequences</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace' }}>Active Sequences</div>
+            <WhatIsThis text="Sequences are automated email, SMS, and WhatsApp campaigns that fire based on customer actions — like abandoning a cart. Each one runs 24/7 and recovers revenue while you sleep." />
+          </div>
           {workflows.filter(w => w.status === 'active').length === 0 ? (
             <div style={{ background: '#0f1f35', border: '2px dashed rgba(255,255,255,0.07)', borderRadius: 14, padding: 40, textAlign: 'center' }}>
               <div style={{ fontSize: 28, marginBottom: 10 }}>⚡</div>
@@ -729,9 +755,12 @@ export default function ClientDashboard({ user, onLogout }) {
         </div>
       )}
 
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 4 }}>Performance</div>
-        <div style={{ fontSize: 22, fontWeight: 800, color: '#f0f4f8' }}>My Results</div>
+      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 4 }}>Performance</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: '#f0f4f8' }}>My Results</div>
+        </div>
+        <WhatIsThis text="My Results shows estimated revenue recovered through your sequences, email open rates, click rates, and enrollment counts. Revenue is calculated as completed enrollments × your average order value." />
       </div>
 
       {/* REVENUE HERO */}
@@ -937,10 +966,13 @@ export default function ClientDashboard({ user, onLogout }) {
         </div>
       )}
 
-      <div style={{ marginBottom: '24px' }}>
-        <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Automation</div>
-        <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Sequences</div>
-        <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>{workflows.filter(w => w.status === 'active').length} running · {workflows.length} total · full step-by-step visibility into what your AI team is sending</div>
+      <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Automation</div>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Sequences</div>
+          <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>{workflows.filter(w => w.status === 'active').length} running · {workflows.length} total · full step-by-step visibility into what your AI team is sending</div>
+        </div>
+        <WhatIsThis text="Sequences are automated campaigns written by Mahdi in your brand voice. They fire automatically based on customer actions. Each one must be approved before going live — check My Approvals to review them." dark />
       </div>
 
       {/* Fix 1: WhatsApp pending banner */}
@@ -1503,10 +1535,13 @@ export default function ClientDashboard({ user, onLogout }) {
 
     return (
       <div>
-        <div style={{ marginBottom: '24px' }}>
-          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Pending Review</div>
-          <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Approvals</div>
-          <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>Review and approve content before it goes live to your customers</div>
+        <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Pending Review</div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Approvals</div>
+            <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>Review and approve content before it goes live to your customers</div>
+          </div>
+          <WhatIsThis text="Before any sequence goes live to your customers, it appears here for your review. Read the content, edit if needed, then approve with one click. Rejecting sends it back to the AI with your feedback." dark />
         </div>
 
         {loadingA ? (
@@ -1691,10 +1726,13 @@ export default function ClientDashboard({ user, onLogout }) {
 
     return (
       <div>
-        <div style={{ marginBottom: '24px' }}>
-          <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Monthly Performance</div>
-          <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Reports</div>
-          <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>Your monthly performance reports, written by Zainab</div>
+        <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Monthly Performance</div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Reports</div>
+            <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>Your monthly performance reports, written by Zainab</div>
+          </div>
+          <WhatIsThis text="Zainab generates a full monthly report each month covering emails sent, SMS sent, contacts added, which sequences performed best, and personalised recommendations for next month." dark />
         </div>
 
         {loadingR ? (

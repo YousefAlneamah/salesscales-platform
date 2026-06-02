@@ -3334,47 +3334,115 @@ app.get('/team/performance', async (req, res) => {
 });
 
 // ─── APPROVAL ENDPOINTS ──────────────────────────────────
+const notifyAfterSubmit = (data, title) => {
+  if (!data) return;
+  (async () => {
+    try {
+      let clientName = null;
+      if (data.client_id) {
+        const { data: cl } = await supabase.from('clients').select('name').eq('id', data.client_id).maybeSingle();
+        clientName = cl?.name || null;
+      }
+      await sendApprovalSlackNotification(data, clientName);
+    } catch {}
+  })();
+  if (data.client_id) {
+    notifyClientUserBranded(
+      data.client_id,
+      'New content is ready for your review',
+      `<p>Your AI team has prepared new content — <strong>${title}</strong> — that is ready for your review.</p><p>Log in to your Sales Scales portal to review and approve it.</p>`
+    ).catch(() => {});
+    createClientNotification(data.client_id, 'New approval pending', `"${title}" is ready for your review`, 'approval').catch(() => {});
+  }
+};
+
 app.post('/approvals/submit', async (req, res) => {
   const { type, title, content, metadata, from_member, client_id } = req.body;
   if (!type || !title) return res.status(400).json({ error: 'type and title are required' });
   try {
     const priority = inferApprovalPriority(type, title, from_member);
+    const isSequence = ['email_sequence', 'sms_sequence', 'whatsapp_sequence'].includes(type);
+    const isUrgent = priority === 'urgent' || /refund|return|complaint|dispute|money.?back|brand.?deal/i.test(title + ' ' + (content || ''));
+
+    // ─── Auto-approval logic (Fix 1) ──────────────────────
+    if (isSequence && !isUrgent) {
+      const [confidenceScore, autoEnabled] = await Promise.all([
+        calculateConfidenceScore(type, title, content, metadata, from_member),
+        getAutoApproveEnabled(),
+      ]);
+
+      if (autoEnabled && confidenceScore >= 9) {
+        // High confidence → activate workflow directly, log as auto_approved
+        const meta = metadata || {};
+        const steps = Array.isArray(meta.steps) ? meta.steps : [];
+        const { data: wf } = await supabase.from('workflows').insert([{
+          name: title,
+          client_id: client_id || null,
+          trigger_type: meta.trigger_type || 'manual',
+          status: 'active',
+          enrolled_count: 0,
+        }]).select().single();
+        if (wf && steps.length > 0) {
+          await supabase.from('workflow_steps').insert(
+            steps.map((s, i) => ({
+              workflow_id: wf.id, step_order: i,
+              step_type: s.step_type || (type === 'sms_sequence' ? 'sms' : 'email'),
+              content: s.content || '', subject: s.subject || null, wait_hours: s.wait_hours || 0,
+            }))
+          );
+        }
+        const { data: autoData } = await supabase.from('approvals').insert([{
+          type, title, content: content || '',
+          metadata: { ...(metadata || {}), workflow_id: wf?.id },
+          from_member: from_member || 'system',
+          client_id: client_id || null,
+          priority, status: 'auto_approved',
+          confidence_score: confidenceScore, auto_approved: true,
+          created_at: new Date().toISOString()
+        }]).select().single();
+        console.log(`[AutoApprove] "${title}" — score ${confidenceScore}/10`);
+        return res.json({ approval: autoData, auto_approved: true, confidence_score: confidenceScore });
+      }
+
+      if (confidenceScore < 7) {
+        // Low confidence → Mahdi rewrites before submitting
+        try {
+          const pseudoApproval = { type, title, content, metadata, client_id: client_id || null, from_member, priority };
+          const revised = await reviseApprovalWithMahdi(pseudoApproval, 'Content scored below quality threshold — improve clarity, brand voice, and persuasiveness.');
+          if (revised) return res.json({ approval: revised, rewritten: true, original_score: confidenceScore });
+        } catch (rewriteErr) {
+          console.error('Auto-rewrite failed:', rewriteErr.message);
+        }
+      }
+
+      // Score 7–8 or rewrite failed → submit normally with score
+      const { data, error } = await supabase.from('approvals').insert([{
+        type, title, content: content || '',
+        metadata: metadata || {},
+        from_member: from_member || 'system',
+        client_id: client_id || null,
+        priority, status: 'pending',
+        confidence_score: confidenceScore,
+        created_at: new Date().toISOString()
+      }]).select().single();
+      if (error) throw error;
+      onUrgentApproval(data);
+      notifyAfterSubmit(data, title);
+      return res.json({ approval: data, confidence_score: confidenceScore });
+    }
+
+    // ─── Non-sequence types: normal submit ─────────────────
     const { data, error } = await supabase.from('approvals').insert([{
       type, title, content: content || '',
       metadata: metadata || {},
       from_member: from_member || 'system',
       client_id: client_id || null,
-      priority,
-      status: 'pending',
+      priority, status: 'pending',
       created_at: new Date().toISOString()
     }]).select().single();
     if (error) throw error;
     onUrgentApproval(data);
-    // Fix 4: Slack notification on every approval submission
-    (async () => {
-      try {
-        let clientName = null;
-        if (data?.client_id) {
-          const { data: cl } = await supabase.from('clients').select('name').eq('id', data.client_id).maybeSingle();
-          clientName = cl?.name || null;
-        }
-        await sendApprovalSlackNotification(data, clientName);
-      } catch {}
-    })();
-    if (data?.client_id) {
-      // Fix 3: use branded email template for client notifications
-      notifyClientUserBranded(
-        data.client_id,
-        'New content is ready for your review',
-        `<p>Your AI team has prepared new content — <strong>${title}</strong> — that is ready for your review.</p><p>Log in to your Sales Scales portal to review and approve it.</p>`
-      ).catch(() => {});
-      createClientNotification(
-        data.client_id,
-        'New approval pending',
-        `"${title}" is ready for your review`,
-        'approval'
-      ).catch(() => {});
-    }
+    notifyAfterSubmit(data, title);
     res.json({ approval: data });
   } catch (e) {
     console.error('/approvals/submit error:', e.message);
@@ -3385,6 +3453,39 @@ app.post('/approvals/submit', async (req, res) => {
 // Mahdi rewrites a rejected approval's content incorporating the owner's feedback,
 // then submits it as a fresh pending approval titled "Revised: ...".
 const MAHDI_REVISE_SYS = `You are Mahdi, the Marketing and Content AI at Sales Scales. You are a world class copywriter. Write like a real human, not a marketing robot. Use short sentences and generous line breaks. Never use exclamation marks or phrases like "we understand", "we know how you feel", "don't miss out", or "limited time". Write the way a thoughtful friend who works at the brand would write. You are Mahdi — never identify as anyone else or mention Claude.`;
+
+// ─── FIX 1: AUTO-APPROVAL HELPERS ────────────────────────
+const getAutoApproveEnabled = async () => {
+  try {
+    const { data } = await supabase.from('platform_settings').select('value').eq('key', 'auto_approve_enabled').maybeSingle();
+    return data?.value !== 'false';
+  } catch { return true; }
+};
+
+const calculateConfidenceScore = async (type, title, content, metadata, fromMember) => {
+  try {
+    const preview = (content || '').slice(0, 500);
+    const stepsPreview = Array.isArray(metadata?.steps)
+      ? metadata.steps.filter(s => s.step_type !== 'wait').slice(0, 3)
+          .map(s => `[${s.step_type}] ${s.subject || ''} ${(s.content || '').slice(0, 120)}`).join('\n')
+      : '';
+    const raw = await axios.post(
+      'https://api.anthropic.com/v1/messages',
+      {
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 30,
+        system: 'You are a content quality reviewer for a professional ecommerce marketing agency. Score content 1–10: quality, brand safety, professionalism. 10 = publication-ready. 1 = low quality or unsafe. Return ONLY a single integer.',
+        messages: [{ role: 'user', content: `Type: ${type}\nTitle: ${title}\nAuthor: ${fromMember}\n\nContent:\n${preview || stepsPreview}` }]
+      },
+      { headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' } }
+    );
+    const score = parseInt((raw.data.content[0].text.trim().match(/\d+/) || ['7'])[0], 10);
+    return Math.min(10, Math.max(1, score));
+  } catch (e) {
+    console.log('Confidence score skipped:', e.message);
+    return 7;
+  }
+};
 
 const reviseApprovalWithMahdi = async (approval, feedback) => {
   const meta = approval.metadata || {};
@@ -4207,6 +4308,147 @@ app.post('/test/trigger-webhook', async (req, res) => {
   }
 });
 
+// ─── FIX 2: OPT-IN SEQUENCE WEBHOOK ─────────────────────
+// POST /shopify/optin — creates a contact from a web form opt-in and enrolls in opt_in_sequence
+app.post('/shopify/optin', async (req, res) => {
+  const { email, client_id, first_name, last_name } = req.body;
+  if (!email || !client_id) return res.status(400).json({ error: 'email and client_id required' });
+  try {
+    const { contact } = await upsertContact({
+      first_name: first_name || email.split('@')[0],
+      last_name: last_name || '',
+      email,
+      source: 'Opt-in',
+      channel: 'Email',
+      pipeline_stage: 'New Lead',
+      client_id,
+    });
+
+    const { data: wfs } = await supabase.from('workflows')
+      .select('*').eq('client_id', client_id).eq('trigger_type', 'opt_in').eq('status', 'active');
+    if (!wfs || wfs.length === 0) {
+      return res.json({ ok: true, contact_id: contact.id, enrolled: false, reason: 'No active opt_in workflow found' });
+    }
+    const wf = wfs[0];
+    const enrollment = await enrollContactInWorkflow(wf, contact, client_id);
+    res.json({ ok: true, contact_id: contact.id, enrollment_id: enrollment?.id, workflow: wf.name });
+  } catch (e) {
+    console.error('/shopify/optin error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── FIX 4: CREATE DEMO CLIENT ───────────────────────────
+// POST /clients/create-demo — creates a pre-filled demo account for recording demos
+app.post('/clients/create-demo', async (req, res) => {
+  try {
+    const demoEmail = `demo_${Date.now()}@demostore.com`;
+    const demoPassword = 'DemoStore2025!';
+    const demoPasswordHash = await bcrypt.hash(demoPassword, 10);
+
+    // Create demo client
+    const { data: client, error: clientErr } = await supabase.from('clients').insert([{
+      name: 'Demo Store',
+      business_type: 'Ecommerce',
+      niche: 'Health & Wellness',
+      tier: 'Growth',
+      status: 'active',
+    }]).select().single();
+    if (clientErr) throw clientErr;
+
+    // Create demo login
+    const { data: clientUser, error: userErr } = await supabase.from('client_users').insert([{
+      name: 'Demo Owner',
+      email: demoEmail,
+      password: demoPasswordHash,
+      client_id: client.id,
+    }]).select('id, name, email, client_id').single();
+    if (userErr) throw userErr;
+
+    // Sample contacts
+    const contactData = [
+      { first_name: 'Emma', last_name: 'Johnson', email: `emma_${Date.now()}@example.com`, phone: '+15551230001', source: 'Shopify', channel: 'Email', pipeline_stage: 'Customer', client_id: client.id },
+      { first_name: 'Liam', last_name: 'Smith',   email: `liam_${Date.now()}@example.com`, phone: '+15551230002', source: 'Shopify', channel: 'Email', pipeline_stage: 'Lead', client_id: client.id },
+      { first_name: 'Sophia', last_name: 'Davis', email: `sophia_${Date.now()}@example.com`, phone: '+15551230003', source: 'Opt-in', channel: 'SMS', pipeline_stage: 'New Lead', client_id: client.id },
+    ];
+    const { data: contacts } = await supabase.from('contacts').insert(contactData.map(c => ({ ...c, last_activity: new Date().toISOString() }))).select();
+
+    // Sample workflow (cart recovery, pre-approved active)
+    const { data: workflow } = await supabase.from('workflows').insert([{
+      name: 'Cart Recovery — Demo Store',
+      client_id: client.id,
+      trigger_type: 'cart_abandoned',
+      status: 'active',
+      enrolled_count: 47,
+    }]).select().single();
+
+    // Sample workflow steps
+    if (workflow) {
+      await supabase.from('workflow_steps').insert([
+        { workflow_id: workflow.id, step_order: 0, step_type: 'email', subject: 'You left something behind', content: 'Hi {{first_name}}, your cart is waiting for you. Complete your order today and get free shipping.', wait_hours: 0 },
+        { workflow_id: workflow.id, step_order: 1, step_type: 'wait', content: '', wait_hours: 24 },
+        { workflow_id: workflow.id, step_order: 2, step_type: 'email', subject: 'Still thinking it over?', content: 'Hi {{first_name}}, your items are almost gone. We saved your cart — but stock is limited.', wait_hours: 0 },
+        { workflow_id: workflow.id, step_order: 3, step_type: 'wait', content: '', wait_hours: 48 },
+        { workflow_id: workflow.id, step_order: 4, step_type: 'sms', content: 'Hi {{first_name}}! One last reminder — your cart expires tonight. Reply SHOP to complete your order.', wait_hours: 0 },
+      ]);
+
+      // Sample enrollments to show revenue stats
+      if (contacts && contacts.length > 0) {
+        const now = new Date().toISOString();
+        await supabase.from('workflow_enrollments').insert(
+          contacts.map(c => ({
+            workflow_id: workflow.id, contact_id: c.id, client_id: client.id,
+            status: 'completed', current_step: 5,
+            enrolled_at: new Date(Date.now() - 7*86400000).toISOString(),
+            next_step_at: now, completed_at: now,
+          }))
+        );
+      }
+    }
+
+    // Sample messages to populate inbox
+    if (contacts && contacts.length > 0) {
+      await supabase.from('messages').insert([
+        { client_id: client.id, contact_id: contacts[0].id, channel: 'Email', direction: 'outbound', sender_name: 'Demo Store', content: 'You left something behind — complete your order today', status: 'sent', created_at: new Date().toISOString() },
+        { client_id: client.id, contact_id: contacts[1].id, channel: 'SMS',   direction: 'outbound', sender_name: 'Demo Store', content: 'Hi Liam! Your cart is waiting. Reply SHOP to complete.', status: 'sent', created_at: new Date().toISOString() },
+        { client_id: client.id, contact_id: contacts[0].id, channel: 'Email', direction: 'inbound',  sender_name: 'Emma Johnson', content: 'Just purchased! The checkout was so smooth.', status: 'unread', created_at: new Date().toISOString() },
+      ]);
+    }
+
+    // Pre-fill onboarding as completed
+    await supabase.from('client_onboarding').upsert([{
+      client_id: client.id,
+      store_url: 'demostore.myshopify.com',
+      monthly_revenue: '$25,000–$50,000',
+      average_order_value: '$75–$150',
+      main_products: 'Supplements, wellness bundles, protein shakes',
+      brand_voice: 'Friendly, science-backed, motivating',
+      target_customer: 'Health-conscious adults aged 25–45',
+      biggest_challenge: 'Cart abandonment and repeat purchase rate',
+      current_tools: ['Klaviyo', 'Shopify'],
+      main_competitors: 'GNC, Thorne, Ritual',
+      goals: 'Recover 30% of abandoned carts and increase LTV by 40%',
+      completed_at: new Date().toISOString(),
+    }], { onConflict: 'client_id' });
+
+    res.json({
+      ok: true,
+      client_id: client.id,
+      demo_email: demoEmail,
+      demo_password: demoPassword,
+      client_name: client.name,
+      stats: {
+        contacts_enrolled: 47,
+        revenue_recovered: 2340,
+        active_sequences: 1,
+      },
+    });
+  } catch (e) {
+    console.error('/clients/create-demo error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── CLIENT ONBOARDING ───────────────────────────────────
 app.post('/clients/onboard', async (req, res) => {
   const { name, email, password, business_type, niche, tier } = req.body;
@@ -4355,6 +4597,29 @@ app.post('/clients/onboard', async (req, res) => {
     } catch (verifyErr) {
       console.error('Verification email failed (non-fatal):', verifyErr.message);
     }
+
+    // Fix 3: Auto-provision dedicated Twilio phone number for the new client
+    (async () => {
+      try {
+        if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) return;
+        const { data: existing } = await supabase.from('clients').select('twilio_subaccount_sid').eq('id', client.id).maybeSingle();
+        if (existing?.twilio_subaccount_sid) return;
+        const masterClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        const subAccount = await masterClient.api.accounts.create({ friendlyName: `Sales Scales — ${name}` });
+        const subClient = twilio(subAccount.sid, subAccount.authToken);
+        const available = await subClient.availablePhoneNumbers('US').local.list({ smsEnabled: true, limit: 1 });
+        if (!available || available.length === 0) return;
+        const purchased = await subClient.incomingPhoneNumbers.create({ phoneNumber: available[0].phoneNumber });
+        await supabase.from('clients').update({
+          twilio_subaccount_sid: subAccount.sid,
+          twilio_subaccount_token: subAccount.authToken,
+          twilio_phone_number: purchased.phoneNumber,
+        }).eq('id', client.id);
+        console.log(`[Twilio] Provisioned ${purchased.phoneNumber} for ${name}`);
+      } catch (twErr) {
+        console.error('[Twilio] Auto-provision failed (non-fatal):', twErr.message);
+      }
+    })();
 
     console.log(`Client onboarded: ${name} (${email}) — client_id ${client.id}`);
     res.json({ ok: true, client, client_user: clientUser });

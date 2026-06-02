@@ -165,10 +165,11 @@ export default function Approvals() {
       </div>
 
       {/* STATS */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 14, marginBottom: 20 }}>
         {[
           { label: 'Pending Review', value: approvals.filter(a => a.status === 'pending').length, sub: 'waiting for you', color: '#f59e0b' },
           { label: 'Sequences', value: approvals.filter(a => a.status === 'pending' && (a.type === 'email_sequence' || a.type === 'sms_sequence')).length, sub: 'ready to activate', color: '#60a5fa' },
+          { label: 'Auto-Approved', value: approvals.filter(a => a.status === 'auto_approved').length, sub: 'score 9–10 · live', color: '#a78bfa' },
           { label: 'Approved', value: approvals.filter(a => a.status === 'approved').length, sub: 'actions executed', color: '#34d399' },
           { label: 'Rejected', value: approvals.filter(a => a.status === 'rejected').length, sub: 'AI feedback logged', color: '#8896a8' },
         ].map(stat => (
@@ -182,10 +183,10 @@ export default function Approvals() {
 
       {/* FILTERS */}
       <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-        {['pending', 'approved', 'rejected', 'All'].map(s => (
+        {['pending', 'approved', 'auto_approved', 'rejected', 'All'].map(s => (
           <button key={s} onClick={() => setFilterStatus(s)}
-            style={{ padding: '6px 14px', borderRadius: '20px', border: '1px solid', fontSize: '11px', cursor: 'pointer', fontWeight: filterStatus === s ? 600 : 400, background: filterStatus === s ? '#0a1628' : 'white', color: filterStatus === s ? 'white' : '#8896a8', borderColor: filterStatus === s ? '#0a1628' : '#e4e9f0' }}>
-            {s === 'All' ? 'All Status' : s.charAt(0).toUpperCase() + s.slice(1)}
+            style={{ padding: '6px 14px', borderRadius: '20px', border: '1px solid', fontSize: '11px', cursor: 'pointer', fontWeight: filterStatus === s ? 600 : 400, background: filterStatus === s ? (s === 'auto_approved' ? '#7c3aed' : '#0a1628') : 'white', color: filterStatus === s ? 'white' : '#8896a8', borderColor: filterStatus === s ? (s === 'auto_approved' ? '#7c3aed' : '#0a1628') : '#e4e9f0' }}>
+            {s === 'All' ? 'All Status' : s === 'auto_approved' ? '⚡ Auto-Approved' : s.charAt(0).toUpperCase() + s.slice(1)}
           </button>
         ))}
         <div style={{ width: '1px', height: '20px', background: '#e4e9f0', margin: '0 2px' }} />
@@ -280,13 +281,20 @@ export default function Approvals() {
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <div style={{ fontSize: 10, color: '#4a5568' }}>{getClientName(approval.client_id)}</div>
                       {/* Status badge */}
-                      <span style={{ fontSize: 9, padding: '3px 9px', borderRadius: 20, fontWeight: 700,
-                        background: approval.status === 'approved' ? 'rgba(16,185,129,0.12)' : approval.status === 'rejected' ? 'rgba(239,68,68,0.12)' : 'rgba(217,119,6,0.12)',
-                        color: approval.status === 'approved' ? '#34d399' : approval.status === 'rejected' ? '#f87171' : '#f59e0b',
-                        border: `1px solid ${approval.status === 'approved' ? 'rgba(16,185,129,0.25)' : approval.status === 'rejected' ? 'rgba(239,68,68,0.25)' : 'rgba(217,119,6,0.25)'}`,
-                      }}>
-                        {approval.status.charAt(0).toUpperCase() + approval.status.slice(1)}
-                      </span>
+                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                        {approval.confidence_score != null && (
+                          <span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 20, fontWeight: 700, background: approval.confidence_score >= 9 ? 'rgba(124,58,237,0.15)' : approval.confidence_score >= 7 ? 'rgba(59,130,246,0.15)' : 'rgba(239,68,68,0.15)', color: approval.confidence_score >= 9 ? '#a78bfa' : approval.confidence_score >= 7 ? '#60a5fa' : '#f87171', border: `1px solid ${approval.confidence_score >= 9 ? 'rgba(124,58,237,0.3)' : 'rgba(59,130,246,0.3)'}` }}>
+                            {approval.confidence_score}/10
+                          </span>
+                        )}
+                        <span style={{ fontSize: 9, padding: '3px 9px', borderRadius: 20, fontWeight: 700,
+                          background: approval.status === 'auto_approved' ? 'rgba(124,58,237,0.15)' : approval.status === 'approved' ? 'rgba(16,185,129,0.12)' : approval.status === 'rejected' ? 'rgba(239,68,68,0.12)' : 'rgba(217,119,6,0.12)',
+                          color: approval.status === 'auto_approved' ? '#a78bfa' : approval.status === 'approved' ? '#34d399' : approval.status === 'rejected' ? '#f87171' : '#f59e0b',
+                          border: `1px solid ${approval.status === 'auto_approved' ? 'rgba(124,58,237,0.3)' : approval.status === 'approved' ? 'rgba(16,185,129,0.25)' : approval.status === 'rejected' ? 'rgba(239,68,68,0.25)' : 'rgba(217,119,6,0.25)'}`,
+                        }}>
+                          {approval.status === 'auto_approved' ? '⚡ Auto-Approved' : approval.status.charAt(0).toUpperCase() + approval.status.slice(1)}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Approve / Reject buttons */}

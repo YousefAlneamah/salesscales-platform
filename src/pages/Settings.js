@@ -124,6 +124,48 @@ function TwoFASection({ inputStyle, labelStyle, handleSave }) {
   );
 }
 
+function AutoApproveToggle({ apiBase }) {
+  const [enabled, setEnabled] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [loaded, setLoaded] = React.useState(false);
+
+  React.useEffect(() => {
+    axios.get(`${apiBase}/settings/platform`)
+      .then(r => {
+        const v = r.data.settings?.auto_approve_enabled;
+        setEnabled(v !== 'false');
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, [apiBase]);
+
+  const toggle = async () => {
+    setSaving(true);
+    const next = !enabled;
+    try {
+      await axios.put(`${apiBase}/settings/platform`, { settings: { auto_approve_enabled: String(next) } });
+      setEnabled(next);
+    } catch { /* non-critical */ }
+    setSaving(false);
+  };
+
+  if (!loaded) return null;
+  return (
+    <div style={{ background: '#f8fafc', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div>
+        <div style={{ fontSize: '12px', fontWeight: 700, color: '#0a1628', marginBottom: '2px' }}>Auto-Approval</div>
+        <div style={{ fontSize: '11px', color: '#8896a8', lineHeight: 1.5 }}>
+          When enabled, email/SMS/WhatsApp sequences scoring 9–10 confidence are automatically approved and activated without owner review. Urgent content (refunds, complaints, brand deals) always requires manual review.
+        </div>
+      </div>
+      <button onClick={toggle} disabled={saving}
+        style={{ marginLeft: '16px', flexShrink: 0, width: '44px', height: '24px', borderRadius: '12px', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', background: enabled ? '#10b981' : '#e4e9f0', position: 'relative', transition: 'background 0.2s' }}>
+        <span style={{ position: 'absolute', top: '3px', left: enabled ? '22px' : '3px', width: '18px', height: '18px', borderRadius: '50%', background: 'white', transition: 'left 0.2s', display: 'block', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+      </button>
+    </div>
+  );
+}
+
 export default function Settings() {
   const [activeTab, setActiveTab] = useState('profile');
   const [saved, setSaved] = useState(false);
@@ -556,8 +598,12 @@ export default function Settings() {
           {/* AI TEAM */}
           {activeTab === 'ai' && (
             <div>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628', marginBottom: '20px' }}>AI Team Configuration</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0a1628', marginBottom: '16px' }}>AI Team Configuration</div>
+
+              {/* Auto-approve toggle */}
+              <AutoApproveToggle apiBase={API_BASE} />
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '20px' }}>
                 {aiTeam.map(ai => (
                   <div key={ai.name} style={{ background: '#f8fafc', borderRadius: '10px', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '14px', border: '1px solid #f0f3f8' }}>
                     <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', color: '#c9a84c', fontWeight: 700, flexShrink: 0 }}>
