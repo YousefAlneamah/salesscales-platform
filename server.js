@@ -7383,6 +7383,105 @@ app.get('/contracts/generate', async (req, res) => {
   }
 });
 
+// ─── CLIENT TEAM MANAGEMENT ──────────────────────────────
+const VALID_TEAM_ROLES = ['admin', 'viewer', 'approver'];
+
+app.post('/client-team/invite', async (req, res) => {
+  const { client_id, email, name, role } = req.body;
+  if (!client_id || !email || !name) return res.status(400).json({ error: 'client_id, email, and name required' });
+  const memberRole = VALID_TEAM_ROLES.includes(role) ? role : 'viewer';
+  try {
+    const { data: existing } = await supabase.from('client_users').select('id').eq('email', email.toLowerCase()).maybeSingle();
+    if (existing) return res.status(409).json({ error: 'A user with this email already exists' });
+
+    const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    const tempPassword = Array.from({ length: 10 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    const passwordHash = await bcrypt.hash(tempPassword, 10);
+
+    const { data: newUser, error: insertErr } = await supabase.from('client_users').insert([{
+      name, email: email.toLowerCase(), password: passwordHash, client_id, role: memberRole,
+    }]).select('id, name, email, client_id, role').single();
+    if (insertErr) throw insertErr;
+
+    const { data: client } = await supabase.from('clients').select('name').eq('id', client_id).maybeSingle();
+    const storeName = client?.name || 'Sales Scales';
+    const roleLabel = memberRole.charAt(0).toUpperCase() + memberRole.slice(1);
+    const roleDesc = memberRole === 'admin' ? 'full access including settings and approvals'
+      : memberRole === 'approver' ? 'can review and approve content, view sequences and reports'
+      : 'read-only access to the dashboard and reports';
+
+    sgMail.send({
+      to: email,
+      from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'Sales Scales' },
+      subject: `You've been invited to ${storeName} on Sales Scales`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f0f3f8;padding:32px 16px">
+        <div style="background:#0a1628;padding:28px 32px;border-radius:12px 12px 0 0;text-align:center">
+          <div style="color:#c9a84c;font-size:11px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase">Sales Scales</div>
+          <div style="color:white;font-size:18px;font-weight:700;margin-top:8px">You've been invited</div>
+        </div>
+        <div style="background:#fff;border:1px solid #e4e9f0;border-top:none;border-radius:0 0 12px 12px;padding:28px 32px">
+          <p style="color:#0a1628;font-size:14px;line-height:1.7;margin:0 0 16px">Hi ${name},</p>
+          <p style="color:#4a5568;font-size:14px;line-height:1.7;margin:0 0 16px">You've been added to <strong>${storeName}</strong>'s Sales Scales portal as a <strong>${roleLabel}</strong> — ${roleDesc}.</p>
+          <div style="background:#f0f3f8;border-radius:8px;padding:18px 20px;margin:0 0 20px">
+            <div style="font-size:12px;color:#4a5568;margin-bottom:6px"><strong>Login URL:</strong> <a href="http://localhost:3000" style="color:#c9a84c">localhost:3000</a></div>
+            <div style="font-size:12px;color:#4a5568;margin-bottom:6px"><strong>Email:</strong> ${email.toLowerCase()}</div>
+            <div style="font-size:12px;color:#4a5568"><strong>Temporary password:</strong> <span style="font-family:monospace;background:#e4e9f0;padding:2px 6px;border-radius:4px">${tempPassword}</span></div>
+          </div>
+          <p style="color:#8896a8;font-size:12px;margin:0">Please change your password after your first login.</p>
+        </div>
+      </div>`,
+    }).catch(e => console.error('Team invite email failed:', e.message));
+
+    res.json({ ok: true, member: newUser, temp_password: tempPassword });
+  } catch (e) {
+    console.error('/client-team/invite error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/client-team/members', async (req, res) => {
+  const { client_id } = req.query;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+  try {
+    const { data, error } = await supabase.from('client_users')
+      .select('id, name, email, role, last_login, created_at')
+      .eq('client_id', client_id)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    res.json({ members: (data || []).map(m => ({ ...m, role: m.role || 'admin' })) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/client-team/remove', async (req, res) => {
+  const { client_user_id, client_id } = req.body;
+  if (!client_user_id || !client_id) return res.status(400).json({ error: 'client_user_id and client_id required' });
+  try {
+    const { error } = await supabase.from('client_users')
+      .delete().eq('id', client_user_id).eq('client_id', client_id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/client-team/update-role', async (req, res) => {
+  const { client_user_id, client_id, role } = req.body;
+  if (!client_user_id || !client_id || !role) return res.status(400).json({ error: 'client_user_id, client_id, and role required' });
+  if (!VALID_TEAM_ROLES.includes(role)) return res.status(400).json({ error: 'role must be admin, viewer, or approver' });
+  try {
+    const { data, error } = await supabase.from('client_users')
+      .update({ role }).eq('id', client_user_id).eq('client_id', client_id)
+      .select('id, name, email, role').single();
+    if (error) throw error;
+    res.json({ ok: true, member: data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── GLOBAL ERROR HANDLER ─────────────────────────────────
 app.use((err, req, res, next) => {
   const endpoint = `${req.method} ${req.path}`;

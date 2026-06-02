@@ -57,6 +57,7 @@ export default function Login({ onLogin }) {
         clientId: clientData.client_id,
         clientName: clientData.client_name,
         tier: clientData.tier,
+        teamRole: clientData.team_role || 'admin',
       };
       if (clientData.verified === false) {
         setPendingUser(user);

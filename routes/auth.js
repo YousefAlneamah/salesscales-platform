@@ -210,7 +210,7 @@ module.exports = ({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }) =>
     try {
       const { data: clientUser } = await supabase
         .from('client_users')
-        .select('id, name, email, client_id, password, verified')
+        .select('id, name, email, client_id, password, verified, role')
         .eq('email', email.toLowerCase())
         .maybeSingle();
 
@@ -240,6 +240,7 @@ module.exports = ({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }) =>
         client_name: client?.name || 'Your Store',
         tier: client?.tier || 'starter',
         verified: clientUser.verified === true,
+        team_role: clientUser.role || 'admin',
       });
     } catch (e) {
       console.error('Client login error:', e.message);

@@ -291,7 +291,20 @@ export default function ClientDashboard({ user, onLogout }) {
   const channelIcon = (ch) => ({ Email: '✉', SMS: '💬', WhatsApp: '📱', Instagram: '📸', Facebook: '👥' }[ch] || '💌');
   const stepTypeIcon = (t) => ({ email: '✉', sms: '💬', whatsapp: '📱', wait: '⏱', tag: '🏷', pipeline: '🎯', notify: '🔔' }[t] || '·');
 
-  const navItems = [
+  // ─── Role-based access control ───────────────────────────
+  const teamRole   = user.teamRole || 'admin';
+  const canApprove = teamRole === 'admin' || teamRole === 'approver';
+  const canSettings = teamRole === 'admin';
+  const canInvite   = teamRole === 'admin';
+
+  const ROLE_PAGES = {
+    admin:    null, // all pages
+    approver: new Set(['dashboard','results','sequences','activity','approvals','messages','reports','help']),
+    viewer:   new Set(['dashboard','results','reports','help']),
+  };
+  const allowedPages = ROLE_PAGES[teamRole] || null;
+
+  const allNavItems = [
     { id: 'dashboard', label: t('dashboard', lang), icon: '▦' },
     { id: 'results', label: t('myResults', lang), icon: '📈' },
     { id: 'sequences', label: t('sequences', lang), icon: '⚡' },
@@ -307,6 +320,7 @@ export default function ClientDashboard({ user, onLogout }) {
     { id: 'help', label: t('help', lang), icon: '❔' },
     { id: 'settings', label: t('settings', lang), icon: '⚙' },
   ];
+  const navItems = allowedPages ? allNavItems.filter(n => allowedPages.has(n.id)) : allNavItems;
 
   const pageTitles = {
     dashboard: 'Dashboard',
@@ -325,7 +339,20 @@ export default function ClientDashboard({ user, onLogout }) {
     settings: 'Settings',
   };
 
+  const AccessDenied = ({ page }) => (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 24px', textAlign: 'center' }}>
+      <div style={{ fontSize: 40, marginBottom: 16 }}>🔒</div>
+      <div style={{ fontSize: 18, fontWeight: 700, color: '#f0f4f8', marginBottom: 8 }}>Access Restricted</div>
+      <div style={{ fontSize: 13, color: '#4a5568', maxWidth: 320 }}>
+        Your <strong>{teamRole}</strong> role does not include access to {page}. Contact your account admin to update your permissions.
+      </div>
+    </div>
+  );
+
   const renderPage = () => {
+    if (allowedPages && !allowedPages.has(currentPage) && currentPage !== 'dashboard') {
+      return <AccessDenied page={currentPage} />;
+    }
     switch (currentPage) {
       case 'dashboard': return <ClientHome />;
       case 'results': return <ClientResults />;
@@ -1603,10 +1630,16 @@ export default function ClientDashboard({ user, onLogout }) {
                   <textarea value={feedback} onChange={e => setFeedback(e.target.value)} placeholder="Optional: describe any changes you'd like (required if requesting changes)"
                     style={{ width: '100%', minHeight: '64px', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: '#0a1628', fontFamily: 'DM Sans, sans-serif', resize: 'vertical', boxSizing: 'border-box', marginBottom: '12px' }} />
                   <div style={{ display: 'flex', gap: '10px' }}>
-                    <button disabled={busy} onClick={() => act(selected, 'approve')}
-                      style={{ flex: 1, padding: '11px', background: busy ? '#e4e9f0' : '#10b981', color: busy ? '#8896a8' : 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
-                      {busy ? 'Working...' : editing ? 'Save & Go Live' : 'Approve & Go Live'}
-                    </button>
+                    {canApprove ? (
+                      <button disabled={busy} onClick={() => act(selected, 'approve')}
+                        style={{ flex: 1, padding: '11px', background: busy ? '#e4e9f0' : '#10b981', color: busy ? '#8896a8' : 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                        {busy ? 'Working...' : editing ? 'Save & Go Live' : 'Approve & Go Live'}
+                      </button>
+                    ) : (
+                      <div style={{ flex: 1, padding: '11px', background: '#f8fafc', border: '1px solid #e4e9f0', borderRadius: '8px', fontSize: '12px', color: '#8896a8', textAlign: 'center' }}>
+                        Your role (Viewer) cannot approve content
+                      </div>
+                    )}
                     {editing ? (
                       <button disabled={busy} onClick={() => { setEditing(false); setEditContent(''); }}
                         style={{ flex: 1, padding: '11px', background: 'white', color: '#64748b', border: '1px solid #e4e9f0', borderRadius: '8px', fontSize: '12px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
@@ -2051,6 +2084,13 @@ export default function ClientDashboard({ user, onLogout }) {
     const [billingLoading, setBillingLoading] = useState(true);
     const [subscribing, setSubscribing] = useState(null);
     const [upgradeMsg, setUpgradeMsg] = useState('');
+    const [members, setMembers] = useState([]);
+    const [loadingM, setLoadingM] = useState(true);
+    const [showInvite, setShowInvite] = useState(false);
+    const [inviteForm, setInviteForm] = useState({ name: '', email: '', role: 'viewer' });
+    const [inviting, setInviting] = useState(false);
+    const [inviteResult, setInviteResult] = useState(null);
+    const [removing, setRemoving] = useState(null);
 
     useEffect(() => {
       (async () => {
@@ -2077,6 +2117,50 @@ export default function ClientDashboard({ user, onLogout }) {
         .catch(() => setBilling(null))
         .finally(() => setBillingLoading(false));
     }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const loadMembers = () => {
+      setLoadingM(true);
+      axios.get(`${API_BASE}/client-team/members?client_id=${user.clientId}`)
+        .then(r => setMembers(r.data.members || []))
+        .catch(() => {})
+        .finally(() => setLoadingM(false));
+    };
+    useEffect(() => { loadMembers(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const inviteMember = async () => {
+      if (!inviteForm.name || !inviteForm.email) return;
+      setInviting(true);
+      try {
+        const r = await axios.post(`${API_BASE}/client-team/invite`, { ...inviteForm, client_id: user.clientId });
+        setInviteResult(r.data);
+        setInviteForm({ name: '', email: '', role: 'viewer' });
+        loadMembers();
+      } catch (e) {
+        alert(e.response?.data?.error || 'Failed to invite member');
+      }
+      setInviting(false);
+    };
+
+    const removeMember = async (memberId) => {
+      if (!window.confirm('Remove this team member?')) return;
+      setRemoving(memberId);
+      try {
+        await axios.delete(`${API_BASE}/client-team/remove`, { data: { client_user_id: memberId, client_id: user.clientId } });
+        setMembers(prev => prev.filter(m => m.id !== memberId));
+      } catch (e) {
+        alert(e.response?.data?.error || 'Failed to remove member');
+      }
+      setRemoving(null);
+    };
+
+    const updateRole = async (memberId, newRole) => {
+      try {
+        await axios.put(`${API_BASE}/client-team/update-role`, { client_user_id: memberId, client_id: user.clientId, role: newRole });
+        setMembers(prev => prev.map(m => m.id === memberId ? { ...m, role: newRole } : m));
+      } catch (e) {
+        alert(e.response?.data?.error || 'Failed to update role');
+      }
+    };
 
     const handleSubscribe = async (plan) => {
       setSubscribing(plan);
@@ -2396,6 +2480,124 @@ export default function ClientDashboard({ user, onLogout }) {
               </a>
             </div>
           </>
+        )}
+      </div>
+
+      {/* TEAM MEMBERS — admin only */}
+      <div style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(10,22,40,0.06)', marginTop: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+          <div>
+            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Team Access</div>
+            <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628' }}>Team Members</div>
+            <div style={{ fontSize: '11px', color: '#8896a8', marginTop: '2px' }}>Manage who can access this portal</div>
+          </div>
+          {canInvite && (
+            <button onClick={() => { setShowInvite(true); setInviteResult(null); }}
+              style={{ background: '#0a1628', color: '#c9a84c', border: 'none', borderRadius: '8px', padding: '9px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif', whiteSpace: 'nowrap' }}>
+              + Invite Member
+            </button>
+          )}
+        </div>
+
+        {!canSettings && (
+          <div style={{ background: '#fef9ec', border: '1px solid #f0e0b0', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: '#92400e', marginBottom: '16px' }}>
+            You have <strong>{teamRole}</strong> access. Contact an admin to manage team members.
+          </div>
+        )}
+
+        {/* Invite modal */}
+        {showInvite && canInvite && (
+          <div style={{ background: '#f8fafc', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '16px', marginBottom: '16px' }}>
+            {inviteResult ? (
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#059669', marginBottom: '8px' }}>✓ Invitation sent to {inviteResult.member?.email}</div>
+                <div style={{ background: '#f0f3f8', borderRadius: '8px', padding: '12px', fontFamily: 'DM Mono,monospace', fontSize: '12px', color: '#0a1628', marginBottom: '12px' }}>
+                  Temporary password: <strong>{inviteResult.temp_password}</strong>
+                </div>
+                <div style={{ fontSize: '11px', color: '#8896a8', marginBottom: '12px' }}>Share these credentials with your team member. They should change their password after first login.</div>
+                <button onClick={() => { setShowInvite(false); setInviteResult(null); }}
+                  style={{ background: '#0a1628', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>Done</button>
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '12px' }}>Invite Team Member</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 140px auto', gap: '8px', alignItems: 'end' }}>
+                  <div>
+                    <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '4px', fontWeight: 600 }}>Name</div>
+                    <input value={inviteForm.name} onChange={e => setInviteForm(f => ({ ...f, name: e.target.value }))} placeholder="Full name"
+                      style={{ width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '8px 10px', fontSize: '12px', color: '#0a1628', outline: 'none', boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '4px', fontWeight: 600 }}>Email</div>
+                    <input value={inviteForm.email} onChange={e => setInviteForm(f => ({ ...f, email: e.target.value }))} placeholder="email@example.com" type="email"
+                      style={{ width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '8px 10px', fontSize: '12px', color: '#0a1628', outline: 'none', boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '4px', fontWeight: 600 }}>Role</div>
+                    <select value={inviteForm.role} onChange={e => setInviteForm(f => ({ ...f, role: e.target.value }))}
+                      style={{ width: '100%', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '8px 10px', fontSize: '12px', color: '#0a1628', outline: 'none', background: 'white', boxSizing: 'border-box' }}>
+                      <option value="admin">Admin</option>
+                      <option value="approver">Approver</option>
+                      <option value="viewer">Viewer</option>
+                    </select>
+                  </div>
+                  <button onClick={inviteMember} disabled={inviting || !inviteForm.name || !inviteForm.email}
+                    style={{ background: inviting ? '#e4e9f0' : '#c9a84c', color: inviting ? '#8896a8' : '#0a1628', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '12px', fontWeight: 700, cursor: inviting ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}>
+                    {inviting ? 'Sending…' : 'Send Invite'}
+                  </button>
+                </div>
+                <div style={{ fontSize: '10px', color: '#8896a8', marginTop: '8px' }}>
+                  Admin — full access · Approver — can approve content · Viewer — read only
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Members list */}
+        {loadingM ? (
+          <div style={{ fontSize: '12px', color: '#8896a8', padding: '16px 0' }}>Loading members…</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {members.map(m => {
+              const roleBadge = {
+                admin:    { bg: 'rgba(201,168,76,0.1)',  color: '#c9a84c', border: 'rgba(201,168,76,0.3)',  label: 'Admin'    },
+                approver: { bg: 'rgba(59,130,246,0.1)',  color: '#3b82f6', border: 'rgba(59,130,246,0.3)', label: 'Approver' },
+                viewer:   { bg: 'rgba(136,150,168,0.1)', color: '#8896a8', border: 'rgba(136,150,168,0.3)', label: 'Viewer'   },
+              }[m.role] || { bg: '#f8fafc', color: '#8896a8', border: '#e4e9f0', label: m.role };
+              const isMe = m.email.toLowerCase() === user.email.toLowerCase();
+              return (
+                <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#f8fafc', border: '1px solid #f0f3f8', borderRadius: '10px', padding: '12px 14px' }}>
+                  <div style={{ width: 36, height: 36, borderRadius: '10px', background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 800, color: '#c9a84c', flexShrink: 0 }}>
+                    {(m.name || '?')[0].toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#0a1628' }}>{m.name}{isMe && <span style={{ fontSize: '9px', color: '#8896a8', marginLeft: '6px', fontWeight: 400 }}>(you)</span>}</div>
+                    <div style={{ fontSize: '11px', color: '#8896a8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.email}</div>
+                    {m.last_login && <div style={{ fontSize: '9px', color: '#8896a8', marginTop: '2px' }}>Last login: {formatDate(m.last_login)}</div>}
+                  </div>
+                  <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 700, background: roleBadge.bg, color: roleBadge.color, border: `1px solid ${roleBadge.border}`, flexShrink: 0 }}>{roleBadge.label}</span>
+                  {canInvite && !isMe && (
+                    <>
+                      <select value={m.role} onChange={e => updateRole(m.id, e.target.value)}
+                        style={{ border: '1px solid #e4e9f0', borderRadius: '6px', padding: '5px 8px', fontSize: '11px', color: '#0a1628', background: 'white', cursor: 'pointer', outline: 'none' }}>
+                        <option value="admin">Admin</option>
+                        <option value="approver">Approver</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                      <button onClick={() => removeMember(m.id)} disabled={removing === m.id}
+                        style={{ background: 'none', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '6px', padding: '5px 10px', fontSize: '11px', fontWeight: 600, cursor: removing === m.id ? 'not-allowed' : 'pointer', flexShrink: 0 }}>
+                        {removing === m.id ? '…' : 'Remove'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+            {members.length === 0 && (
+              <div style={{ fontSize: '12px', color: '#8896a8', padding: '16px 0', textAlign: 'center' }}>No team members yet. Invite someone to get started.</div>
+            )}
+          </div>
         )}
       </div>
     </div>
