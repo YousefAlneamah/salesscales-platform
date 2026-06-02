@@ -24,20 +24,30 @@ export default function Clients() {
     name: "", email: "", niche: "", tier: "starter", status: "onboarding"
   });
   const [demoCreating, setDemoCreating] = useState(false);
+  const [demoResult, setDemoResult] = useState(null);
+  const [copiedField, setCopiedField] = useState(null);
 
   const createDemo = async () => {
-    if (!window.confirm('This will create a new Demo Store client with pre-filled data. Continue?')) return;
     setDemoCreating(true);
     try {
       const res = await axios.post(`${API_BASE}/clients/create-demo`);
-      const d = res.data;
       fetchClients();
-      alert(`Demo account created!\n\nClient: ${d.client_name}\nEmail: ${d.demo_email}\nPassword: ${d.demo_password}\n\nRevenue: $${d.stats.revenue_recovered.toLocaleString()} recovered\nContacts: ${d.stats.contacts_enrolled} enrolled\n\nShare these credentials with your prospect.`);
+      setDemoResult(res.data);
     } catch (e) {
       alert('Failed to create demo: ' + (e.response?.data?.error || e.message));
     } finally {
       setDemoCreating(false);
     }
+  };
+
+  const copyField = (text, field) => {
+    navigator.clipboard.writeText(text).catch(() => {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+    });
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
   };
 
   const defaultFeatures = {
@@ -273,6 +283,59 @@ export default function Clients() {
 
   return (
     <div>
+      {/* DEMO CREDENTIALS MODAL */}
+      {demoResult && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ background: '#0f1f35', borderRadius: 16, width: 420, maxWidth: '100%', overflow: 'hidden', boxShadow: '0 24px 80px rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            {/* Header */}
+            <div style={{ background: 'linear-gradient(135deg, #0a1628, #112240)', padding: '22px 24px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+              <div style={{ fontSize: 8, color: '#c9a84c', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 6 }}>Demo Account Ready</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: '#f0f4f8' }}>🎬 {demoResult.client_name}</div>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>Share these credentials with your prospect — they can log in immediately.</div>
+            </div>
+
+            {/* Credentials */}
+            <div style={{ padding: '20px 24px' }}>
+              {[
+                { label: 'Email', value: demoResult.demo_email, field: 'email' },
+                { label: 'Password', value: demoResult.demo_password, field: 'password' },
+              ].map(({ label, value, field }) => (
+                <div key={field} style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 6 }}>{label}</div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <div style={{ flex: 1, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '10px 14px', fontFamily: 'DM Mono,monospace', fontSize: 13, color: '#f0f4f8', letterSpacing: 0.5 }}>{value}</div>
+                    <button onClick={() => copyField(value, field)}
+                      style={{ background: copiedField === field ? 'rgba(16,185,129,0.15)' : 'rgba(201,168,76,0.12)', border: `1px solid ${copiedField === field ? 'rgba(16,185,129,0.3)' : 'rgba(201,168,76,0.3)'}`, borderRadius: 8, padding: '10px 14px', fontSize: 11, fontWeight: 700, color: copiedField === field ? '#34d399' : '#c9a84c', cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'Inter,sans-serif', transition: 'all 0.2s' }}>
+                      {copiedField === field ? '✓ Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {/* Stats row */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginTop: 16, marginBottom: 20 }}>
+                {[
+                  { label: 'Revenue', value: `$${(demoResult.stats?.revenue_recovered || 0).toLocaleString()}` },
+                  { label: 'Enrolled', value: demoResult.stats?.contacts_enrolled || 0 },
+                  { label: 'Emails', value: demoResult.stats?.emails_sent || 0 },
+                  { label: 'Open rate', value: `${demoResult.stats?.open_rate || 0}%` },
+                ].map(s => (
+                  <div key={s.label} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, padding: '10px 8px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: '#c9a84c', lineHeight: 1, marginBottom: 4 }}>{s.value}</div>
+                    <div style={{ fontSize: 8, color: '#4a5568', fontFamily: 'DM Mono,monospace', textTransform: 'uppercase', letterSpacing: 1 }}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              <button onClick={() => setDemoResult(null)}
+                style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '11px 0', fontSize: 12, fontWeight: 700, color: '#8896a8', cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* HEADER */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
         <div>

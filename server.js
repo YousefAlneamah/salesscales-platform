@@ -4577,110 +4577,185 @@ app.post('/shopify/optin', async (req, res) => {
   }
 });
 
-// ─── FIX 4: CREATE DEMO CLIENT ───────────────────────────
-// POST /clients/create-demo — creates a pre-filled demo account for recording demos
+// ─── CREATE DEMO CLIENT ──────────────────────────────────
+// Fixed credentials — idempotent: cleans up any previous demo and rebuilds
 app.post('/clients/create-demo', async (req, res) => {
+  const DEMO_EMAIL    = 'demo@salesscales.com';
+  const DEMO_PASSWORD = 'demo123';
   try {
-    const demoEmail = `demo_${Date.now()}@demostore.com`;
-    const demoPassword = 'DemoStore2025!';
-    const demoPasswordHash = await bcrypt.hash(demoPassword, 10);
+    // Clean up any previous demo with this exact email
+    const { data: existingUser } = await supabase
+      .from('client_users').select('id, client_id').eq('email', DEMO_EMAIL).maybeSingle();
+    if (existingUser?.client_id) {
+      const oldCid = existingUser.client_id;
+      const { data: oldWfs } = await supabase.from('workflows').select('id').eq('client_id', oldCid);
+      const oldWfIds = (oldWfs || []).map(w => w.id);
+      await Promise.all([
+        supabase.from('workflow_enrollments').delete().eq('client_id', oldCid),
+        oldWfIds.length ? supabase.from('workflow_steps').delete().in('workflow_id', oldWfIds) : Promise.resolve(),
+        supabase.from('workflows').delete().eq('client_id', oldCid),
+        supabase.from('messages').delete().eq('client_id', oldCid),
+        supabase.from('contacts').delete().eq('client_id', oldCid),
+        supabase.from('client_onboarding').delete().eq('client_id', oldCid),
+      ]);
+      await supabase.from('client_users').delete().eq('client_id', oldCid);
+      await supabase.from('clients').delete().eq('id', oldCid);
+    }
 
-    // Create demo client
+    // Create client
     const { data: client, error: clientErr } = await supabase.from('clients').insert([{
       name: 'Demo Store',
       business_type: 'Ecommerce',
-      niche: 'Health & Wellness',
-      tier: 'Growth',
+      niche: 'Travel Bags',
+      tier: 'elite',
       status: 'active',
     }]).select().single();
     if (clientErr) throw clientErr;
 
-    // Create demo login
-    const { data: clientUser, error: userErr } = await supabase.from('client_users').insert([{
-      name: 'Demo Owner',
-      email: demoEmail,
-      password: demoPasswordHash,
-      client_id: client.id,
-    }]).select('id, name, email, client_id').single();
-    if (userErr) throw userErr;
+    // Create fixed demo login — try with verified/accepted_terms, fall back if columns missing
+    const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
+    const baseUser = { name: 'Demo Owner', email: DEMO_EMAIL, password: passwordHash, client_id: client.id };
+    let clientUser;
+    const { data: cu1, error: ue1 } = await supabase.from('client_users')
+      .insert([{ ...baseUser, verified: true, accepted_terms: true }])
+      .select('id, name, email, client_id').single();
+    if (ue1) {
+      const { data: cu2, error: ue2 } = await supabase.from('client_users').insert([baseUser]).select('id, name, email, client_id').single();
+      if (ue2) throw ue2;
+      clientUser = cu2;
+    } else {
+      clientUser = cu1;
+    }
 
-    // Sample contacts
-    const contactData = [
-      { first_name: 'Emma', last_name: 'Johnson', email: `emma_${Date.now()}@example.com`, phone: '+15551230001', source: 'Shopify', channel: 'Email', pipeline_stage: 'Customer', client_id: client.id },
-      { first_name: 'Liam', last_name: 'Smith',   email: `liam_${Date.now()}@example.com`, phone: '+15551230002', source: 'Shopify', channel: 'Email', pipeline_stage: 'Lead', client_id: client.id },
-      { first_name: 'Sophia', last_name: 'Davis', email: `sophia_${Date.now()}@example.com`, phone: '+15551230003', source: 'Opt-in', channel: 'SMS', pipeline_stage: 'New Lead', client_id: client.id },
-    ];
-    const { data: contacts } = await supabase.from('contacts').insert(contactData.map(c => ({ ...c, last_activity: new Date().toISOString() }))).select();
+    // 5 realistic contacts
+    const ts = Date.now();
+    const { data: contacts } = await supabase.from('contacts').insert([
+      { first_name: 'Emma',   last_name: 'Johnson', email: `emma.j.${ts}@example.com`,    phone: '+15551230001', source: 'Shopify',  channel: 'Email', pipeline_stage: 'Customer',  client_id: client.id, last_activity: new Date().toISOString() },
+      { first_name: 'Liam',   last_name: 'Smith',   email: `liam.s.${ts}@example.com`,    phone: '+15551230002', source: 'Shopify',  channel: 'Email', pipeline_stage: 'Lead',      client_id: client.id, last_activity: new Date().toISOString() },
+      { first_name: 'Sophia', last_name: 'Davis',   email: `sophia.d.${ts}@example.com`,  phone: '+15551230003', source: 'Opt-in',   channel: 'SMS',   pipeline_stage: 'New Lead',  client_id: client.id, last_activity: new Date().toISOString() },
+      { first_name: 'Noah',   last_name: 'Wilson',  email: `noah.w.${ts}@example.com`,    phone: '+15551230004', source: 'Shopify',  channel: 'Email', pipeline_stage: 'Customer',  client_id: client.id, last_activity: new Date().toISOString() },
+      { first_name: 'Olivia', last_name: 'Brown',   email: `olivia.b.${ts}@example.com`,  phone: '+15551230005', source: 'Referral', channel: 'Email', pipeline_stage: 'Qualified', client_id: client.id, last_activity: new Date().toISOString() },
+    ]).select();
 
-    // Sample workflow (cart recovery, pre-approved active)
-    const { data: workflow } = await supabase.from('workflows').insert([{
-      name: 'Cart Recovery — Demo Store',
-      client_id: client.id,
-      trigger_type: 'cart_abandoned',
-      status: 'active',
-      enrolled_count: 47,
-    }]).select().single();
+    // 3 workflows: Cart Recovery, Lead Nurture, Win Back
+    const { data: workflows } = await supabase.from('workflows').insert([
+      { name: 'Cart Recovery', trigger_type: 'cart_abandoned', client_id: client.id, status: 'active', enrolled_count: 23 },
+      { name: 'Lead Nurture',  trigger_type: 'New Customer',   client_id: client.id, status: 'active', enrolled_count: 15 },
+      { name: 'Win Back',      trigger_type: 'Win-Back',       client_id: client.id, status: 'active', enrolled_count: 9  },
+    ]).select();
 
-    // Sample workflow steps
-    if (workflow) {
-      await supabase.from('workflow_steps').insert([
-        { workflow_id: workflow.id, step_order: 0, step_type: 'email', subject: 'You left something behind', content: 'Hi {{first_name}}, your cart is waiting for you. Complete your order today and get free shipping.', wait_hours: 0 },
-        { workflow_id: workflow.id, step_order: 1, step_type: 'wait', content: '', wait_hours: 24 },
-        { workflow_id: workflow.id, step_order: 2, step_type: 'email', subject: 'Still thinking it over?', content: 'Hi {{first_name}}, your items are almost gone. We saved your cart — but stock is limited.', wait_hours: 0 },
-        { workflow_id: workflow.id, step_order: 3, step_type: 'wait', content: '', wait_hours: 48 },
-        { workflow_id: workflow.id, step_order: 4, step_type: 'sms', content: 'Hi {{first_name}}! One last reminder — your cart expires tonight. Reply SHOP to complete your order.', wait_hours: 0 },
-      ]);
+    if (workflows && workflows.length) {
+      const stepSets = {
+        'Cart Recovery': [
+          { step_order: 0, step_type: 'email', subject: 'You left something in your bag, {{first_name}}', content: "Hi {{first_name}},\n\nYour travel bag is still waiting. We saved your cart — grab it before it sells out.", wait_hours: 0 },
+          { step_order: 1, step_type: 'wait',  content: '', wait_hours: 1 },
+          { step_order: 2, step_type: 'email', subject: 'Still thinking it over?', content: "Hi {{first_name}},\n\nYour bag is almost gone. We can't hold it much longer. Complete your order today.", wait_hours: 0 },
+          { step_order: 3, step_type: 'wait',  content: '', wait_hours: 24 },
+          { step_order: 4, step_type: 'sms',   content: "Hi {{first_name}}! Last chance — your cart expires tonight. Reply SHOP to complete.", wait_hours: 0 },
+        ],
+        'Lead Nurture': [
+          { step_order: 0, step_type: 'email', subject: 'Welcome to Luux Bags, {{first_name}}', content: "Hi {{first_name}},\n\nThank you for joining us. We make travel bags that last a lifetime.", wait_hours: 0 },
+          { step_order: 1, step_type: 'wait',  content: '', wait_hours: 48 },
+          { step_order: 2, step_type: 'email', subject: 'How we make every bag', content: "Hi {{first_name}},\n\nEach bag is handcrafted from full-grain leather and built to outlast your passport.", wait_hours: 0 },
+          { step_order: 3, step_type: 'wait',  content: '', wait_hours: 72 },
+          { step_order: 4, step_type: 'email', subject: 'Your first order — 10% off', content: "Hi {{first_name}},\n\nAs a new member, here's 10% off your first order. Use code WELCOME10 at checkout.", wait_hours: 0 },
+        ],
+        'Win Back': [
+          { step_order: 0, step_type: 'email', subject: "We miss you, {{first_name}}", content: "Hi {{first_name}},\n\nIt's been a while. We've added new styles since you last visited — worth a look.", wait_hours: 0 },
+          { step_order: 1, step_type: 'wait',  content: '', wait_hours: 72 },
+          { step_order: 2, step_type: 'email', subject: "Come back — 15% just for you", content: "Hi {{first_name}},\n\nWe'd love to have you back. Use code COMEBACK15 for 15% off your next order.", wait_hours: 0 },
+        ],
+      };
+      const allSteps = [];
+      for (const wf of workflows) {
+        (stepSets[wf.name] || []).forEach(s => allSteps.push({ ...s, workflow_id: wf.id }));
+      }
+      if (allSteps.length) await supabase.from('workflow_steps').insert(allSteps);
 
-      // Sample enrollments to show revenue stats
-      if (contacts && contacts.length > 0) {
-        const now = new Date().toISOString();
-        await supabase.from('workflow_enrollments').insert(
-          contacts.map(c => ({
-            workflow_id: workflow.id, contact_id: c.id, client_id: client.id,
-            status: 'completed', current_step: 5,
-            enrolled_at: new Date(Date.now() - 7*86400000).toISOString(),
-            next_step_at: now, completed_at: now,
-          }))
-        );
+      // 47 completed enrollments spread across the 3 workflows
+      if (contacts && contacts.length) {
+        const enrollments = [];
+        const wfCounts = { 'Cart Recovery': 23, 'Lead Nurture': 15, 'Win Back': 9 };
+        let ci = 0;
+        for (const wf of workflows) {
+          const count = wfCounts[wf.name] || 0;
+          for (let i = 0; i < count; i++) {
+            const c = contacts[ci % contacts.length];
+            const enrolledAt = new Date(Date.now() - (count - i) * 6 * 3600000).toISOString();
+            const completedAt = new Date(Date.now() - i * 2 * 3600000).toISOString();
+            enrollments.push({
+              workflow_id: wf.id, contact_id: c.id, client_id: client.id,
+              status: 'completed', current_step: (stepSets[wf.name] || []).length,
+              enrolled_at: enrolledAt, next_step_at: completedAt, completed_at: completedAt,
+            });
+            ci++;
+          }
+        }
+        await supabase.from('workflow_enrollments').insert(enrollments);
       }
     }
 
-    // Sample messages to populate inbox
-    if (contacts && contacts.length > 0) {
-      await supabase.from('messages').insert([
-        { client_id: client.id, contact_id: contacts[0].id, channel: 'Email', direction: 'outbound', sender_name: 'Demo Store', content: 'You left something behind — complete your order today', status: 'sent', created_at: new Date().toISOString() },
-        { client_id: client.id, contact_id: contacts[1].id, channel: 'SMS',   direction: 'outbound', sender_name: 'Demo Store', content: 'Hi Liam! Your cart is waiting. Reply SHOP to complete.', status: 'sent', created_at: new Date().toISOString() },
-        { client_id: client.id, contact_id: contacts[0].id, channel: 'Email', direction: 'inbound',  sender_name: 'Emma Johnson', content: 'Just purchased! The checkout was so smooth.', status: 'unread', created_at: new Date().toISOString() },
-      ]);
+    // 20 messages showing sent and opened, + 2 inbound replies
+    if (contacts && contacts.length) {
+      const now = Date.now();
+      const subjects = [
+        'You left something in your bag',
+        'Still thinking it over?',
+        'Last chance — cart expires tonight',
+        'Welcome to Luux Bags',
+        'How we make every bag',
+        'Your first order — 10% off',
+        'We miss you',
+        'Come back — 15% just for you',
+        'New arrivals: weekend bags',
+        'Your order has shipped',
+      ];
+      const msgs = [];
+      for (let i = 0; i < 20; i++) {
+        const contact = contacts[i % contacts.length];
+        const daysAgo = Math.floor(i / 3);
+        msgs.push({
+          client_id: client.id,
+          contact_id: contact.id,
+          channel: i % 5 === 4 ? 'SMS' : 'Email',
+          direction: 'outbound',
+          sender_name: 'Demo Store',
+          content: subjects[i % subjects.length],
+          status: 'sent',
+          created_at: new Date(now - daysAgo * 86400000 - i * 1800000).toISOString(),
+        });
+      }
+      msgs.push(
+        { client_id: client.id, contact_id: contacts[0].id, channel: 'Email', direction: 'inbound', sender_name: 'Emma Johnson', content: 'Just received my bag and it is absolutely stunning. Best purchase this year.', status: 'unread', created_at: new Date(now - 86400000).toISOString() },
+        { client_id: client.id, contact_id: contacts[1].id, channel: 'SMS',   direction: 'inbound', sender_name: 'Liam Smith',   content: 'SHOP', status: 'unread', created_at: new Date(now - 3600000).toISOString() },
+      );
+      await supabase.from('messages').insert(msgs);
     }
 
-    // Pre-fill onboarding as completed
+    // Onboarding completed — AOV $30–$75 (= $52) × 47 completions ≈ $2,444 revenue shown in portal
     await supabase.from('client_onboarding').upsert([{
       client_id: client.id,
-      store_url: 'demostore.myshopify.com',
+      store_url: 'luuxbags.myshopify.com',
       monthly_revenue: '$25,000–$50,000',
-      average_order_value: '$75–$150',
-      main_products: 'Supplements, wellness bundles, protein shakes',
-      brand_voice: 'Friendly, science-backed, motivating',
-      target_customer: 'Health-conscious adults aged 25–45',
-      biggest_challenge: 'Cart abandonment and repeat purchase rate',
-      current_tools: ['Klaviyo', 'Shopify'],
-      main_competitors: 'GNC, Thorne, Ritual',
-      goals: 'Recover 30% of abandoned carts and increase LTV by 40%',
+      average_order_value: '$30–$75',
+      main_products: 'Leather weekender bags, laptop bags, passport holders, travel accessories',
+      brand_voice: 'Premium, refined, minimal — quality over quantity',
+      target_customer: 'Frequent travellers aged 28–45 who value craftsmanship and timeless design',
+      biggest_challenge: 'Cart abandonment and converting first-time visitors',
+      current_tools: ['Shopify', 'Klaviyo'],
+      main_competitors: 'Tumi, Bellroy, Filson',
+      goals: 'Recover abandoned carts and grow repeat purchase rate to 40%',
       completed_at: new Date().toISOString(),
     }], { onConflict: 'client_id' });
 
+    console.log(`[Demo] Account created — ${DEMO_EMAIL} → client ${client.id}`);
     res.json({
       ok: true,
       client_id: client.id,
-      demo_email: demoEmail,
-      demo_password: demoPassword,
-      client_name: client.name,
-      stats: {
-        contacts_enrolled: 47,
-        revenue_recovered: 2340,
-        active_sequences: 1,
-      },
+      demo_email: DEMO_EMAIL,
+      demo_password: DEMO_PASSWORD,
+      client_name: 'Demo Store',
+      stats: { contacts_enrolled: 47, revenue_recovered: 2340, emails_sent: 156, open_rate: 34, active_sequences: 3 },
     });
   } catch (e) {
     console.error('/clients/create-demo error:', e.message);
