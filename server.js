@@ -1238,10 +1238,10 @@ cron.schedule('*/15 * * * *', async () => {
 });
 
 // ─── HELPER: STORE TEAM BRIEFING ─────────────────────────
-const storeBriefing = async (from_member, to_member, subject, content, priority = 'normal', client_id = null) => {
+const storeBriefing = async (from_member, to_member, subject, content, priority = 'normal', client_id = null, contact_id = null) => {
   const { error } = await supabase.from('team_briefings').insert([{
     from_member, to_member, subject, content,
-    priority, client_id, is_read: false,
+    priority, client_id, contact_id: contact_id || null, is_read: false,
     created_at: new Date().toISOString()
   }]);
   if (error) throw new Error(`storeBriefing failed: ${error.message}`);
@@ -3853,8 +3853,88 @@ app.post('/voice-agent/save-agent', async (req, res) => {
   }
 });
 
+// ─── ALI CALL SCRIPT GENERATOR ───────────────────────────
+const generateAliCallScript = async (contact, recentMessages, ragContext, clientName) => {
+  const name = contact.first_name || 'the customer';
+  const products = contact.abandoned_products || 'products';
+  const cartValue = contact.cart_value ? `$${contact.cart_value}` : 'their cart items';
+  const msgHistory = recentMessages.length
+    ? recentMessages.slice(0, 5).map(m => `[${m.direction}/${m.channel}] ${(m.content || '').slice(0, 100)}`).join('\n')
+    : 'No prior messages';
+
+  const raw = await aiCall(
+    `You are Ali, the Sales Closer AI at Sales Scales. You use the NEPQ (Neuro-Emotional Persuasion Questioning) framework. You speak with confidence, warmth, and precision. You never use pressure tactics — only insightful questions that help prospects sell themselves. You are Ali — never mention Claude.
+
+Return ONLY valid JSON. No markdown, no explanation.`,
+    `Generate a personalized NEPQ call script for this contact. You are calling on behalf of ${clientName || 'the store'}.
+
+Contact: ${name}
+Abandoned: ${products}
+Cart value: ${cartValue}
+Recent interactions:\n${msgHistory}
+
+Return exactly this JSON shape:
+{
+  "opening": "...",
+  "situation_questions": ["...", "...", "..."],
+  "problem_questions": ["...", "..."],
+  "consequence_questions": ["...", "..."],
+  "close": "...",
+  "objections": {
+    "too_expensive": "...",
+    "need_to_think": "...",
+    "quality_concerns": "...",
+    "shipping_concerns": "...",
+    "wrong_time": "..."
+  }
+}
+
+Each objection response must be 1–2 sentences, personalized to the specific product. The opening must be a confident pattern interrupt — do not start with 'Hi' or 'How are you'.`,
+    ragContext || ''
+  );
+
+  try {
+    const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    const m = cleaned.match(/\{[\s\S]*\}/);
+    return JSON.parse(m ? m[0] : cleaned);
+  } catch {
+    return { opening: raw.slice(0, 200), situation_questions: [], problem_questions: [], consequence_questions: [], close: '', objections: {} };
+  }
+};
+
+// ─── ALI POST-CALL FOLLOW-UP ANALYZER ────────────────────
+const generateAliFollowUp = async (transcript, contact, clientName) => {
+  const name = contact?.first_name || 'the contact';
+  const raw = await aiCall(
+    `You are Ali, the Sales Closer AI at Sales Scales. You analyze sales call transcripts and recommend the best follow-up action. You are Ali — never mention Claude. Return ONLY valid JSON.`,
+    `Analyze this call transcript for ${name} and determine if they converted.
+
+Transcript:\n${transcript.slice(0, 3000)}
+
+Return exactly this JSON:
+{
+  "converted": true | false,
+  "action": "follow_up_call" | "send_sms" | "mark_not_interested",
+  "timing": "24h" | "48h" | "1 week" | null,
+  "sms_message": "..." | null,
+  "reason": "..."
+}
+
+If converted = true, set action to null.
+If the contact seemed uninterested or hostile, set action to mark_not_interested.
+sms_message must be under 160 chars and use {{first_name}} for personalization.`
+  );
+  try {
+    const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    const m = cleaned.match(/\{[\s\S]*\}/);
+    return JSON.parse(m ? m[0] : cleaned);
+  } catch {
+    return { converted: false, action: 'follow_up_call', timing: '24h', sms_message: null, reason: raw.slice(0, 200) };
+  }
+};
+
 app.post('/voice-agent/outbound-call', async (req, res) => {
-  const { phone, agentId } = req.body;
+  const { phone, agentId, contact_id, client_id } = req.body;
   if (!phone || !agentId) return res.status(400).json({ error: 'Missing phone or agentId' });
   try {
     const response = await axios.post(
@@ -3868,6 +3948,82 @@ app.post('/voice-agent/outbound-call', async (req, res) => {
     );
     const callId = response.data.callsid || response.data.call_sid || response.data.call_id;
     console.log('ElevenLabs outbound call initiated:', callId, '→', phone);
+
+    // Fire Ali script generation in background — does not block the call response
+    if (contact_id || client_id) {
+      (async () => {
+        try {
+          const [contactRes, messagesRes, ragCtx, clientRes] = await Promise.all([
+            contact_id ? supabase.from('contacts').select('*').eq('id', contact_id).maybeSingle() : { data: null },
+            contact_id ? supabase.from('messages').select('channel, direction, content, created_at').eq('contact_id', contact_id).order('created_at', { ascending: false }).limit(10) : { data: [] },
+            ragSearch(phone, client_id),
+            client_id ? supabase.from('clients').select('name').eq('id', client_id).maybeSingle() : { data: null },
+          ]);
+          const contact = contactRes.data || { first_name: 'Customer', phone };
+          const messages = messagesRes.data || [];
+          const clientName = clientRes.data?.name || '';
+
+          const script = await generateAliCallScript(contact, messages, ragCtx, clientName);
+          const contactName = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || contact.email || phone;
+
+          // Format the briefing content
+          const objLines = Object.entries(script.objections || {}).map(([k, v]) =>
+            `• ${k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}: ${v}`
+          ).join('\n');
+
+          const briefingContent = [
+            `NEPQ CALL SCRIPT — ${contactName}`,
+            `Phone: ${phone}`,
+            contact.email ? `Email: ${contact.email}` : null,
+            contact_id ? `Contact ID: ${contact_id}` : null,
+            '',
+            '── OPENING ──',
+            script.opening || '—',
+            '',
+            '── SITUATION QUESTIONS ──',
+            (script.situation_questions || []).map((q, i) => `${i + 1}. ${q}`).join('\n'),
+            '',
+            '── PROBLEM AWARENESS ──',
+            (script.problem_questions || []).map((q, i) => `${i + 1}. ${q}`).join('\n'),
+            '',
+            '── CONSEQUENCE QUESTIONS ──',
+            (script.consequence_questions || []).map((q, i) => `${i + 1}. ${q}`).join('\n'),
+            '',
+            '── CLOSE ──',
+            script.close || '—',
+            '',
+            '── OBJECTION HANDLERS ──',
+            objLines || '—',
+          ].filter(l => l !== null).join('\n');
+
+          await storeBriefing(
+            'ali', 'yousef',
+            `Call Script — ${contactName} — ${new Date().toLocaleDateString()}`,
+            briefingContent,
+            'high',
+            client_id || null,
+            contact_id || null
+          );
+
+          // Create a pending call_log record so the webhook can attach transcript to it
+          await supabase.from('call_logs').insert([{
+            client_id: client_id || null,
+            contact_id: contact_id || null,
+            contact_phone: phone,
+            direction: 'outbound',
+            call_script: briefingContent,
+            objection_handlers: script.objections || {},
+            status: 'initiated',
+            created_at: new Date().toISOString(),
+          }]);
+
+          console.log(`[Ali] Call script generated for ${contactName}`);
+        } catch (scriptErr) {
+          console.error('[Ali] Call script generation failed:', scriptErr.message);
+        }
+      })();
+    }
+
     res.json({ success: true, callId });
   } catch (e) {
     console.error('Outbound call error:', e.response?.data || e.message);
@@ -3929,28 +4085,61 @@ app.post('/calls/log', async (req, res) => {
       }
     }
 
-    const { data: inserted, error } = await supabase
-      .from('call_logs')
-      .insert({
+    // Look up contact_id by phone + client_id (for linking)
+    let contactId = body.contact_id || req.body?.contact_id || null;
+    if (!contactId && contactPhone && clientId) {
+      try {
+        const { data: contactMatch } = await supabase.from('contacts')
+          .select('id, first_name, last_name').eq('phone', contactPhone).eq('client_id', clientId).maybeSingle();
+        if (contactMatch) contactId = contactMatch.id;
+      } catch {}
+    }
+
+    // Try to find a pending initiated call_log for this phone + client to update instead of insert
+    let inserted = null;
+    let existingId = null;
+    if (contactPhone && clientId) {
+      const twoHoursAgo = new Date(Date.now() - 2 * 3600000).toISOString();
+      const { data: pending } = await supabase.from('call_logs')
+        .select('id').eq('contact_phone', contactPhone).eq('client_id', clientId)
+        .eq('status', 'initiated').gte('created_at', twoHoursAgo)
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (pending) existingId = pending.id;
+    }
+
+    if (existingId) {
+      const { data: updated, error } = await supabase.from('call_logs').update({
+        contact_id: contactId,
+        direction: direction === 'inbound' ? 'inbound' : 'outbound',
+        duration_seconds: durationSeconds,
+        transcript: transcript || null,
+        summary: summary || null,
+        status: 'completed',
+      }).eq('id', existingId).select().single();
+      if (!error) inserted = updated;
+    }
+
+    if (!inserted) {
+      const { data: fresh, error } = await supabase.from('call_logs').insert({
         client_id: clientId,
+        contact_id: contactId,
         contact_phone: contactPhone,
         direction: direction === 'inbound' ? 'inbound' : 'outbound',
         duration_seconds: durationSeconds,
         transcript: transcript || null,
-        summary: summary || null
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('call_logs insert error:', error.message);
-      return res.status(500).json({ error: 'Failed to log call', details: error.message });
+        summary: summary || null,
+        status: 'completed',
+      }).select().single();
+      if (error) {
+        console.error('call_logs insert error:', error.message);
+        return res.status(500).json({ error: 'Failed to log call', details: error.message });
+      }
+      inserted = fresh;
     }
 
     console.log('Call logged:', inserted.id, direction, contactPhone);
 
-    // Feedback loop: store the transcript in the knowledge base so the AI team
-    // can learn from real call conversations.
+    // Feedback loop: store the transcript in the knowledge base
     if (transcript && transcript.trim()) {
       storeKnowledge({
         title: `Call Transcript — ${contactPhone || 'Unknown'} (${direction === 'inbound' ? 'inbound' : 'outbound'})`,
@@ -3960,6 +4149,55 @@ app.post('/calls/log', async (req, res) => {
         type: 'call_transcript',
         notes: 'call_transcript',
       });
+    }
+
+    // Ali analyses the transcript and generates a follow-up recommendation
+    if (transcript && transcript.trim() && clientId) {
+      (async () => {
+        try {
+          let contact = { first_name: contactPhone };
+          if (contactId) {
+            const { data: c } = await supabase.from('contacts').select('first_name, last_name, email').eq('id', contactId).maybeSingle();
+            if (c) contact = c;
+          }
+          const { data: cl } = await supabase.from('clients').select('name').eq('id', clientId).maybeSingle();
+          const followUp = await generateAliFollowUp(transcript, contact, cl?.name || '');
+          const contactName = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || contactPhone;
+
+          const followUpContent = [
+            `POST-CALL ANALYSIS — ${contactName}`,
+            `Phone: ${contactPhone}`,
+            contactId ? `Contact ID: ${contactId}` : null,
+            `Converted: ${followUp.converted ? 'Yes ✓' : 'No'}`,
+            '',
+            `Recommended Action: ${(followUp.action || '—').replace(/_/g, ' ').toUpperCase()}`,
+            followUp.timing ? `Timing: ${followUp.timing}` : null,
+            followUp.sms_message ? `\nSMS to send:\n"${followUp.sms_message}"` : null,
+            '',
+            `Ali's reasoning: ${followUp.reason || '—'}`,
+          ].filter(l => l !== null).join('\n');
+
+          await storeBriefing(
+            'ali', 'yousef',
+            `Post-Call Action — ${contactName} — ${followUp.converted ? 'Converted' : followUp.action?.replace(/_/g, ' ')}`,
+            followUpContent,
+            'normal',
+            clientId,
+            contactId
+          );
+
+          // Save follow-up action back to the call_log
+          const followUpStr = followUp.action
+            ? `${followUp.action.replace(/_/g, ' ')}${followUp.timing ? ` in ${followUp.timing}` : ''}${followUp.sms_message ? ` — SMS: "${followUp.sms_message}"` : ''}`
+            : null;
+          if (followUpStr) {
+            await supabase.from('call_logs').update({ follow_up_action: followUpStr }).eq('id', inserted.id);
+          }
+          console.log(`[Ali] Follow-up action generated: ${followUpStr || 'none'}`);
+        } catch (fuErr) {
+          console.error('[Ali] Follow-up generation failed:', fuErr.message);
+        }
+      })();
     }
 
     res.json({ success: true, call: inserted });
@@ -3975,6 +4213,7 @@ app.get('/calls/list', async (req, res) => {
     let query = supabase
       .from('call_logs')
       .select('*, clients(name)')
+      .neq('status', 'initiated')
       .order('created_at', { ascending: false });
     if (req.query.client_id) query = query.eq('client_id', req.query.client_id);
     const { data, error } = await query;

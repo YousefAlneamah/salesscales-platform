@@ -1638,11 +1638,15 @@ export default function ClientDashboard({ user, onLogout }) {
   const ClientCalls = () => {
     const [calls, setCalls] = useState([]);
     const [loadingC, setLoadingC] = useState(true);
+    const [expandedScript, setExpandedScript] = useState({});
+    const [expandedTranscript, setExpandedTranscript] = useState({});
 
     const fmtDur = (s) => {
       if (!s && s !== 0) return '—';
       return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
     };
+
+    const toggleSection = (id, setter) => setter(prev => ({ ...prev, [id]: !prev[id] }));
 
     useEffect(() => {
       (async () => {
@@ -1656,12 +1660,20 @@ export default function ClientDashboard({ user, onLogout }) {
       })();
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+    const OBJECTION_LABELS = {
+      too_expensive: 'Too Expensive',
+      need_to_think: 'Need to Think About It',
+      quality_concerns: 'Not Sure About Quality',
+      shipping_concerns: 'Shipping Concerns',
+      wrong_time: 'Wrong Time',
+    };
+
     return (
       <div>
         <div style={{ marginBottom: '24px' }}>
           <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Voice Calls</div>
           <div style={{ fontSize: '20px', fontWeight: 700, color: '#0a1628' }}>My Calls</div>
-          <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>Recordings and transcripts of your AI-handled calls</div>
+          <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '4px' }}>Ali-briefed call scripts, objection handlers, and transcripts</div>
         </div>
 
         {loadingC ? (
@@ -1673,32 +1685,135 @@ export default function ClientDashboard({ user, onLogout }) {
             <div style={{ fontSize: '12px', color: '#8896a8' }}>Your call recordings and transcripts will appear here.</div>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {calls.map(c => (
-              <div key={c.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(10,22,40,0.06)' }}>
-                <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f0f3f8' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 700, letterSpacing: '0.5px', background: c.direction === 'inbound' ? '#eff6ff' : '#fef9ec', color: c.direction === 'inbound' ? '#3b82f6' : '#c9a84c', border: `1px solid ${c.direction === 'inbound' ? '#bfdbfe' : '#f0e0b0'}` }}>
-                      {c.direction === 'inbound' ? '↓ INBOUND' : '↑ OUTBOUND'}
-                    </span>
-                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628' }}>{c.contact_phone || 'Unknown'}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {calls.map(c => {
+              const objections = typeof c.objection_handlers === 'object' && !Array.isArray(c.objection_handlers) ? c.objection_handlers : {};
+              const hasScript = !!c.call_script;
+              const hasObjHandlers = Object.keys(objections).length > 0;
+              const hasFollowUp = !!c.follow_up_action;
+              const scriptOpen = expandedScript[c.id];
+              const transcriptOpen = expandedTranscript[c.id];
+
+              return (
+                <div key={c.id} style={{ background: 'white', border: '1px solid #e4e9f0', borderRadius: '14px', overflow: 'hidden', boxShadow: '0 1px 4px rgba(10,22,40,0.06)' }}>
+                  {/* Call header */}
+                  <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f0f3f8' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '9px', padding: '3px 10px', borderRadius: '20px', fontWeight: 700, background: c.direction === 'inbound' ? '#eff6ff' : '#fef9ec', color: c.direction === 'inbound' ? '#3b82f6' : '#c9a84c', border: `1px solid ${c.direction === 'inbound' ? '#bfdbfe' : '#f0e0b0'}` }}>
+                        {c.direction === 'inbound' ? '↓ INBOUND' : '↑ OUTBOUND'}
+                      </span>
+                      {hasScript && (
+                        <span style={{ fontSize: '9px', padding: '3px 8px', borderRadius: '20px', fontWeight: 700, background: 'rgba(59,130,246,0.08)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.2)' }}>⚡ Ali Briefed</span>
+                      )}
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: '#0a1628' }}>{c.contact_phone || 'Unknown'}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+                      <div style={{ fontSize: '11px', color: '#8896a8' }}>{fmtDur(c.duration_seconds)}</div>
+                      <div style={{ fontSize: '11px', color: '#8896a8' }}>{formatDate(c.created_at)}</div>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                    <div style={{ fontSize: '11px', color: '#8896a8' }}>{fmtDur(c.duration_seconds)}</div>
-                    <div style={{ fontSize: '11px', color: '#8896a8' }}>{formatDate(c.created_at)}</div>
-                  </div>
-                </div>
-                <div style={{ padding: '16px 20px' }}>
+
+                  {/* Summary */}
                   {c.summary && (
-                    <div style={{ fontSize: '13px', color: '#0a1628', lineHeight: 1.7, marginBottom: '14px', fontWeight: 500 }}>{c.summary}</div>
+                    <div style={{ padding: '14px 20px 0', fontSize: '13px', color: '#0a1628', lineHeight: 1.7, fontWeight: 500 }}>{c.summary}</div>
                   )}
-                  <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>Transcript</div>
-                  <div style={{ fontSize: '12px', color: '#4a5568', lineHeight: 1.8, whiteSpace: 'pre-wrap', background: '#f8fafc', borderRadius: '8px', padding: '14px 16px', maxHeight: '320px', overflowY: 'auto' }}>
-                    {c.transcript || 'No transcript available for this call.'}
+
+                  {/* Follow-up action (post-call Ali recommendation) */}
+                  {hasFollowUp && (
+                    <div style={{ margin: '12px 20px 0', background: '#fef9ec', border: '1px solid #f0e0b0', borderRadius: '8px', padding: '10px 14px' }}>
+                      <div style={{ fontSize: '9px', color: '#c9a84c', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Ali's Follow-Up Recommendation</div>
+                      <div style={{ fontSize: '12px', color: '#0a1628', fontWeight: 600 }}>{c.follow_up_action}</div>
+                    </div>
+                  )}
+
+                  {/* Ali's Call Brief (collapsible) */}
+                  {(hasScript || hasObjHandlers) && (
+                    <div style={{ margin: '12px 20px 0' }}>
+                      <button
+                        onClick={() => toggleSection(c.id, setExpandedScript)}
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '7px 12px', fontSize: '11px', fontWeight: 700, color: '#3b82f6', cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                        <span>📋</span>
+                        {scriptOpen ? 'Hide' : 'Show'} Ali's Call Brief & Objection Handlers
+                        <span style={{ marginLeft: 'auto', fontSize: '12px' }}>{scriptOpen ? '▲' : '▼'}</span>
+                      </button>
+
+                      {scriptOpen && (
+                        <div style={{ marginTop: '10px', background: '#0a1628', borderRadius: '10px', padding: '18px 20px', color: '#f0f4f8' }}>
+                          <div style={{ fontSize: '9px', color: '#c9a84c', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '14px' }}>Ali — NEPQ Call Brief</div>
+
+                          {/* Render structured script sections */}
+                          {(() => {
+                            // Try to extract structured sections from call_script text
+                            const scriptText = c.call_script || '';
+                            const sections = [
+                              { key: 'OPENING', label: 'Opening' },
+                              { key: 'SITUATION QUESTIONS', label: 'Situation Questions' },
+                              { key: 'PROBLEM AWARENESS', label: 'Problem Awareness' },
+                              { key: 'CONSEQUENCE QUESTIONS', label: 'Consequence Questions' },
+                              { key: 'CLOSE', label: 'Close' },
+                            ];
+                            const parsed = {};
+                            sections.forEach((s, i) => {
+                              const marker = `── ${s.key} ──`;
+                              const nextMarker = i < sections.length - 1 ? `── ${sections[i + 1].key} ──` : '── OBJECTION HANDLERS ──';
+                              const start = scriptText.indexOf(marker);
+                              const end = scriptText.indexOf(nextMarker);
+                              if (start !== -1) {
+                                parsed[s.key] = scriptText.slice(start + marker.length, end !== -1 ? end : undefined).trim();
+                              }
+                            });
+
+                            const hasStructured = Object.keys(parsed).length > 0;
+                            if (!hasStructured) return (
+                              <pre style={{ fontSize: '11px', color: 'rgba(255,255,255,0.7)', lineHeight: 1.7, whiteSpace: 'pre-wrap', margin: 0 }}>{scriptText}</pre>
+                            );
+                            return sections.map(s => parsed[s.key] ? (
+                              <div key={s.key} style={{ marginBottom: '14px' }}>
+                                <div style={{ fontSize: '8px', color: '#c9a84c', letterSpacing: '1.5px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '6px' }}>{s.label}</div>
+                                <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.85)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{parsed[s.key]}</div>
+                              </div>
+                            ) : null);
+                          })()}
+
+                          {/* Objection handlers grid */}
+                          {hasObjHandlers && (
+                            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '14px', marginTop: '4px' }}>
+                              <div style={{ fontSize: '9px', color: '#c9a84c', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '12px' }}>Objection Handlers</div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                {Object.entries(objections).map(([key, response]) => (
+                                  <div key={key} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '8px', padding: '10px 12px' }}>
+                                    <div style={{ fontSize: '9px', color: '#c9a84c', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '5px' }}>
+                                      {OBJECTION_LABELS[key] || key.replace(/_/g, ' ')}
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.8)', lineHeight: 1.7 }}>{response}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Transcript (collapsible) */}
+                  <div style={{ margin: '12px 20px 16px' }}>
+                    <button
+                      onClick={() => toggleSection(c.id, setExpandedTranscript)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '7px 12px', fontSize: '11px', fontWeight: 700, color: '#8896a8', cursor: 'pointer', fontFamily: 'Inter,sans-serif', width: '100%' }}>
+                      <span>📝</span>
+                      {transcriptOpen ? 'Hide' : 'Show'} Transcript
+                      <span style={{ marginLeft: 'auto', fontSize: '12px' }}>{transcriptOpen ? '▲' : '▼'}</span>
+                    </button>
+                    {transcriptOpen && (
+                      <div style={{ marginTop: '8px', fontSize: '12px', color: '#4a5568', lineHeight: 1.8, whiteSpace: 'pre-wrap', background: '#f8fafc', borderRadius: '8px', padding: '14px 16px', maxHeight: '320px', overflowY: 'auto' }}>
+                        {c.transcript || 'No transcript available for this call.'}
+                      </div>
+                    )}
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
