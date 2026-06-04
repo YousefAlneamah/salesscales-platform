@@ -1730,7 +1730,7 @@ cron.schedule('0 8 1 * *', async () => {
             .order('created_at', { ascending: false }).limit(1).maybeSingle();
           const amount = contract?.monthly_fee
             ? parseFloat(contract.monthly_fee)
-            : (ZAINAB_TIER_FEE[(client.tier || '').toLowerCase()] || 997);
+            : (ZAINAB_TIER_FEE[(client.tier || '').toLowerCase()] || 199);
           const invoiceNumber = `SS-${Date.now().toString(36).toUpperCase()}`;
           const issuedDate = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
           const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -5519,7 +5519,7 @@ app.get('/clients/ltv', async (req, res) => {
     if (!clients || clients.length === 0) return res.json({ clients: [] });
     const results = await Promise.all(clients.map(async (client) => {
       const monthsActive = Math.max(1, Math.floor((Date.now() - new Date(client.created_at)) / (30.44 * 86400000)));
-      const monthlyFee = TIER_PRICES[client.tier] || TIER_PRICES[client.tier?.toLowerCase()] || 997;
+      const monthlyFee = TIER_PRICES[client.tier] || TIER_PRICES[client.tier?.toLowerCase()] || 199;
       const totalSubscription = monthlyFee * monthsActive;
       const { count: completedEnrollments } = await supabase
         .from('workflow_enrollments').select('id', { count: 'exact', head: true })
@@ -6420,7 +6420,7 @@ app.get('/clients/success-scores', async (req, res) => {
     const now = new Date();
     const scores = await Promise.all(clients.map(async (c) => {
       const monthsActive = Math.max(1, Math.round((now - new Date(c.created_at)) / (30 * 24 * 3600 * 1000)));
-      const monthlyFee = TIER_PRICE[c.tier?.toLowerCase()] || 997;
+      const monthlyFee = TIER_PRICE[c.tier?.toLowerCase()] || 199;
       const totalPaid = monthlyFee * monthsActive;
 
       const [enrollRes, contactRes, prevContactRes] = await Promise.all([
@@ -7259,7 +7259,7 @@ app.get('/contracts/generate', async (req, res) => {
       enterprise: 'Custom scope as agreed in writing',
     };
     const tier        = (client.tier || 'starter').toLowerCase();
-    const fee         = TIER_FEES[tier] || '$997';
+    const fee         = TIER_FEES[tier] || '$199';
     const services    = TIER_SVCS[tier] || TIER_SVCS.starter;
     const today       = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
     const year        = new Date().getFullYear();

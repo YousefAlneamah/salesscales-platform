@@ -2415,11 +2415,12 @@ export default function ClientDashboard({ user, onLogout }) {
 
         {(() => {
           const TIER_ORDER = ['starter', 'growth', 'elite'];
-          const TIER_PRICES = { starter: '$199', growth: '$299', elite: '$399' };
+          const TIER_PRICES = { starter: '$199', growth: '$299', elite: '$399', scale: '$399' };
           const TIER_FEATURES = {
-            starter: ['Email sequences', 'CRM & contacts', 'Up to 3 sequences', 'AI team — Hussain, Zainab, Fatima'],
-            growth:  ['Everything in Starter', 'SMS sequences', 'Unlimited sequences', 'Full AI team (6 members)', 'Klaviyo + Meta Ads + HubSpot'],
-            elite:   ['Everything in Growth', 'WhatsApp automation', 'Voice AI agents', 'Shopify live data', 'Canva & Higgsfield AI briefs'],
+            starter: ['Email sequences & automation', 'Unlimited contacts', 'Cart recovery sequences', 'AI team — Hussain, Zainab, Fatima'],
+            growth:  ['Everything in Starter', 'SMS sequences & automation', 'Unlimited sequences', 'Full AI team — all 6 members', 'Klaviyo + Meta Ads + HubSpot'],
+            elite:   ['Everything in Growth', 'WhatsApp automation', 'Voice AI agents (outbound calls)', 'Shopify live data sync', 'Canva & Higgsfield AI briefs'],
+            scale:   ['Everything in Growth', 'WhatsApp automation', 'Voice AI agents (outbound calls)', 'Shopify live data sync', 'Canva & Higgsfield AI briefs'],
           };
           const currentTier = (user.tier || 'starter').toLowerCase();
           const currentIdx = TIER_ORDER.indexOf(currentTier);
@@ -2430,7 +2431,7 @@ export default function ClientDashboard({ user, onLogout }) {
               <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '16px' }}>Your Plan</div>
               <div style={{ background: 'linear-gradient(135deg, #0a1628, #112240)', borderRadius: '10px', padding: '16px 18px', marginBottom: '14px', border: '1px solid rgba(201,168,76,0.2)' }}>
                 <div style={{ fontSize: '9px', color: '#c9a84c', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>{currentTier} Plan · Active</div>
-                <div style={{ fontSize: '20px', fontWeight: 700, color: 'white', marginBottom: '4px' }}>{TIER_PRICES[currentTier] || '$997'}<span style={{ fontSize: '11px', fontWeight: 400, color: 'rgba(255,255,255,0.4)' }}>/mo</span></div>
+                <div style={{ fontSize: '20px', fontWeight: 700, color: 'white', marginBottom: '4px' }}>{TIER_PRICES[currentTier] || '$199'}<span style={{ fontSize: '11px', fontWeight: 400, color: 'rgba(255,255,255,0.4)' }}>/mo</span></div>
                 <ul style={{ margin: '8px 0 0', padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '3px' }}>
                   {(TIER_FEATURES[currentTier] || []).map(f => (
                     <li key={f} style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -2502,7 +2503,7 @@ export default function ClientDashboard({ user, onLogout }) {
           <div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
               {[
-                { label: 'Plan', value: billing.tier || '—' },
+                { label: 'Plan', value: (billing.tier || '—').charAt(0).toUpperCase() + (billing.tier || '').slice(1) },
                 { label: 'Status', value: billing.paypal_status || '—' },
                 { label: 'Next Billing', value: billing.next_billing_date ? new Date(billing.next_billing_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' },
                 { label: 'Last Payment', value: billing.last_payment?.time ? new Date(billing.last_payment.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' },
@@ -2513,7 +2514,7 @@ export default function ClientDashboard({ user, onLogout }) {
                 </div>
               ))}
             </div>
-            <div style={{ fontSize: '11px', color: '#8896a8', lineHeight: 1.6 }}>
+            <div style={{ fontSize: '11px', color: '#8896a8', lineHeight: 1.6, marginBottom: billing?.performance_fee_enabled !== false ? '14px' : 0 }}>
               Subscription ID: <span style={{ fontFamily: 'DM Mono, monospace', fontSize: '10px' }}>{billing.subscription_id}</span>
             </div>
           </div>
@@ -2522,11 +2523,11 @@ export default function ClientDashboard({ user, onLogout }) {
             <div style={{ fontSize: '12px', color: '#8896a8', marginBottom: '16px', lineHeight: 1.6 }}>
               No active subscription. Subscribe via PayPal to enable automated recurring billing.
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
               {[
-                { key: 'starter', label: 'Starter', price: '$199/mo', desc: 'Email sequences, CRM, AI team (Hussain, Zainab, Fatima)' },
-                { key: 'growth',  label: 'Growth',  price: '$299/mo', desc: 'Everything in Starter + SMS, full AI team, Klaviyo, Meta Ads, HubSpot' },
-                { key: 'elite',   label: 'Elite',   price: '$399/mo', desc: 'Everything in Growth + WhatsApp, voice agents, Shopify live data, Canva & Higgsfield AI' },
+                { key: 'starter', label: 'Starter', price: '$199/mo', desc: 'Email sequences only · unlimited contacts' },
+                { key: 'growth',  label: 'Growth',  price: '$299/mo', desc: 'Email + SMS · unlimited contacts · full AI team' },
+                { key: 'elite',   label: 'Scale',   price: '$399/mo', desc: 'Email + SMS + WhatsApp + calls · full AI team' },
               ].map(plan => (
                 <div key={plan.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f8fafc', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '12px 16px' }}>
                   <div>
@@ -2541,6 +2542,46 @@ export default function ClientDashboard({ user, onLogout }) {
                   </button>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Performance Fee Panel — always visible */}
+        {!billingLoading && billing?.performance_fee_enabled !== false && (
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '16px 18px', marginTop: billing?.has_subscription ? 0 : 0 }}>
+            <div style={{ fontSize: '9px', color: '#92400e', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '12px' }}>
+              Performance Fee — 10% of Revenue Recovered
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+              {[
+                {
+                  label: 'Recovered This Month',
+                  value: `$${(billing?.recovered_revenue || 0).toLocaleString()}`,
+                  sub: 'platform attributed',
+                  color: '#c9a84c',
+                },
+                {
+                  label: 'Estimated Fee',
+                  value: `$${(billing?.estimated_fee || 0).toLocaleString()}`,
+                  sub: 'added to next invoice',
+                  color: '#0a1628',
+                },
+                {
+                  label: billing?.last_perf_month ? `Fee — ${billing.last_perf_month}` : 'Last Month Fee',
+                  value: billing?.last_perf_fee > 0 ? `$${billing.last_perf_fee.toLocaleString()}` : '—',
+                  sub: billing?.last_perf_status || 'no data yet',
+                  color: '#0a1628',
+                },
+              ].map(s => (
+                <div key={s.label} style={{ background: 'white', border: '1px solid #fde68a', borderRadius: '8px', padding: '10px 12px' }}>
+                  <div style={{ fontSize: '8px', color: '#92400e', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '4px', lineHeight: 1.4 }}>{s.label}</div>
+                  <div style={{ fontSize: '16px', fontWeight: 800, color: s.color, lineHeight: 1, marginBottom: '3px' }}>{s.value}</div>
+                  <div style={{ fontSize: '9px', color: '#b45309', fontWeight: 500 }}>{s.sub}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: '10px', color: '#92400e', lineHeight: 1.7 }}>
+              You pay your base plan fee each month plus <strong>10% of the revenue Sales Scales directly recovers</strong> for your store through sequences. This aligns our incentives — we only earn the performance fee when you do.
             </div>
           </div>
         )}

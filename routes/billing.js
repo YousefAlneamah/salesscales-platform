@@ -386,9 +386,26 @@ module.exports = ({ supabase, axios, sgMail, storeBriefing }) => {
     if (!client_id) return res.status(400).json({ error: 'client_id required' });
     try {
       const { data: client } = await supabase.from('clients')
-        .select('id, name, tier, status, paypal_subscription_id')
+        .select('id, name, tier, status, paypal_subscription_id, recovered_revenue, performance_fee_enabled')
         .eq('id', client_id).maybeSingle();
       if (!client) return res.status(404).json({ error: 'Client not found' });
+
+      // Fetch last month's performance fee record
+      const lastMonthDate = new Date();
+      lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
+      const lastMonthLabel = lastMonthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      const { data: lastFeeRow } = await supabase.from('performance_fees')
+        .select('fee_amount, month, status').eq('client_id', client_id)
+        .eq('month', lastMonthLabel).maybeSingle().catch(() => ({ data: null }));
+
+      const perfBase = {
+        recovered_revenue: parseFloat(client.recovered_revenue || 0),
+        performance_fee_enabled: client.performance_fee_enabled !== false,
+        estimated_fee: Math.round(parseFloat(client.recovered_revenue || 0) * 0.10 * 100) / 100,
+        last_perf_fee: lastFeeRow ? parseFloat(lastFeeRow.fee_amount || 0) : 0,
+        last_perf_month: lastFeeRow?.month || null,
+        last_perf_status: lastFeeRow?.status || null,
+      };
 
       if (!client.paypal_subscription_id || !ppConfigured()) {
         return res.json({
@@ -399,6 +416,7 @@ module.exports = ({ supabase, axios, sgMail, storeBriefing }) => {
           paypal_status: null,
           next_billing_date: null,
           last_payment: null,
+          ...perfBase,
         });
       }
 
@@ -416,9 +434,26 @@ module.exports = ({ supabase, axios, sgMail, storeBriefing }) => {
         paypal_status: sub.status,
         next_billing_date: sub.billing_info?.next_billing_time || null,
         last_payment: sub.billing_info?.last_payment || null,
+        ...perfBase,
       });
     } catch (e) {
       console.error('/billing/status error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── POST /billing/reset-plans ────────────────────────────
+  // Force PayPal to recreate subscription plans at new prices ($199/$299/$399).
+  // Call once after updating PLANS prices — clears cached plan IDs so next
+  // /billing/create-plan call creates fresh plans at the correct amounts.
+  router.post('/reset-plans', async (req, res) => {
+    try {
+      await Promise.all(
+        ['paypal_plan_starter', 'paypal_plan_growth', 'paypal_plan_elite', 'paypal_plan_scale']
+          .map(key => supabase.from('billing_config').delete().eq('id', key))
+      );
+      res.json({ ok: true, message: 'PayPal plan IDs cleared — call /billing/create-plan to regenerate at $199/$299/$399' });
+    } catch (e) {
       res.status(500).json({ error: e.message });
     }
   });

@@ -33,41 +33,43 @@ const PLANS = [
   {
     name: 'Starter',
     price: '$199',
+    sub: 'Email sequences only',
     highlight: false,
     features: [
-      'Email sequences',
+      'Email sequences & automation',
+      'Unlimited contacts',
+      'Cart recovery sequences',
       'CRM & contact management',
-      'Monthly analytics report',
-      'Up to 3 active sequences',
       'AI team — Hussain, Zainab, Fatima',
+      'Monthly analytics report',
     ],
   },
   {
     name: 'Growth',
     price: '$299',
+    sub: 'Email + SMS',
     highlight: true,
     features: [
       'Everything in Starter',
-      'SMS sequences',
-      'Unlimited sequences',
-      'Klaviyo integration',
-      'Meta Ads reporting',
-      'HubSpot CRM sync',
-      'Full AI team (6 members)',
+      'SMS sequences & automation',
+      'Unlimited contacts & sequences',
+      'Full AI team — all 6 members',
+      'Klaviyo, Meta Ads & HubSpot sync',
+      'Weekly strategy briefs',
     ],
   },
   {
     name: 'Scale',
     price: '$399',
+    sub: 'Email + SMS + WhatsApp + Calls',
     highlight: false,
     features: [
       'Everything in Growth',
       'WhatsApp automation',
-      'Voice AI agents (calls)',
+      'Voice AI agents — outbound calls',
       'Shopify live data sync',
       'Canva & Higgsfield AI briefs',
       'Competitor intelligence',
-      'Monthly executive reports',
     ],
   },
 ];
@@ -296,12 +298,13 @@ export default function LandingPage({ onLoginClick }) {
           Most Popular
         </div>
       )}
-      <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: plan.highlight ? GOLD : MUTED, marginBottom: '12px' }}>{plan.name}</div>
-      <div style={{ fontSize: '36px', fontWeight: 800, color: plan.highlight ? WHITE : NAVY, letterSpacing: '-1.5px', marginBottom: '4px' }}>{plan.price}<span style={{ fontSize: '14px', fontWeight: 500, color: plan.highlight ? 'rgba(255,255,255,0.5)' : MUTED }}>/mo</span></div>
-      <div style={{ fontSize: '11px', color: plan.highlight ? 'rgba(201,168,76,0.85)' : '#c9a84c', fontWeight: 600, marginBottom: '16px', lineHeight: 1.5 }}>
+      <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: plan.highlight ? GOLD : MUTED, marginBottom: '6px' }}>{plan.name}</div>
+      <div style={{ fontSize: '13px', fontWeight: 600, color: plan.highlight ? 'rgba(255,255,255,0.6)' : '#4a5568', marginBottom: '14px' }}>{plan.sub}</div>
+      <div style={{ fontSize: '36px', fontWeight: 800, color: plan.highlight ? WHITE : NAVY, letterSpacing: '-1.5px', marginBottom: '6px' }}>{plan.price}<span style={{ fontSize: '14px', fontWeight: 500, color: plan.highlight ? 'rgba(255,255,255,0.5)' : MUTED }}>/mo</span></div>
+      <div style={{ background: plan.highlight ? 'rgba(201,168,76,0.12)' : '#fffbeb', border: `1px solid ${plan.highlight ? 'rgba(201,168,76,0.25)' : '#fde68a'}`, borderRadius: '7px', padding: '7px 12px', marginBottom: '16px', fontSize: '11px', color: plan.highlight ? 'rgba(201,168,76,0.9)' : '#92400e', fontWeight: 600, lineHeight: 1.5 }}>
         {PERFORMANCE_FEE_NOTE}
       </div>
-      <div style={{ height: '1px', background: plan.highlight ? 'rgba(255,255,255,0.1)' : BORDER, margin: '16px 0' }} />
+      <div style={{ height: '1px', background: plan.highlight ? 'rgba(255,255,255,0.1)' : BORDER, margin: '14px 0' }} />
       <ul style={{ padding: 0, listStyle: 'none', margin: '0 0 28px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {plan.features.map(f => (
           <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', fontSize: '13px', color: plan.highlight ? 'rgba(255,255,255,0.8)' : '#4a5568' }}>
