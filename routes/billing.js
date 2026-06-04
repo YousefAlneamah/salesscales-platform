@@ -6,9 +6,10 @@ const PAYPAL_BASE = () =>
     : 'https://api-m.sandbox.paypal.com';
 
 const PLANS = {
-  starter: { name: 'Sales Scales Starter',  price: '997.00',  label: 'Starter' },
-  growth:  { name: 'Sales Scales Growth',   price: '1997.00', label: 'Growth' },
-  elite:   { name: 'Sales Scales Elite',    price: '2997.00', label: 'Elite' },
+  starter: { name: 'Sales Scales Starter',  price: '199.00', label: 'Starter' },
+  growth:  { name: 'Sales Scales Growth',   price: '299.00', label: 'Growth' },
+  elite:   { name: 'Sales Scales Elite',    price: '399.00', label: 'Elite' },
+  scale:   { name: 'Sales Scales Scale',    price: '399.00', label: 'Scale' },
 };
 
 const successHtml = (title, body) => `<!DOCTYPE html>

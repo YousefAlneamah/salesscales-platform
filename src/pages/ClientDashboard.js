@@ -75,6 +75,7 @@ export default function ClientDashboard({ user, onLogout }) {
   const [workflowStepsMap, setWorkflowStepsMap] = useState({});
   const [onboardingSteps, setOnboardingSteps] = useState(null);
   const [daysSinceJoined, setDaysSinceJoined] = useState(null);
+  const [attribution, setAttribution] = useState(null);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('cd_dark') === '1');
   const [lang, setLang] = useState(() => localStorage.getItem('cd_lang') || 'en');
   const [helpOpen, setHelpOpen] = useState(false);
@@ -148,6 +149,12 @@ export default function ClientDashboard({ user, onLogout }) {
       .then(r => setProducts(r.data.products || []))
       .catch(() => setProducts([]));
   }, [user.clientId]);
+
+  useEffect(() => {
+    axios.get(`${API_BASE}/revenue/attribution?client_id=${user.clientId}`)
+      .then(r => setAttribution(r.data))
+      .catch(() => setAttribution(null));
+  }, [user.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     (async () => {
@@ -475,6 +482,54 @@ export default function ClientDashboard({ user, onLogout }) {
           })}
         </svg>
       </div>
+
+      {/* REVENUE OVERVIEW (attribution) */}
+      {attribution && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+            <div style={{ background: 'rgba(15,31,53,0.8)', border: '1px solid rgba(16,185,129,0.2)', borderTop: '2px solid #10b981', borderRadius: 16, padding: '20px 22px' }}>
+              <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 8 }}>Store Total Revenue</div>
+              <div style={{ fontSize: 30, fontWeight: 800, color: '#f0f4f8', marginBottom: 4 }}>
+                {attribution.store_revenue > 0 ? `$${attribution.store_revenue.toLocaleString()}` : <span style={{ fontSize: 13, color: '#4a5568' }}>Connect Shopify to track</span>}
+              </div>
+              <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600 }}>from your Shopify store this month</div>
+            </div>
+            <div style={{ background: 'rgba(15,31,53,0.8)', border: '1px solid rgba(201,168,76,0.2)', borderTop: '2px solid #c9a84c', borderRadius: 16, padding: '20px 22px' }}>
+              <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 8 }}>Platform Recovered Revenue</div>
+              <div style={{ fontSize: 30, fontWeight: 800, color: '#c9a84c', marginBottom: 4 }}>${attribution.platform_revenue.toLocaleString()}</div>
+              <div style={{ fontSize: 11, color: '#c9a84c', fontWeight: 600 }}>{attribution.completed_enrollments} converted · ${attribution.aov} avg order</div>
+            </div>
+          </div>
+          <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, padding: '20px 24px', marginBottom: 14 }}>
+            <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 14 }}>Channel Breakdown</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 80px 80px', gap: 8, marginBottom: 8 }}>
+              {['Channel', 'Sent', 'Rate', 'Revenue'].map(h => (
+                <div key={h} style={{ fontSize: 8, color: '#4a5568', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace' }}>{h}</div>
+              ))}
+            </div>
+            {(attribution.channel_breakdown || []).map(ch => (
+              <div key={ch.channel} style={{ display: 'grid', gridTemplateColumns: '1fr 70px 80px 80px', gap: 8, padding: '8px 0', borderTop: '1px solid rgba(255,255,255,0.04)', alignItems: 'center' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#f0f4f8' }}>{ch.channel}</div>
+                <div style={{ fontSize: 12, color: '#8896a8' }}>{ch.sent.toLocaleString()}</div>
+                <div style={{ fontSize: 12, color: ch.rate >= 20 ? '#10b981' : ch.rate >= 10 ? '#c9a84c' : '#8896a8', fontWeight: 600 }}>{ch.rate}%</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#f0f4f8' }}>{ch.revenue > 0 ? `$${ch.revenue.toLocaleString()}` : '—'}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ background: 'linear-gradient(135deg, #0a1628, #112240)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 14, padding: '16px 22px', marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: 9, color: '#c9a84c', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Platform ROI</div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', lineHeight: 1.6 }}>
+                You pay <span style={{ color: '#f0f4f8', fontWeight: 700 }}>${attribution.monthly_cost}/mo</span> · Platform recovered <span style={{ color: '#c9a84c', fontWeight: 700 }}>${attribution.platform_revenue.toLocaleString()}</span> this month
+              </div>
+            </div>
+            <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 20 }}>
+              <div style={{ fontSize: 36, fontWeight: 800, color: '#c9a84c', letterSpacing: '-1px', lineHeight: 1 }}>{attribution.roi}×</div>
+              <div style={{ fontSize: 9, color: '#4a5568', fontWeight: 700, fontFamily: 'DM Mono,monospace' }}>ROI</div>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ONBOARDING PROGRESS */}
       {onboardingSteps && !allDone && (
@@ -2277,11 +2332,11 @@ export default function ClientDashboard({ user, onLogout }) {
 
         {(() => {
           const TIER_ORDER = ['starter', 'growth', 'elite'];
-          const TIER_PRICES = { starter: '$997', growth: '$1,997', elite: '$2,997' };
+          const TIER_PRICES = { starter: '$199', growth: '$299', elite: '$399' };
           const TIER_FEATURES = {
-            starter: ['Email + SMS automation', 'Full AI team (6 members)', 'CRM & contacts', 'Up to 3 sequences'],
-            growth:  ['Everything in Starter', 'WhatsApp automation', 'Unlimited sequences', 'Klaviyo + Meta Ads + HubSpot'],
-            elite:   ['Everything in Growth', 'Voice AI agents', 'Shopify live data', 'Canva & Higgsfield AI briefs'],
+            starter: ['Email sequences', 'CRM & contacts', 'Up to 3 sequences', 'AI team — Hussain, Zainab, Fatima'],
+            growth:  ['Everything in Starter', 'SMS sequences', 'Unlimited sequences', 'Full AI team (6 members)', 'Klaviyo + Meta Ads + HubSpot'],
+            elite:   ['Everything in Growth', 'WhatsApp automation', 'Voice AI agents', 'Shopify live data', 'Canva & Higgsfield AI briefs'],
           };
           const currentTier = (user.tier || 'starter').toLowerCase();
           const currentIdx = TIER_ORDER.indexOf(currentTier);
@@ -2386,9 +2441,9 @@ export default function ClientDashboard({ user, onLogout }) {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {[
-                { key: 'starter', label: 'Starter', price: '$997/mo', desc: 'Email, SMS, workflows, AI team, CRM' },
-                { key: 'growth',  label: 'Growth',  price: '$1,997/mo', desc: 'Everything in Starter + WhatsApp, Klaviyo, Meta Ads, HubSpot' },
-                { key: 'elite',   label: 'Elite',   price: '$2,997/mo', desc: 'Everything in Growth + voice agents, Shopify live data, Canva & Higgsfield AI' },
+                { key: 'starter', label: 'Starter', price: '$199/mo', desc: 'Email sequences, CRM, AI team (Hussain, Zainab, Fatima)' },
+                { key: 'growth',  label: 'Growth',  price: '$299/mo', desc: 'Everything in Starter + SMS, full AI team, Klaviyo, Meta Ads, HubSpot' },
+                { key: 'elite',   label: 'Elite',   price: '$399/mo', desc: 'Everything in Growth + WhatsApp, voice agents, Shopify live data, Canva & Higgsfield AI' },
               ].map(plan => (
                 <div key={plan.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f8fafc', border: '1px solid #e4e9f0', borderRadius: '10px', padding: '12px 16px' }}>
                   <div>

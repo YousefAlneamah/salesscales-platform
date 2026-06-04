@@ -1653,7 +1653,7 @@ cron.schedule('0 8 1 * *', async () => {
     const monthEnd = thisMonthStart.toISOString();
     const period = prevMonthStart.toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
-    const ZAINAB_TIER_FEE = { starter: 997, growth: 1997, scale: 3997, enterprise: 4997 };
+    const ZAINAB_TIER_FEE = { starter: 199, growth: 299, scale: 399, elite: 399, enterprise: 399 };
     let reportsGenerated = 0;
     let emailsSentCount = 0;
     let invoicesGenerated = 0;
@@ -4518,6 +4518,25 @@ app.post('/test/trigger-webhook', async (req, res) => {
 
     step('Contact enrolled successfully', { enrollment_id: enrollment.id });
 
+    // Fire-and-forget: Ali generates personalized NEPQ call script for cart recovery
+    (async () => {
+      try {
+        const [clientData, msgData, ragCtx] = await Promise.all([
+          supabase.from('clients').select('name, niche').eq('id', client_id).maybeSingle().then(r => r.data),
+          supabase.from('messages').select('channel, direction, content, created_at').eq('contact_id', contact.id).order('created_at', { ascending: false }).limit(10).then(r => r.data || []),
+          ragSearch(`cart recovery NEPQ ${client?.name || ''} call script`, client_id).catch(() => ''),
+        ]);
+        const script = await generateAliCallScript(contact, msgData, ragCtx, clientData?.name || '');
+        const contactName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || email;
+        const objLines = Object.entries(script.objections || {}).map(([k, v]) => `${k}: ${v}`).join('\n');
+        const briefingContent = [`NEPQ CART RECOVERY BRIEF — ${contactName}`, `Store: ${clientData?.name || ''} (${clientData?.niche || 'ecommerce'})`, '', '── OPENING ──', script.opening || '', '', '── SITUATION QUESTIONS ──', (script.situation_questions || []).join('\n'), '', '── PROBLEM AWARENESS ──', (script.problem_questions || []).join('\n'), '', '── CONSEQUENCE QUESTIONS ──', (script.consequence_questions || []).join('\n'), '', '── CLOSE ──', script.close || '', '', '── OBJECTION HANDLERS ──', objLines].join('\n');
+        await storeBriefing('ali', 'yousef', `Cart Recovery Brief — ${contactName} (${clientData?.name || 'Client'})`, briefingContent, 'high', client_id, contact.id);
+        console.log(`[TriggerWebhook] Ali call brief stored for ${contactName}`);
+      } catch (e) {
+        console.error('[TriggerWebhook] Ali script generation failed:', e.message);
+      }
+    })();
+
     await supabase.from('activity').insert([{
       contact_id: contact.id, client_id,
       type: 'test_webhook',
@@ -5493,7 +5512,7 @@ app.get('/nps/submit', async (req, res) => {
 
 // ─── FIX 5: CLIENT LTV ENDPOINT ───────────────────────────
 // SQL: no new tables needed — uses existing clients + workflow_enrollments
-const TIER_PRICES = { starter: 997, growth: 1997, elite: 2997, 'Starter': 997, 'Growth': 1997, 'Elite': 2997 };
+const TIER_PRICES = { starter: 199, growth: 299, elite: 399, scale: 399, 'Starter': 199, 'Growth': 299, 'Elite': 399, 'Scale': 399 };
 app.get('/clients/ltv', async (req, res) => {
   try {
     const { data: clients } = await supabase.from('clients').select('id, name, tier, created_at, status');
@@ -5968,7 +5987,7 @@ app.get('/client-comms', async (req, res) => {
 // ─── FIX 4: AUTOMATED INVOICE EMAIL — 1ST OF MONTH 9AM ───
 cron.schedule('0 9 1 * *', async () => {
   console.log('[AUTO] Monthly invoice email sending starting...');
-  const TIER_PRICES_MAP = { starter: 997, growth: 1997, elite: 2997, Starter: 997, Growth: 1997, Elite: 2997 };
+  const TIER_PRICES_MAP = { starter: 199, growth: 299, elite: 399, scale: 399, Starter: 199, Growth: 299, Elite: 399, Scale: 399 };
   try {
     const { data: clients } = await supabase.from('clients').select('id, name, tier, status').eq('status', 'active');
     if (!clients || clients.length === 0) return;
@@ -5978,7 +5997,7 @@ cron.schedule('0 9 1 * *', async () => {
       try {
         const { data: users } = await supabase.from('client_users').select('email, name').eq('client_id', client.id);
         if (!users || users.length === 0) continue;
-        const amount = TIER_PRICES_MAP[client.tier] || 997;
+        const amount = TIER_PRICES_MAP[client.tier] || 199;
         const invNum = `SS-${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2,'0')}-${client.id.slice(0,6).toUpperCase()}`;
         const { data: inv } = await supabase.from('invoices').insert([{
           invoice_number: invNum, client_id: client.id, client_name: client.name,
@@ -6080,8 +6099,8 @@ app.post('/referrals/process-reward', async (req, res) => {
     const { data: referrerClient } = await supabase.from('client_users').select('client_id').eq('email', referral.referrer_email).maybeSingle();
     if (!referrerClient) return res.json({ ok: false, note: 'Referrer not a platform client — cannot auto-credit' });
     const { data: clientData } = await supabase.from('clients').select('tier').eq('id', referrerClient.client_id).maybeSingle();
-    const TIER_P = { starter: 997, growth: 1997, elite: 2997, Starter: 997, Growth: 1997, Elite: 2997 };
-    const creditAmount = TIER_P[clientData?.tier] || 997;
+    const TIER_P = { starter: 199, growth: 299, elite: 399, scale: 399, Starter: 199, Growth: 299, Elite: 399, Scale: 399 };
+    const creditAmount = TIER_P[clientData?.tier] || 199;
     const { data: credit, error } = await supabase.from('credits').insert([{
       client_id: referrerClient.client_id, amount: creditAmount,
       reason: `Referral reward — ${referral.referred_business} converted`, applied: false,
@@ -6249,7 +6268,7 @@ app.put('/clients/:id/tier', async (req, res) => {
   const valid = ['starter', 'growth', 'elite'];
   if (!tier || !valid.includes(tier.toLowerCase())) return res.status(400).json({ error: 'tier must be starter, growth, or elite' });
   const tierFormatted = tier.charAt(0).toUpperCase() + tier.slice(1).toLowerCase();
-  const TIER_PRICES = { Starter: 997, Growth: 1997, Elite: 2997 };
+  const TIER_PRICES = { Starter: 199, Growth: 299, Elite: 399, Scale: 399 };
   try {
     const { data: client, error } = await supabase.from('clients').update({ tier: tierFormatted }).eq('id', req.params.id).select().single();
     if (error) throw error;
@@ -6393,7 +6412,7 @@ app.get('/health/detailed', async (req, res) => {
 });
 
 // ─── FIX 6: CLIENT SUCCESS SCORES ────────────────────────
-const TIER_PRICE = { starter: 997, growth: 1997, scale: 3997, enterprise: 5000 };
+const TIER_PRICE = { starter: 199, growth: 299, scale: 399, elite: 399, enterprise: 399 };
 app.get('/clients/success-scores', async (req, res) => {
   try {
     const { data: clients } = await supabase.from('clients').select('id, name, tier, health_score, created_at, status');
@@ -7232,7 +7251,7 @@ app.get('/contracts/generate', async (req, res) => {
     const { data: client } = await supabase.from('clients').select('name, tier').eq('id', client_id).maybeSingle();
     if (!client) return res.status(404).json({ error: 'Client not found' });
 
-    const TIER_FEES   = { starter: '$997', growth: '$1,997', elite: '$2,997', enterprise: 'Custom' };
+    const TIER_FEES   = { starter: '$199', growth: '$299', elite: '$399', scale: '$399', enterprise: 'Custom' };
     const TIER_SVCS   = {
       starter:    'Email automation, SMS automation, CRM & contacts, AI team (6 members), up to 3 active sequences',
       growth:     'Everything in Starter, plus WhatsApp automation, unlimited sequences, Klaviyo, Meta Ads, HubSpot CRM integrations',
@@ -7479,6 +7498,201 @@ app.put('/client-team/update-role', async (req, res) => {
     res.json({ ok: true, member: data });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── REVENUE ATTRIBUTION ─────────────────────────────────
+// SQL (run once in Supabase SQL editor):
+// ALTER TABLE clients ADD COLUMN IF NOT EXISTS recovered_revenue numeric DEFAULT 0;
+// ALTER TABLE clients ADD COLUMN IF NOT EXISTS performance_fee_enabled boolean DEFAULT true;
+// CREATE TABLE IF NOT EXISTS performance_fees (id uuid DEFAULT gen_random_uuid() PRIMARY KEY, client_id uuid REFERENCES clients(id), month text, revenue_amount numeric DEFAULT 0, fee_amount numeric DEFAULT 0, status text DEFAULT 'pending', created_at timestamptz DEFAULT now());
+// CREATE TABLE IF NOT EXISTS revenue_attribution (id uuid DEFAULT gen_random_uuid() PRIMARY KEY, client_id uuid REFERENCES clients(id), contact_id uuid REFERENCES contacts(id), order_id text, order_value numeric DEFAULT 0, channel text, workflow_id uuid, attributed_at timestamptz DEFAULT now());
+const ATTR_TIER_FEES = { starter: 199, growth: 299, elite: 399, scale: 399, enterprise: 399 };
+
+app.get('/revenue/attribution', async (req, res) => {
+  const { client_id } = req.query;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+  try {
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+    const [clientRes, onboardingRes] = await Promise.all([
+      supabase.from('clients').select('id, name, tier, recovered_revenue').eq('id', client_id).maybeSingle(),
+      supabase.from('client_onboarding').select('average_order_value').eq('client_id', client_id).maybeSingle(),
+    ]);
+    const client = clientRes.data;
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+
+    const parseAovLocal = (text) => {
+      if (!text) return 75;
+      if (text.includes('Under')) return 25;
+      if (text === '$30–75') return 52;
+      if (text === '$75–150') return 112;
+      if (text === '$150–300') return 225;
+      if (text.includes('Over')) return 350;
+      return 75;
+    };
+    const aov = parseAovLocal(onboardingRes.data?.average_order_value);
+    const monthlyCost = ATTR_TIER_FEES[(client.tier || '').toLowerCase()] || 199;
+
+    const { count: completedMonth } = await supabase.from('workflow_enrollments')
+      .select('id', { count: 'exact', head: true })
+      .eq('client_id', client_id).eq('status', 'completed').gte('completed_at', monthStart);
+
+    const platformRevenue = (completedMonth || 0) * aov;
+    const attrRevenue = (client.recovered_revenue && client.recovered_revenue > 0) ? client.recovered_revenue : platformRevenue;
+
+    const channelDefs = [
+      { channel: 'Email', rateLabel: 'Open Rate', dbChannel: 'Email' },
+      { channel: 'SMS', rateLabel: 'Reply Rate', dbChannel: 'SMS' },
+      { channel: 'WhatsApp', rateLabel: 'Reply Rate', dbChannel: 'WhatsApp' },
+      { channel: 'Voice', rateLabel: 'Connect Rate', dbChannel: 'Voice' },
+    ];
+    const channelBreakdown = await Promise.all(channelDefs.map(async ({ channel, rateLabel, dbChannel }) => {
+      const [sentRes, openedRes, repliedRes] = await Promise.all([
+        supabase.from('messages').select('id', { count: 'exact', head: true })
+          .eq('client_id', client_id).eq('channel', dbChannel).eq('direction', 'outbound').gte('created_at', monthStart),
+        supabase.from('messages').select('id', { count: 'exact', head: true })
+          .eq('client_id', client_id).eq('channel', dbChannel).eq('direction', 'outbound')
+          .not('opened_at', 'is', null).gte('created_at', monthStart),
+        supabase.from('messages').select('id', { count: 'exact', head: true })
+          .eq('client_id', client_id).eq('channel', dbChannel).eq('direction', 'inbound').gte('created_at', monthStart),
+      ]);
+      const sent = sentRes.count || 0;
+      const openedCount = channel === 'Email' ? (openedRes.count || 0) : (repliedRes.count || 0);
+      const rate = sent > 0 ? Math.round((openedCount / sent) * 100) : 0;
+      const revenue = sent > 0 ? Math.round((openedCount / Math.max(sent, 1)) * (attrRevenue / 4)) : 0;
+      return { channel, sent, rate, rateLabel, revenue };
+    }));
+
+    const roi = monthlyCost > 0 ? parseFloat((attrRevenue / monthlyCost).toFixed(2)) : 0;
+    res.json({ store_revenue: 0, platform_revenue: attrRevenue, monthly_cost: monthlyCost, roi, aov, completed_enrollments: completedMonth || 0, channel_breakdown: channelBreakdown });
+  } catch (e) {
+    console.error('/revenue/attribution error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── SHOPIFY ORDER WEBHOOK (purchase attribution) ─────────
+app.post('/shopify/order-webhook', async (req, res) => {
+  const payload = req.body;
+  try {
+    const email = payload.email || payload.contact_email || '';
+    const shopDomain = req.headers['x-shopify-shop-domain'] || '';
+    const orderValue = parseFloat(payload.total_price || payload.subtotal_price || '0') || 0;
+    const orderId = String(payload.id || payload.order_number || Date.now());
+    if (!email) return res.json({ ok: false, reason: 'no_email' });
+    const { data: conn } = await supabase.from('shopify_connections').select('client_id').eq('shop', shopDomain).maybeSingle();
+    const client_id = conn?.client_id;
+    if (!client_id) return res.json({ ok: false, reason: 'shop_not_linked' });
+    const { data: contact } = await supabase.from('contacts').select('id').eq('email', email).eq('client_id', client_id).maybeSingle();
+    if (!contact) return res.json({ ok: false, reason: 'contact_not_found' });
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600000).toISOString();
+    const { data: enrollment } = await supabase.from('workflow_enrollments')
+      .select('id, workflow_id').eq('contact_id', contact.id).eq('client_id', client_id)
+      .gte('enrolled_at', sevenDaysAgo).maybeSingle();
+    if (!enrollment) return res.json({ ok: false, reason: 'no_recent_enrollment' });
+    // Store attribution
+    await supabase.from('revenue_attribution').insert([{
+      client_id, contact_id: contact.id, order_id: orderId,
+      order_value: orderValue, workflow_id: enrollment.workflow_id,
+    }]).catch(() => {});
+    // Increment recovered_revenue
+    const { data: cl } = await supabase.from('clients').select('recovered_revenue').eq('id', client_id).maybeSingle();
+    await supabase.from('clients').update({ recovered_revenue: ((cl?.recovered_revenue || 0) + orderValue) }).eq('id', client_id).catch(() => {});
+    console.log(`[Attribution] $${orderValue} attributed to client ${client_id} from order ${orderId}`);
+    res.json({ ok: true, attributed: orderValue });
+  } catch (e) {
+    console.error('/shopify/order-webhook error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── PERFORMANCE FEE LIST ─────────────────────────────────
+app.get('/performance-fees/list', async (req, res) => {
+  const { client_id } = req.query;
+  try {
+    let query = supabase.from('performance_fees').select('*, clients(name)').order('created_at', { ascending: false });
+    if (client_id) query = query.eq('client_id', client_id);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ fees: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── ALI GENERATE CALL SCRIPT (standalone endpoint) ───────
+app.post('/ali/generate-call-script', async (req, res) => {
+  const { contact_id, client_id, product_name, cart_value } = req.body;
+  if (!contact_id || !client_id) return res.status(400).json({ error: 'contact_id and client_id required' });
+  try {
+    const [contactRes, clientRes] = await Promise.all([
+      supabase.from('contacts').select('first_name, last_name, email, phone, pipeline_stage').eq('id', contact_id).maybeSingle(),
+      supabase.from('clients').select('name, niche').eq('id', client_id).maybeSingle(),
+    ]);
+    const contact = contactRes.data;
+    const client = clientRes.data;
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
+    const [ragCtx, briefCtx] = await Promise.all([
+      ragSearch(`cart recovery NEPQ sales call ${product_name || ''} ${client?.niche || ''}`, client_id).catch(() => ''),
+      getBriefingsContext('ali').catch(() => ''),
+    ]);
+    const contactName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || contact.email || 'the customer';
+    const context = [ragCtx, briefCtx].filter(Boolean).join('\n\n');
+    const productInfo = product_name ? `Abandoned product: ${product_name}` : '';
+    const valueInfo = cart_value ? `Cart value: $${cart_value}` : '';
+    const script = await generateAliCallScript(
+      { ...contact, abandoned_products: product_name || 'their cart items', cart_value: cart_value || null },
+      [],
+      context,
+      client?.name || ''
+    );
+    const briefingLines = [
+      `NEPQ CART RECOVERY CALL BRIEF — ${contactName}`,
+      `Store: ${client?.name || ''} (${client?.niche || 'ecommerce'})`,
+      productInfo, valueInfo, '',
+      '── OPENING ──', script.opening || '',
+      '', '── SITUATION QUESTIONS ──', (script.situation_questions || []).join('\n'),
+      '', '── PROBLEM AWARENESS ──', (script.problem_questions || []).join('\n'),
+      '', '── CONSEQUENCE QUESTIONS ──', (script.consequence_questions || []).join('\n'),
+      '', '── CLOSE ──', script.close || '',
+      '', '── OBJECTION HANDLERS ──',
+      ...Object.entries(script.objections || {}).map(([k, v]) => `${k}: ${v}`),
+    ].filter(l => l !== null).join('\n');
+    await storeBriefing('ali', 'yousef', `Cart Recovery Brief — ${contactName} (${client?.name || 'Client'})`, briefingLines, 'high', client_id, contact_id);
+    const { data: callRecord } = await supabase.from('call_logs').select('id').eq('contact_id', contact_id).eq('client_id', client_id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (callRecord) {
+      await supabase.from('call_logs').update({ call_script: briefingLines, objection_handlers: script.objections || {} }).eq('id', callRecord.id).catch(() => {});
+    }
+    res.json({ ok: true, script, briefing: briefingLines });
+  } catch (e) {
+    console.error('/ali/generate-call-script error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── MONTHLY PERFORMANCE FEE CRON (1st of month at 2am) ───
+cron.schedule('0 2 1 * *', async () => {
+  console.log('[CRON] Monthly performance fee calculation starting...');
+  try {
+    const lastMonth = new Date();
+    lastMonth.setMonth(lastMonth.getMonth() - 1);
+    const monthLabel = lastMonth.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    const { data: clients } = await supabase.from('clients').select('id, name, recovered_revenue, performance_fee_enabled').gt('recovered_revenue', 0);
+    if (!clients || clients.length === 0) return;
+    for (const client of clients) {
+      if (client.performance_fee_enabled === false) continue;
+      const recovered = parseFloat(client.recovered_revenue || 0);
+      if (recovered <= 0) continue;
+      const feeAmount = Math.round(recovered * 0.10 * 100) / 100;
+      await supabase.from('performance_fees').insert([{
+        client_id: client.id, month: monthLabel,
+        revenue_amount: recovered, fee_amount: feeAmount, status: 'pending',
+      }]).catch(e => console.error(`Perf fee insert failed for ${client.name}:`, e.message));
+      await supabase.from('clients').update({ recovered_revenue: 0 }).eq('id', client.id).catch(() => {});
+      console.log(`[CRON] Performance fee for ${client.name}: $${feeAmount} (10% of $${recovered})`);
+    }
+  } catch (e) {
+    console.error('[CRON] Performance fee calculation error:', e.message);
   }
 });
 

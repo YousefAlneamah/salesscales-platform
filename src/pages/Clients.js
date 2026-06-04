@@ -376,9 +376,9 @@ export default function Clients() {
             <div>
               <div style={{ fontSize: '10px', color: '#8896a8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Tier</div>
               <select value={form.tier} onChange={e => setForm({ ...form, tier: e.target.value })} style={inputStyle}>
-                <option value="starter">Starter — $1,500/mo</option>
-                <option value="growth">Growth — $3,000/mo</option>
-                <option value="elite">Elite — $6,000/mo</option>
+                <option value="starter">Starter — $199/mo</option>
+                <option value="growth">Growth — $299/mo</option>
+                <option value="elite">Elite — $399/mo</option>
               </select>
             </div>
             <div>
@@ -425,9 +425,9 @@ export default function Clients() {
               onChange={e => changeTier(selectedClient.id, e.target.value)}
               disabled={tierChanging === selectedClient.id}
               style={{ border: '1px solid #e4e9f0', borderRadius: '8px', padding: '7px 12px', fontSize: '12px', color: '#0a1628', outline: 'none', background: 'white', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
-              <option value="starter">Starter — $997/mo</option>
-              <option value="growth">Growth — $1,997/mo</option>
-              <option value="elite">Elite — $2,997/mo</option>
+              <option value="starter">Starter — $199/mo</option>
+              <option value="growth">Growth — $299/mo</option>
+              <option value="elite">Elite — $399/mo</option>
             </select>
             {tierChanging === selectedClient.id && <span style={{ fontSize: '11px', color: '#8896a8' }}>Updating…</span>}
           </div>
@@ -546,8 +546,8 @@ export default function Clients() {
         </div>
       ) : (
         <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '16px', overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.1fr 1fr 1fr 1fr 1fr', padding: '12px 20px', background: '#142840', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-            {['CLIENT', 'NICHE', 'TIER', 'HEALTH', 'LTV', 'STATUS'].map(h => (
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.1fr 1fr 1fr 0.9fr 1fr 1fr', padding: '12px 20px', background: '#142840', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            {['CLIENT', 'NICHE', 'TIER', 'HEALTH', 'RECOVERED', 'LTV', 'STATUS'].map(h => (
               <div key={h} style={{ fontSize: '8px', color: '#4a5568', letterSpacing: '2px', fontWeight: 700, fontFamily: 'DM Mono,monospace' }}>{h}</div>
             ))}
           </div>
@@ -558,7 +558,7 @@ export default function Clients() {
             return (
               <div key={client.id}
                 onClick={() => { const c = selectedClient?.id === client.id ? null : client; setSelectedClient(c); if (c) { loadChecklist(c.id); loadComms(c.id); } }}
-                style={{ display: 'grid', gridTemplateColumns: '2fr 1.1fr 1fr 1fr 1fr 1fr', padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'pointer', background: selectedClient?.id === client.id ? 'rgba(201,168,76,0.05)' : 'transparent', transition: 'background 0.15s', position: 'relative' }}
+                style={{ display: 'grid', gridTemplateColumns: '2fr 1.1fr 1fr 1fr 0.9fr 1fr 1fr', padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'pointer', background: selectedClient?.id === client.id ? 'rgba(201,168,76,0.05)' : 'transparent', transition: 'background 0.15s', position: 'relative' }}
                 onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; const acts = e.currentTarget.querySelector('.hover-actions'); if (acts) acts.style.opacity = '1'; }}
                 onMouseLeave={e => { e.currentTarget.style.background = selectedClient?.id === client.id ? 'rgba(201,168,76,0.05)' : 'transparent'; const acts = e.currentTarget.querySelector('.hover-actions'); if (acts) acts.style.opacity = '0'; }}>
 
@@ -617,6 +617,16 @@ export default function Clients() {
                       </div>
                     );
                   })()}
+                </div>
+
+                {/* Recovered Revenue */}
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  {client.recovered_revenue > 0 ? (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#c9a84c' }}>${Number(client.recovered_revenue).toLocaleString()}</div>
+                      <div style={{ fontSize: 9, color: '#4a5568', fontFamily: 'DM Mono,monospace' }}>platform</div>
+                    </div>
+                  ) : <span style={{ fontSize: 10, color: '#4a5568' }}>—</span>}
                 </div>
 
                 {/* LTV */}

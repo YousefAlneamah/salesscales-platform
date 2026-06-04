@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { API_BASE } from '../config';
 import axios from 'axios';
 
-const TIER_FEES = { starter: 997, growth: 1997, scale: 3997, enterprise: 0 };
+const TIER_FEES = { starter: 199, growth: 299, scale: 399, elite: 399, enterprise: 0 };
 const TIER_LABELS = { starter: 'Starter', growth: 'Growth', scale: 'Scale', enterprise: 'Enterprise' };
 
 const fmtMoney = (n) => n === 0 ? 'Custom' : `$${n.toLocaleString()}/mo`;

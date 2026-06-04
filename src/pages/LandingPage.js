@@ -27,45 +27,46 @@ const STEPS = [
   { n: '03', title: 'Revenue recovered automatically', body: 'Cart recovery emails fire at the perfect time. SMS follow-ups land. WhatsApp messages convert. You watch the dashboard fill up.' },
 ];
 
+const PERFORMANCE_FEE_NOTE = '+ 10% of revenue the platform recovers for your store';
+
 const PLANS = [
   {
     name: 'Starter',
-    price: '$997',
+    price: '$199',
     highlight: false,
     features: [
-      'Full AI team (6 members)',
-      'Email automation',
-      'SMS sequences',
+      'Email sequences',
       'CRM & contact management',
       'Monthly analytics report',
       'Up to 3 active sequences',
+      'AI team — Hussain, Zainab, Fatima',
     ],
   },
   {
     name: 'Growth',
-    price: '$1,997',
+    price: '$299',
     highlight: true,
     features: [
       'Everything in Starter',
-      'WhatsApp automation',
+      'SMS sequences',
       'Unlimited sequences',
       'Klaviyo integration',
       'Meta Ads reporting',
       'HubSpot CRM sync',
-      'Weekly strategy calls',
+      'Full AI team (6 members)',
     ],
   },
   {
-    name: 'Elite',
-    price: '$2,997',
+    name: 'Scale',
+    price: '$399',
     highlight: false,
     features: [
       'Everything in Growth',
-      'Voice AI agents',
+      'WhatsApp automation',
+      'Voice AI agents (calls)',
       'Shopify live data sync',
       'Canva & Higgsfield AI briefs',
       'Competitor intelligence',
-      'Dedicated account management',
       'Monthly executive reports',
     ],
   },
@@ -297,7 +298,10 @@ export default function LandingPage({ onLoginClick }) {
       )}
       <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: plan.highlight ? GOLD : MUTED, marginBottom: '12px' }}>{plan.name}</div>
       <div style={{ fontSize: '36px', fontWeight: 800, color: plan.highlight ? WHITE : NAVY, letterSpacing: '-1.5px', marginBottom: '4px' }}>{plan.price}<span style={{ fontSize: '14px', fontWeight: 500, color: plan.highlight ? 'rgba(255,255,255,0.5)' : MUTED }}>/mo</span></div>
-      <div style={{ height: '1px', background: plan.highlight ? 'rgba(255,255,255,0.1)' : BORDER, margin: '20px 0' }} />
+      <div style={{ fontSize: '11px', color: plan.highlight ? 'rgba(201,168,76,0.85)' : '#c9a84c', fontWeight: 600, marginBottom: '16px', lineHeight: 1.5 }}>
+        {PERFORMANCE_FEE_NOTE}
+      </div>
+      <div style={{ height: '1px', background: plan.highlight ? 'rgba(255,255,255,0.1)' : BORDER, margin: '16px 0' }} />
       <ul style={{ padding: 0, listStyle: 'none', margin: '0 0 28px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {plan.features.map(f => (
           <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', fontSize: '13px', color: plan.highlight ? 'rgba(255,255,255,0.8)' : '#4a5568' }}>
