@@ -306,14 +306,15 @@ export default function ClientDashboard({ user, onLogout }) {
 
   const ROLE_PAGES = {
     admin:    null, // all pages
-    approver: new Set(['dashboard','results','sequences','activity','approvals','messages','reports','help']),
-    viewer:   new Set(['dashboard','results','reports','help']),
+    approver: new Set(['dashboard','results','sequences','activity','approvals','messages','reports','help','aiteam']),
+    viewer:   new Set(['dashboard','results','reports','help','aiteam']),
   };
   const allowedPages = ROLE_PAGES[teamRole] || null;
 
   const allNavItems = [
     { id: 'dashboard', label: t('dashboard', lang), icon: '▦' },
     { id: 'results', label: t('myResults', lang), icon: '📈' },
+    { id: 'aiteam', label: 'My AI Team', icon: '🤖' },
     { id: 'sequences', label: t('sequences', lang), icon: '⚡' },
     { id: 'activity', label: t('recentActivity', lang), icon: '📊' },
     { id: 'approvals', label: t('myApprovals', lang), icon: '✓' },
@@ -322,7 +323,7 @@ export default function ClientDashboard({ user, onLogout }) {
     { id: 'calls', label: t('calls', lang), icon: '📞' },
     { id: 'reports', label: t('reports', lang), icon: '📄' },
     { id: 'invoices', label: t('invoices', lang), icon: '🧾' },
-    { id: 'zainab', label: t('zainab', lang), icon: '🤖' },
+    { id: 'zainab', label: t('zainab', lang), icon: '✦' },
     { id: 'referrals', label: t('referrals', lang), icon: '🎁' },
     { id: 'help', label: t('help', lang), icon: '❔' },
     { id: 'settings', label: t('settings', lang), icon: '⚙' },
@@ -332,6 +333,7 @@ export default function ClientDashboard({ user, onLogout }) {
   const pageTitles = {
     dashboard: 'Dashboard',
     results: 'My Results',
+    aiteam: 'My AI Team',
     sequences: 'Active Sequences',
     activity: 'Recent Activity',
     approvals: 'My Approvals',
@@ -371,6 +373,7 @@ export default function ClientDashboard({ user, onLogout }) {
       case 'calls': return <ClientCalls />;
       case 'reports': return <ClientReports />;
       case 'invoices': return <ClientInvoices />;
+      case 'aiteam': return <ClientAITeam />;
       case 'zainab': return <ClientZainab chatMessages={chatMessages} setChatMessages={setChatMessages} />;
       case 'referrals': return <ClientReferrals />;
       case 'help': return <ClientHelp />;
@@ -2204,6 +2207,335 @@ export default function ClientDashboard({ user, onLogout }) {
       </div>
     </div>
   );
+
+  // ─── MY AI TEAM ──────────────────────────────────────
+  const ClientAITeam = () => {
+    const [teamData, setTeamData] = useState(null);
+    const [loadingTeam, setLoadingTeam] = useState(true);
+    const [askModal, setAskModal] = useState(null);
+    const [askText, setAskText] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+    const [submitDone, setSubmitDone] = useState(false);
+
+    const MEMBERS = [
+      { key: 'hussain', name: 'Hussain', role: 'Intelligence & Strategy', color: '#3b82f6', emoji: '🧠',
+        desc: `Analyzes your store data weekly and delivers strategic recommendations to grow ${user.clientName || 'your store'}.` },
+      { key: 'hassan', name: 'Hassan', role: 'Growth & Outreach', color: '#10b981', emoji: '📡',
+        desc: 'Finds qualified prospects, warms new leads, and adds fresh contacts to your pipeline every week.' },
+      { key: 'ali', name: 'Ali', role: 'Sales Closer', color: '#f97316', emoji: '📞',
+        desc: 'Handles outbound cart recovery calls using NEPQ, closes warm leads, and writes personalized follow-up plans.' },
+      { key: 'mahdi', name: 'Mahdi', role: 'Marketing & Content', color: '#c9a84c', emoji: '✍️',
+        desc: 'Writes every email, SMS, and WhatsApp sequence in your exact brand voice — ready for your approval before they send.' },
+      { key: 'fatima', name: 'Fatima', role: 'Operations Manager', color: '#ef4444', emoji: '⚙️',
+        desc: 'Monitors all active sequences, tracks every enrollment, and keeps your automations running 24/7 without interruption.' },
+      { key: 'zainab', name: 'Zainab', role: 'Client Partner', color: '#8b5cf6', emoji: '🤝',
+        desc: 'Your dedicated partner — manages your onboarding, writes monthly performance reports, and answers any question you have.' },
+    ];
+
+    useEffect(() => {
+      (async () => {
+        try {
+          const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+          const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+
+          const [briefWRes, briefMRes, approvRes, callsRes, reportsRes, enrollRes, contactsRes] = await Promise.all([
+            supabase.from('team_briefings').select('from_member, subject, created_at')
+              .eq('client_id', user.clientId).gte('created_at', weekAgo)
+              .neq('from_member', 'client').order('created_at', { ascending: false }),
+            supabase.from('team_briefings').select('from_member')
+              .eq('client_id', user.clientId).gte('created_at', monthStart)
+              .neq('from_member', 'client'),
+            supabase.from('approvals').select('id, status, created_at')
+              .eq('client_id', user.clientId).gte('created_at', weekAgo)
+              .order('created_at', { ascending: false }),
+            supabase.from('call_logs').select('id, contact_phone, direction, status, created_at')
+              .eq('client_id', user.clientId).gte('created_at', weekAgo)
+              .order('created_at', { ascending: false }),
+            supabase.from('reports').select('id, period, created_at')
+              .eq('client_id', user.clientId).order('created_at', { ascending: false }).limit(3),
+            supabase.from('workflow_enrollments').select('id, enrolled_at')
+              .eq('client_id', user.clientId).gte('enrolled_at', weekAgo)
+              .order('enrolled_at', { ascending: false }).limit(10),
+            supabase.from('contacts').select('id, first_name, last_name, created_at')
+              .eq('client_id', user.clientId).gte('created_at', weekAgo)
+              .order('created_at', { ascending: false }).limit(5),
+          ]);
+
+          const briefW = briefWRes.data || [];
+          const briefM = briefMRes.data || [];
+          const approvW = approvRes.data || [];
+          const callsW = callsRes.data || [];
+          const reps = reportsRes.data || [];
+          const enrollW = enrollRes.data || [];
+          const newCts = contactsRes.data || [];
+
+          // Group by member
+          const byMember = {};
+          const monthCount = {};
+          for (const b of briefW) {
+            if (!byMember[b.from_member]) byMember[b.from_member] = [];
+            byMember[b.from_member].push(b);
+          }
+          for (const b of briefM) monthCount[b.from_member] = (monthCount[b.from_member] || 0) + 1;
+
+          const mk = (desc, ts) => ({ desc, ts });
+          const members = {
+            hussain: {
+              actions: (byMember['hussain'] || []).slice(0, 3).map(b => mk(b.subject, b.created_at)),
+              monthCount: monthCount['hussain'] || 0,
+            },
+            hassan: {
+              actions: newCts.slice(0, 3).map(c => mk(`Added ${[c.first_name, c.last_name].filter(Boolean).join(' ') || 'contact'} to pipeline`, c.created_at))
+                .concat((byMember['hassan'] || []).map(b => mk(b.subject, b.created_at))).slice(0, 3),
+              monthCount: newCts.length + (monthCount['hassan'] || 0),
+            },
+            ali: {
+              actions: callsW.slice(0, 3).map(c => mk(`${c.direction === 'outbound' ? 'Outbound' : 'Inbound'} call — ${c.contact_phone || 'unknown'}`, c.created_at))
+                .concat((byMember['ali'] || []).map(b => mk(b.subject, b.created_at))).slice(0, 3),
+              monthCount: callsW.length + (monthCount['ali'] || 0),
+            },
+            mahdi: {
+              actions: approvW.slice(0, 3).map(a => mk(
+                a.status === 'approved' ? 'Content approved and scheduled to send'
+                  : a.status === 'rejected' ? 'Content revision requested'
+                  : 'New content item — pending your review',
+                a.created_at
+              )).concat((byMember['mahdi'] || []).map(b => mk(b.subject, b.created_at))).slice(0, 3),
+              monthCount: approvW.length + (monthCount['mahdi'] || 0),
+            },
+            fatima: {
+              actions: enrollW.slice(0, 3).map(e => mk('Contact enrolled in active sequence', e.enrolled_at))
+                .concat((byMember['fatima'] || []).map(b => mk(b.subject, b.created_at))).slice(0, 3),
+              monthCount: enrollW.length + (monthCount['fatima'] || 0),
+            },
+            zainab: {
+              actions: reps.slice(0, 2).map(r => mk(`Monthly performance report — ${r.period || 'this period'}`, r.created_at))
+                .concat((byMember['zainab'] || []).map(b => mk(b.subject, b.created_at))).slice(0, 3),
+              monthCount: reps.length + (monthCount['zainab'] || 0),
+            },
+          };
+
+          const totalWeekly = briefW.length + approvW.length + callsW.length + enrollW.length + newCts.length;
+          setTeamData({ members, totalWeekly });
+        } catch (e) {
+          console.error('AI team load error:', e);
+          setTeamData({ members: {}, totalWeekly: 0 });
+        }
+        setLoadingTeam(false);
+      })();
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const submitRequest = async () => {
+      if (!askText.trim() || !askModal) return;
+      setSubmitting(true);
+      try {
+        await supabase.from('team_briefings').insert([{
+          from_member: 'client',
+          to_member: askModal.key,
+          subject: `Client Request — ${user.name}`,
+          content: askText.trim(),
+          priority: 'high',
+          client_id: user.clientId,
+          is_read: false,
+          created_at: new Date().toISOString(),
+        }]);
+        await supabase.from('approvals').insert([{
+          client_id: user.clientId,
+          status: 'pending',
+          created_at: new Date().toISOString(),
+        }]).catch(() => {});
+        setSubmitDone(true);
+        setTimeout(() => { setAskModal(null); setAskText(''); setSubmitDone(false); }, 2200);
+      } catch (e) {
+        console.error('Submit request error:', e);
+      }
+      setSubmitting(false);
+    };
+
+    const ago = (ts) => {
+      if (!ts) return '—';
+      const diff = Date.now() - new Date(ts).getTime();
+      const m = Math.floor(diff / 60000);
+      if (m < 60) return `${Math.max(1, m)}m ago`;
+      const h = Math.floor(m / 60);
+      if (h < 24) return `${h}h ago`;
+      return `${Math.floor(h / 24)}d ago`;
+    };
+
+    return (
+      <div>
+        {/* Page header */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 4 }}>Dedicated to your store</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: '#f0f4f8' }}>My AI Team</div>
+          <div style={{ fontSize: 12, color: '#4a5568', marginTop: 4 }}>6 AI specialists working 24/7 on {user.clientName || 'your store'}</div>
+        </div>
+
+        {/* Summary row */}
+        <div style={{ background: 'linear-gradient(135deg, #0a1628 0%, #142840 100%)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 14, padding: '18px 24px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 20 }}>
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+            {['#3b82f6','#10b981','#f97316','#c9a84c','#ef4444','#8b5cf6'].map(c => (
+              <div key={c} style={{ width: 10, height: 10, borderRadius: '50%', background: c, boxShadow: `0 0 6px ${c}88` }} />
+            ))}
+          </div>
+          <div style={{ flex: 1 }}>
+            {loadingTeam ? (
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)' }}>Loading team activity…</div>
+            ) : (
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)', fontWeight: 600, lineHeight: 1.6 }}>
+                Your AI team took <span style={{ color: '#c9a84c', fontWeight: 800 }}>{teamData?.totalWeekly || 0} actions</span> this week
+                {stats.revenueRecovered > 0 && (
+                  <> — recovering <span style={{ color: '#c9a84c', fontWeight: 800 }}>${stats.revenueRecovered.toLocaleString()}</span> in revenue for your store</>
+                )}
+              </div>
+            )}
+          </div>
+          <div style={{ fontSize: 10, color: '#4a5568', flexShrink: 0, fontFamily: 'DM Mono,monospace' }}>Last 7 days</div>
+        </div>
+
+        {/* 6 member cards — 2-column grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          {MEMBERS.map(member => {
+            const mData = !loadingTeam && teamData ? (teamData.members[member.key] || { actions: [], monthCount: 0 }) : null;
+            return (
+              <div key={member.key} style={{ background: '#0f1f35', border: `1px solid ${member.color}20`, borderTop: `3px solid ${member.color}`, borderRadius: 16, padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: 0 }}>
+                {/* Card header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: `${member.color}18`, border: `1px solid ${member.color}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+                      {member.emoji}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: '#f0f4f8', lineHeight: 1.2 }}>{member.name}</div>
+                      <div style={{ fontSize: 10, color: member.color, fontWeight: 700, letterSpacing: 0.5, marginTop: 2 }}>{member.role}</div>
+                    </div>
+                  </div>
+                  {/* Active badge with pulsing dot */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 20, padding: '4px 10px', flexShrink: 0 }}>
+                    <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#10b981', animation: 'pulse 2s infinite' }} />
+                    <span style={{ fontSize: 9, fontWeight: 700, color: '#34d399', letterSpacing: 1, fontFamily: 'DM Mono,monospace' }}>ACTIVE</span>
+                  </div>
+                </div>
+
+                {/* Description */}
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)', lineHeight: 1.7, marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid rgba(255,255,255,0.05)` }}>
+                  {member.desc}
+                </div>
+
+                {/* What they did this week */}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 10 }}>This week</div>
+                  {loadingTeam ? (
+                    <div style={{ fontSize: 11, color: '#4a5568', padding: '8px 0' }}>Loading…</div>
+                  ) : mData && mData.actions.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {mData.actions.slice(0, 3).map((action, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                          <div style={{ width: 5, height: 5, borderRadius: '50%', background: member.color, marginTop: 5, flexShrink: 0 }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.75)', lineHeight: 1.5, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                              {action.desc}
+                            </div>
+                            <div style={{ fontSize: 9, color: '#4a5568', fontFamily: 'DM Mono,monospace', marginTop: 2 }}>{ago(action.ts)}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 11, color: '#4a5568', fontStyle: 'italic', padding: '4px 0' }}>
+                      Monitoring your store — no logged actions this week yet
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer: count + Ask button */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 18, paddingTop: 14, borderTop: `1px solid rgba(255,255,255,0.05)` }}>
+                  <div style={{ fontSize: 10, color: '#4a5568' }}>
+                    {mData ? (
+                      <><span style={{ fontWeight: 700, color: 'rgba(255,255,255,0.5)' }}>{mData.monthCount}</span> actions this month</>
+                    ) : '—'}
+                  </div>
+                  <button
+                    onClick={() => { setAskModal(member); setAskText(''); setSubmitDone(false); }}
+                    style={{ background: `${member.color}18`, border: `1px solid ${member.color}33`, borderRadius: 8, padding: '7px 14px', fontSize: 11, fontWeight: 700, color: member.color, cursor: 'pointer', fontFamily: 'Inter,sans-serif', transition: 'all 0.15s' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = `${member.color}28`; e.currentTarget.style.borderColor = `${member.color}55`; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = `${member.color}18`; e.currentTarget.style.borderColor = `${member.color}33`; }}
+                  >
+                    Ask {member.name} →
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Pulse keyframe injected once */}
+        <style>{`@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(1.3)}}`}</style>
+
+        {/* Ask modal */}
+        {askModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,22,40,0.75)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+            onClick={e => { if (e.target === e.currentTarget) setAskModal(null); }}>
+            <div style={{ background: '#0f1f35', borderRadius: 18, width: 460, maxWidth: '100%', overflow: 'hidden', boxShadow: '0 24px 80px rgba(0,0,0,0.6)', border: `1px solid ${askModal.color}22` }}>
+              {/* Modal header */}
+              <div style={{ background: 'linear-gradient(135deg, #0a1628, #112240)', padding: '22px 28px', borderBottom: `1px solid ${askModal.color}18`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: `${askModal.color}18`, border: `1px solid ${askModal.color}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
+                    {askModal.emoji}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: '#f0f4f8' }}>Ask {askModal.name}</div>
+                    <div style={{ fontSize: 10, color: askModal.color, fontWeight: 700, letterSpacing: 0.5, marginTop: 2 }}>{askModal.role}</div>
+                  </div>
+                </div>
+                <button onClick={() => setAskModal(null)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', fontSize: 22, cursor: 'pointer', lineHeight: 1, padding: 4 }}>×</button>
+              </div>
+
+              {/* Modal body */}
+              <div style={{ padding: '24px 28px' }}>
+                {submitDone ? (
+                  <div style={{ textAlign: 'center', padding: '20px 0' }}>
+                    <div style={{ fontSize: 40, marginBottom: 14 }}>✓</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: '#34d399', marginBottom: 6 }}>Request sent to {askModal.name}</div>
+                    <div style={{ fontSize: 12, color: '#4a5568' }}>Your request has been added to the approvals queue with high priority.</div>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7, marginBottom: 18 }}>
+                      Tell {askModal.name} exactly what you need. Be specific — the more context you give, the faster they can act.
+                    </div>
+                    <textarea
+                      value={askText}
+                      onChange={e => setAskText(e.target.value)}
+                      placeholder={`What would you like ${askModal.name} to do? e.g. "Write a win-back email for customers who haven't bought in 90 days..."`}
+                      rows={5}
+                      style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#f0f4f8', outline: 'none', resize: 'vertical', fontFamily: 'DM Sans, sans-serif', lineHeight: 1.6, boxSizing: 'border-box', marginBottom: 16 }}
+                    />
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <button
+                        onClick={submitRequest}
+                        disabled={!askText.trim() || submitting}
+                        style={{ flex: 1, background: askText.trim() && !submitting ? askModal.color : 'rgba(255,255,255,0.08)', color: askText.trim() && !submitting ? '#0a1628' : '#4a5568', border: 'none', borderRadius: 10, padding: '12px', fontSize: 13, fontWeight: 800, cursor: !askText.trim() || submitting ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', transition: 'all 0.15s' }}>
+                        {submitting ? 'Sending…' : `Send to ${askModal.name}`}
+                      </button>
+                      <button
+                        onClick={() => setAskModal(null)}
+                        style={{ background: 'none', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '12px 18px', fontSize: 13, color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+                        Cancel
+                      </button>
+                    </div>
+                    <div style={{ marginTop: 12, fontSize: 10, color: '#4a5568', textAlign: 'center', lineHeight: 1.6 }}>
+                      This creates a high-priority request in the approvals queue — your account manager will see it immediately.
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // ─── SETTINGS ────────────────────────────────────────
   const ClientSettings = () => {
