@@ -26,6 +26,8 @@ export default function Clients() {
   const [demoCreating, setDemoCreating] = useState(false);
   const [demoResult, setDemoResult] = useState(null);
   const [copiedField, setCopiedField] = useState(null);
+  const [attributionData, setAttributionData] = useState({});
+  const [attributionLoading, setAttributionLoading] = useState({});
 
   const createDemo = async () => {
     setDemoCreating(true);
@@ -189,6 +191,18 @@ export default function Clients() {
       loadComms(clientId);
     } catch {}
     setCommSaving(false);
+  };
+
+  const loadAttribution = async (clientId) => {
+    if (attributionData[clientId]) return;
+    setAttributionLoading(prev => ({ ...prev, [clientId]: true }));
+    try {
+      const res = await axios.get(`${API_BASE}/revenue/attribution?client_id=${clientId}`);
+      setAttributionData(prev => ({ ...prev, [clientId]: res.data }));
+    } catch {
+      setAttributionData(prev => ({ ...prev, [clientId]: null }));
+    }
+    setAttributionLoading(prev => ({ ...prev, [clientId]: false }));
   };
 
   const loadChecklist = async (clientId) => {
@@ -532,6 +546,55 @@ export default function Clients() {
             ))}
             {(comms[selectedClient.id] || []).length === 0 && <div style={{ fontSize: '11px', color: '#8896a8' }}>No communications logged yet.</div>}
           </div>
+
+          {/* Revenue Attribution Summary */}
+          <div style={{ borderTop: '1px solid #f0f3f8', paddingTop: '16px', marginTop: '4px' }}>
+            <div style={{ fontSize: '9px', color: '#8896a8', letterSpacing: '2px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '12px' }}>Revenue Attribution</div>
+            {attributionLoading[selectedClient.id] ? (
+              <div style={{ fontSize: '12px', color: '#8896a8', padding: '8px 0' }}>Loading…</div>
+            ) : (() => {
+              const attr = attributionData[selectedClient.id];
+              if (!attr) return <div style={{ fontSize: '11px', color: '#8896a8' }}>No attribution data available.</div>;
+              const chIcon = { Email: '✉', SMS: '💬', WhatsApp: '📱', Voice: '📞' };
+              return (
+                <div>
+                  {/* Two mini stat cards */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+                    <div style={{ background: '#f8fafc', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '10px 12px', borderTop: '2px solid #10b981' }}>
+                      <div style={{ fontSize: '8px', color: '#8896a8', letterSpacing: '1.5px', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>Store Revenue</div>
+                      <div style={{ fontSize: '16px', fontWeight: 800, color: '#0a1628' }}>
+                        {attr.store_revenue > 0 ? `$${attr.store_revenue.toLocaleString()}` : '—'}
+                      </div>
+                      <div style={{ fontSize: '9px', color: '#10b981', fontWeight: 600 }}>this month</div>
+                    </div>
+                    <div style={{ background: '#f8fafc', border: '1px solid #e4e9f0', borderRadius: '8px', padding: '10px 12px', borderTop: '2px solid #c9a84c' }}>
+                      <div style={{ fontSize: '8px', color: '#8896a8', letterSpacing: '1.5px', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>Recovered</div>
+                      <div style={{ fontSize: '16px', fontWeight: 800, color: '#c9a84c' }}>${attr.platform_revenue.toLocaleString()}</div>
+                      <div style={{ fontSize: '9px', color: '#8896a8', fontWeight: 600 }}>{attr.roi}× ROI · ${attr.monthly_cost}/mo plan</div>
+                    </div>
+                  </div>
+                  {/* Channel breakdown mini table */}
+                  {(attr.channel_breakdown || []).filter(c => c.sent > 0).map(ch => (
+                    <div key={ch.channel} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid #f4f6fa' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontSize: '12px' }}>{chIcon[ch.channel] || '·'}</span>
+                        <div>
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: '#0a1628' }}>{ch.label || ch.channel}</div>
+                          <div style={{ fontSize: '9px', color: '#8896a8' }}>{ch.sent.toLocaleString()} sent · {ch.rateLabel}: {ch.rate}%</div>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: ch.revenue > 0 ? '#0a1628' : '#8896a8' }}>
+                        {ch.revenue > 0 ? `$${ch.revenue.toLocaleString()}` : '—'}
+                      </div>
+                    </div>
+                  ))}
+                  {(attr.channel_breakdown || []).every(c => c.sent === 0) && (
+                    <div style={{ fontSize: '11px', color: '#8896a8', padding: '4px 0' }}>No messages sent this month yet.</div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
         </div>
       )}
 
@@ -557,7 +620,7 @@ export default function Clients() {
             const tierGrad = TIER_GRAD[client.tier?.toLowerCase()] || TIER_GRAD.starter;
             return (
               <div key={client.id}
-                onClick={() => { const c = selectedClient?.id === client.id ? null : client; setSelectedClient(c); if (c) { loadChecklist(c.id); loadComms(c.id); } }}
+                onClick={() => { const c = selectedClient?.id === client.id ? null : client; setSelectedClient(c); if (c) { loadChecklist(c.id); loadComms(c.id); loadAttribution(c.id); } }}
                 style={{ display: 'grid', gridTemplateColumns: '2fr 1.1fr 1fr 1fr 0.9fr 1fr 1fr', padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'pointer', background: selectedClient?.id === client.id ? 'rgba(201,168,76,0.05)' : 'transparent', transition: 'background 0.15s', position: 'relative' }}
                 onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; const acts = e.currentTarget.querySelector('.hover-actions'); if (acts) acts.style.opacity = '1'; }}
                 onMouseLeave={e => { e.currentTarget.style.background = selectedClient?.id === client.id ? 'rgba(201,168,76,0.05)' : 'transparent'; const acts = e.currentTarget.querySelector('.hover-actions'); if (acts) acts.style.opacity = '0'; }}>

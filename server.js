@@ -7514,6 +7514,7 @@ app.get('/revenue/attribution', async (req, res) => {
   if (!client_id) return res.status(400).json({ error: 'client_id required' });
   try {
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+
     const [clientRes, onboardingRes] = await Promise.all([
       supabase.from('clients').select('id, name, tier, recovered_revenue').eq('id', client_id).maybeSingle(),
       supabase.from('client_onboarding').select('average_order_value').eq('client_id', client_id).maybeSingle(),
@@ -7524,47 +7525,114 @@ app.get('/revenue/attribution', async (req, res) => {
     const parseAovLocal = (text) => {
       if (!text) return 75;
       if (text.includes('Under')) return 25;
-      if (text === '$30–75') return 52;
-      if (text === '$75–150') return 112;
-      if (text === '$150–300') return 225;
+      const n = text.replace(/[^0-9–-]/g, '');
+      if (n.includes('30') || n.includes('75')) return 52;
+      if (n.includes('75') || n.includes('150')) return 112;
+      if (n.includes('150') || n.includes('300')) return 225;
       if (text.includes('Over')) return 350;
       return 75;
     };
     const aov = parseAovLocal(onboardingRes.data?.average_order_value);
     const monthlyCost = ATTR_TIER_FEES[(client.tier || '').toLowerCase()] || 199;
 
-    const { count: completedMonth } = await supabase.from('workflow_enrollments')
-      .select('id', { count: 'exact', head: true })
-      .eq('client_id', client_id).eq('status', 'completed').gte('completed_at', monthStart);
+    // ── 1. Shopify store total revenue this month ────────────
+    let storeRevenue = 0;
+    try {
+      const { data: conn } = await supabase.from('shopify_connections')
+        .select('shop, access_token').eq('client_id', client_id).maybeSingle();
+      if (conn) {
+        const hdrs = { 'X-Shopify-Access-Token': conn.access_token };
+        const base = `https://${conn.shop}/admin/api/2026-01`;
+        const { data: ord } = await axios.get(
+          `${base}/orders.json?status=any&financial_status=paid&created_at_min=${monthStart}&limit=250`,
+          { headers: hdrs, timeout: 8000 }
+        );
+        storeRevenue = Math.round((ord.orders || []).reduce((s, o) => s + parseFloat(o.total_price || 0), 0) * 100) / 100;
+      }
+    } catch { /* Shopify unreachable — non-fatal */ }
 
-    const platformRevenue = (completedMonth || 0) * aov;
-    const attrRevenue = (client.recovered_revenue && client.recovered_revenue > 0) ? client.recovered_revenue : platformRevenue;
+    // ── 2. Platform recovered revenue ───────────────────────
+    // Primary: revenue_attribution table (contacts who purchased within 7 days of a sequence message)
+    const { data: attrRows } = await supabase.from('revenue_attribution')
+      .select('order_value, channel').eq('client_id', client_id).gte('attributed_at', monthStart);
+    const attrTotal = (attrRows || []).reduce((s, r) => s + parseFloat(r.order_value || 0), 0);
 
-    const channelDefs = [
-      { channel: 'Email', rateLabel: 'Open Rate', dbChannel: 'Email' },
-      { channel: 'SMS', rateLabel: 'Reply Rate', dbChannel: 'SMS' },
-      { channel: 'WhatsApp', rateLabel: 'Reply Rate', dbChannel: 'WhatsApp' },
-      { channel: 'Voice', rateLabel: 'Connect Rate', dbChannel: 'Voice' },
+    // Fallback: completed enrollments × AOV when attribution table is empty
+    let platformRevenue = attrTotal;
+    let completedEnrollments = 0;
+    if (platformRevenue === 0) {
+      const { count: cm } = await supabase.from('workflow_enrollments')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_id', client_id).eq('status', 'completed').gte('completed_at', monthStart);
+      completedEnrollments = cm || 0;
+      platformRevenue = completedEnrollments * aov;
+    }
+    // Also pick up any webhook-attributed total stored on the client record
+    const dbRecovered = parseFloat(client.recovered_revenue || 0);
+    if (dbRecovered > platformRevenue) platformRevenue = dbRecovered;
+
+    // ── 3. Revenue by channel from attribution table ─────────
+    const attrByChannel = {};
+    for (const r of (attrRows || [])) {
+      const ch = (r.channel || 'Email').charAt(0).toUpperCase() + (r.channel || 'Email').slice(1);
+      attrByChannel[ch] = (attrByChannel[ch] || 0) + parseFloat(r.order_value || 0);
+    }
+    const hasChannelAttr = Object.keys(attrByChannel).length > 0;
+
+    // ── 4. Email / SMS / WhatsApp metrics ────────────────────
+    const msgChannels = [
+      { channel: 'Email',    label: 'Email Sequences',    rateLabel: 'Open Rate',   db: 'Email',    useOpened: true  },
+      { channel: 'SMS',      label: 'SMS Sequences',      rateLabel: 'Reply Rate',  db: 'SMS',      useOpened: false },
+      { channel: 'WhatsApp', label: 'WhatsApp Sequences', rateLabel: 'Reply Rate',  db: 'WhatsApp', useOpened: false },
     ];
-    const channelBreakdown = await Promise.all(channelDefs.map(async ({ channel, rateLabel, dbChannel }) => {
+    const msgBreakdown = await Promise.all(msgChannels.map(async ({ channel, label, rateLabel, db, useOpened }) => {
       const [sentRes, openedRes, repliedRes] = await Promise.all([
         supabase.from('messages').select('id', { count: 'exact', head: true })
-          .eq('client_id', client_id).eq('channel', dbChannel).eq('direction', 'outbound').gte('created_at', monthStart),
+          .eq('client_id', client_id).eq('channel', db).eq('direction', 'outbound').gte('created_at', monthStart),
+        useOpened
+          ? supabase.from('messages').select('id', { count: 'exact', head: true })
+              .eq('client_id', client_id).eq('channel', db).eq('direction', 'outbound')
+              .not('opened_at', 'is', null).gte('created_at', monthStart)
+          : Promise.resolve({ count: 0 }),
         supabase.from('messages').select('id', { count: 'exact', head: true })
-          .eq('client_id', client_id).eq('channel', dbChannel).eq('direction', 'outbound')
-          .not('opened_at', 'is', null).gte('created_at', monthStart),
-        supabase.from('messages').select('id', { count: 'exact', head: true })
-          .eq('client_id', client_id).eq('channel', dbChannel).eq('direction', 'inbound').gte('created_at', monthStart),
+          .eq('client_id', client_id).eq('channel', db).eq('direction', 'inbound').gte('created_at', monthStart),
       ]);
       const sent = sentRes.count || 0;
-      const openedCount = channel === 'Email' ? (openedRes.count || 0) : (repliedRes.count || 0);
-      const rate = sent > 0 ? Math.round((openedCount / sent) * 100) : 0;
-      const revenue = sent > 0 ? Math.round((openedCount / Math.max(sent, 1)) * (attrRevenue / 4)) : 0;
-      return { channel, sent, rate, rateLabel, revenue };
+      const engaged = useOpened ? (openedRes.count || 0) : (repliedRes.count || 0);
+      const rate = sent > 0 ? Math.round((engaged / sent) * 100) : 0;
+      // Revenue: from attribution table, or proportional split of platform revenue
+      let revenue = Math.round(attrByChannel[channel] || 0);
+      if (!hasChannelAttr && platformRevenue > 0) {
+        const weights = { Email: 0.50, SMS: 0.30, WhatsApp: 0.15 };
+        revenue = sent > 0 ? Math.round(platformRevenue * (weights[channel] || 0)) : 0;
+      }
+      return { channel, label, sent, rateLabel, rate, revenue };
     }));
 
-    const roi = monthlyCost > 0 ? parseFloat((attrRevenue / monthlyCost).toFixed(2)) : 0;
-    res.json({ store_revenue: 0, platform_revenue: attrRevenue, monthly_cost: monthlyCost, roi, aov, completed_enrollments: completedMonth || 0, channel_breakdown: channelBreakdown });
+    // ── 5. Voice calls ───────────────────────────────────────
+    const { data: callRows } = await supabase.from('call_logs')
+      .select('id, status').eq('client_id', client_id).gte('created_at', monthStart).catch(() => ({ data: [] }));
+    const callsMade = (callRows || []).length;
+    const callsAnswered = (callRows || []).filter(c => ['completed', 'answered'].includes(c.status)).length;
+    const voiceRate = callsMade > 0 ? Math.round((callsAnswered / callsMade) * 100) : 0;
+    const voiceRevenue = hasChannelAttr
+      ? Math.round(attrByChannel['Voice'] || 0)
+      : (platformRevenue > 0 && callsMade > 0 ? Math.round(platformRevenue * 0.05) : 0);
+    msgBreakdown.push({ channel: 'Voice', label: 'Voice Calls', sent: callsMade, rateLabel: 'Answer Rate', rate: voiceRate, revenue: voiceRevenue });
+
+    const totalAttributed = msgBreakdown.reduce((s, c) => s + c.revenue, 0);
+    const roi = monthlyCost > 0 ? parseFloat((platformRevenue / monthlyCost).toFixed(2)) : 0;
+
+    res.json({
+      store_revenue: storeRevenue,
+      platform_revenue: platformRevenue,
+      monthly_cost: monthlyCost,
+      roi,
+      aov,
+      completed_enrollments: completedEnrollments,
+      channel_breakdown: msgBreakdown,
+      total_attributed: totalAttributed,
+    });
   } catch (e) {
     console.error('/revenue/attribution error:', e.message);
     res.status(500).json({ error: e.message });

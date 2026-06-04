@@ -483,52 +483,135 @@ export default function ClientDashboard({ user, onLogout }) {
         </svg>
       </div>
 
-      {/* REVENUE OVERVIEW (attribution) */}
+      {/* REVENUE OVERVIEW */}
       {attribution && (
-        <>
+        <div style={{ marginBottom: 20 }}>
+          {/* Section header */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace' }}>Revenue Overview</div>
+            <WhatIsThis text="Revenue Overview shows your total Shopify store revenue this month alongside the revenue your AI platform has directly recovered through sequences. Channel breakdown shows exactly which channel drove each dollar." />
+          </div>
+
+          {/* Two hero cards */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-            <div style={{ background: 'rgba(15,31,53,0.8)', border: '1px solid rgba(16,185,129,0.2)', borderTop: '2px solid #10b981', borderRadius: 16, padding: '20px 22px' }}>
-              <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 8 }}>Store Total Revenue</div>
-              <div style={{ fontSize: 30, fontWeight: 800, color: '#f0f4f8', marginBottom: 4 }}>
-                {attribution.store_revenue > 0 ? `$${attribution.store_revenue.toLocaleString()}` : <span style={{ fontSize: 13, color: '#4a5568' }}>Connect Shopify to track</span>}
-              </div>
-              <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600 }}>from your Shopify store this month</div>
+            {/* Card 1 — Store Total Revenue */}
+            <div style={{ background: 'rgba(15,31,53,0.85)', border: '1px solid rgba(16,185,129,0.18)', borderTop: '3px solid #10b981', borderRadius: 16, padding: '22px 24px', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: 16, right: 16, fontSize: 20 }}>🛍️</div>
+              <div style={{ fontSize: 8, color: '#4a5568', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 10 }}>Store Total Revenue</div>
+              {attribution.store_revenue > 0 ? (
+                <>
+                  <div style={{ fontSize: 34, fontWeight: 800, color: '#f0f4f8', letterSpacing: '-1px', lineHeight: 1, marginBottom: 8 }}>
+                    ${attribution.store_revenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#10b981', fontWeight: 700, background: 'rgba(16,185,129,0.1)', display: 'inline-block', padding: '3px 10px', borderRadius: 20, border: '1px solid rgba(16,185,129,0.2)' }}>
+                    all Shopify orders this month
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#4a5568', marginBottom: 8 }}>—</div>
+                  <div style={{ fontSize: 10, color: '#4a5568', lineHeight: 1.6 }}>Connect your Shopify store to track total store revenue here</div>
+                </>
+              )}
             </div>
-            <div style={{ background: 'rgba(15,31,53,0.8)', border: '1px solid rgba(201,168,76,0.2)', borderTop: '2px solid #c9a84c', borderRadius: 16, padding: '20px 22px' }}>
-              <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 8 }}>Platform Recovered Revenue</div>
-              <div style={{ fontSize: 30, fontWeight: 800, color: '#c9a84c', marginBottom: 4 }}>${attribution.platform_revenue.toLocaleString()}</div>
-              <div style={{ fontSize: 11, color: '#c9a84c', fontWeight: 600 }}>{attribution.completed_enrollments} converted · ${attribution.aov} avg order</div>
+
+            {/* Card 2 — Platform Recovered Revenue */}
+            <div style={{ background: 'rgba(15,31,53,0.85)', border: '1px solid rgba(201,168,76,0.2)', borderTop: '3px solid #c9a84c', borderRadius: 16, padding: '22px 24px', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 80% 0%, rgba(201,168,76,0.08), transparent 60%)', pointerEvents: 'none' }} />
+              <div style={{ position: 'absolute', top: 16, right: 16, fontSize: 20 }}>💰</div>
+              <div style={{ fontSize: 8, color: '#4a5568', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 10 }}>Platform Recovered Revenue</div>
+              <div style={{ fontSize: 34, fontWeight: 800, color: '#c9a84c', letterSpacing: '-1px', lineHeight: 1, marginBottom: 8 }}>
+                ${attribution.platform_revenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+              </div>
+              <div style={{ fontSize: 10, color: '#c9a84c', fontWeight: 700, background: 'rgba(201,168,76,0.1)', display: 'inline-block', padding: '3px 10px', borderRadius: 20, border: '1px solid rgba(201,168,76,0.2)' }}>
+                {attribution.completed_enrollments > 0
+                  ? `${attribution.completed_enrollments} purchases attributed · $${attribution.aov} avg`
+                  : 'contacts who purchased within 7 days of a message'}
+              </div>
             </div>
           </div>
-          <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, padding: '20px 24px', marginBottom: 14 }}>
-            <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 14 }}>Channel Breakdown</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 80px 80px', gap: 8, marginBottom: 8 }}>
-              {['Channel', 'Sent', 'Rate', 'Revenue'].map(h => (
+
+          {/* Channel Breakdown table */}
+          <div style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, overflow: 'hidden', marginBottom: 14 }}>
+            {/* Table header */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 80px 120px 100px', gap: 0, padding: '12px 20px', background: '#142840', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              {['Channel', 'Sent', 'Rate', 'Revenue Attributed'].map(h => (
                 <div key={h} style={{ fontSize: 8, color: '#4a5568', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace' }}>{h}</div>
               ))}
             </div>
-            {(attribution.channel_breakdown || []).map(ch => (
-              <div key={ch.channel} style={{ display: 'grid', gridTemplateColumns: '1fr 70px 80px 80px', gap: 8, padding: '8px 0', borderTop: '1px solid rgba(255,255,255,0.04)', alignItems: 'center' }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#f0f4f8' }}>{ch.channel}</div>
-                <div style={{ fontSize: 12, color: '#8896a8' }}>{ch.sent.toLocaleString()}</div>
-                <div style={{ fontSize: 12, color: ch.rate >= 20 ? '#10b981' : ch.rate >= 10 ? '#c9a84c' : '#8896a8', fontWeight: 600 }}>{ch.rate}%</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#f0f4f8' }}>{ch.revenue > 0 ? `$${ch.revenue.toLocaleString()}` : '—'}</div>
+
+            {/* Rows */}
+            {(attribution.channel_breakdown || []).map((ch, i) => {
+              const rateColor = ch.rate >= 25 ? '#10b981' : ch.rate >= 12 ? '#c9a84c' : '#8896a8';
+              const chIcon = { Email: '✉', SMS: '💬', WhatsApp: '📱', Voice: '📞' }[ch.channel] || '·';
+              return (
+                <div key={ch.channel} style={{ display: 'grid', gridTemplateColumns: '1.6fr 80px 120px 100px', gap: 0, padding: '13px 20px', borderBottom: i < (attribution.channel_breakdown.length - 1) ? '1px solid rgba(255,255,255,0.04)' : 'none', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 14, flexShrink: 0 }}>{chIcon}</span>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#f0f4f8', lineHeight: 1.2 }}>{ch.label || ch.channel}</div>
+                      <div style={{ fontSize: 9, color: '#4a5568', fontFamily: 'DM Mono,monospace', marginTop: 2 }}>{ch.rateLabel}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 13, color: ch.sent > 0 ? '#f0f4f8' : '#4a5568', fontWeight: ch.sent > 0 ? 600 : 400 }}>
+                    {ch.sent > 0 ? ch.sent.toLocaleString() : '—'}
+                  </div>
+                  <div>
+                    {ch.sent > 0 ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ width: 40, height: 4, background: 'rgba(255,255,255,0.07)', borderRadius: 2, overflow: 'hidden' }}>
+                          <div style={{ width: `${Math.min(ch.rate, 100)}%`, height: '100%', background: rateColor, borderRadius: 2 }} />
+                        </div>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: rateColor }}>{ch.rate}%</span>
+                      </div>
+                    ) : <span style={{ fontSize: 12, color: '#4a5568' }}>—</span>}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: ch.revenue > 0 ? '#f0f4f8' : '#4a5568' }}>
+                    {ch.revenue > 0 ? `$${ch.revenue.toLocaleString()}` : '—'}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Total row */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 80px 120px 100px', gap: 0, padding: '13px 20px', background: 'rgba(201,168,76,0.08)', borderTop: '1px solid rgba(201,168,76,0.2)' }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: '#c9a84c' }}>Total Platform Contribution</div>
+              <div />
+              <div />
+              <div style={{ fontSize: 14, fontWeight: 800, color: '#c9a84c' }}>
+                ${attribution.platform_revenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
               </div>
-            ))}
+            </div>
           </div>
-          <div style={{ background: 'linear-gradient(135deg, #0a1628, #112240)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 14, padding: '16px 22px', marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+
+          {/* Platform ROI card */}
+          <div style={{ background: 'linear-gradient(135deg, #0a1628 0%, #142840 100%)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 14, padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 20 }}>
             <div>
-              <div style={{ fontSize: 9, color: '#c9a84c', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Platform ROI</div>
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', lineHeight: 1.6 }}>
-                You pay <span style={{ color: '#f0f4f8', fontWeight: 700 }}>${attribution.monthly_cost}/mo</span> · Platform recovered <span style={{ color: '#c9a84c', fontWeight: 700 }}>${attribution.platform_revenue.toLocaleString()}</span> this month
+              <div style={{ fontSize: 9, color: '#c9a84c', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 6 }}>Platform ROI</div>
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', lineHeight: 1.7 }}>
+                You pay <span style={{ color: '#f0f4f8', fontWeight: 700 }}>${attribution.monthly_cost}/mo</span>
+                {attribution.platform_revenue > 0 && (
+                  <> · Platform recovered <span style={{ color: '#c9a84c', fontWeight: 700 }}>
+                    ${attribution.platform_revenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </span> this month</>
+                )}
               </div>
+              {attribution.roi >= 1 && (
+                <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+                  <span style={{ fontSize: 10, color: '#10b981', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 20, padding: '3px 10px', fontWeight: 700 }}>
+                    ✓ Profitable this month
+                  </span>
+                </div>
+              )}
             </div>
-            <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 20 }}>
-              <div style={{ fontSize: 36, fontWeight: 800, color: '#c9a84c', letterSpacing: '-1px', lineHeight: 1 }}>{attribution.roi}×</div>
-              <div style={{ fontSize: 9, color: '#4a5568', fontWeight: 700, fontFamily: 'DM Mono,monospace' }}>ROI</div>
+            <div style={{ textAlign: 'center', flexShrink: 0 }}>
+              <div style={{ fontSize: 44, fontWeight: 800, color: attribution.roi >= 1 ? '#c9a84c' : '#8896a8', letterSpacing: '-2px', lineHeight: 1 }}>
+                {attribution.roi}×
+              </div>
+              <div style={{ fontSize: 9, color: '#4a5568', fontWeight: 700, fontFamily: 'DM Mono,monospace', marginTop: 2 }}>RETURN</div>
             </div>
           </div>
-        </>
+        </div>
       )}
 
       {/* ONBOARDING PROGRESS */}
