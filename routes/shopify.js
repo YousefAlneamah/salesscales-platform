@@ -463,5 +463,22 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
     }
   });
 
+  router.post('/generate-sequences', async (req, res) => {
+    const { client_id } = req.body;
+    if (!client_id) return res.status(400).json({ error: 'client_id required' });
+    try {
+      const { data: conn } = await supabase.from('shopify_connections')
+        .select('shop, access_token').eq('client_id', client_id).maybeSingle();
+      if (!conn) return res.status(404).json({ error: 'No Shopify store connected for this client' });
+      res.json({ ok: true, message: 'Sequence generation started — check Approvals in ~30 seconds' });
+      generateShopifySequences(conn.shop, conn.access_token, client_id).catch(e => {
+        console.error('[MANUAL] Sequence generation failed for', conn.shop, ':', e.message);
+      });
+    } catch (e) {
+      console.error('/shopify/generate-sequences error:', e.message);
+      res.status(500).json({ error: 'Failed to start generation', details: e.message });
+    }
+  });
+
   return router;
 };

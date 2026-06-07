@@ -314,6 +314,7 @@ export default function ClientDashboard({ user, onLogout }) {
   const allNavItems = [
     { id: 'dashboard', label: t('dashboard', lang), icon: '▦' },
     { id: 'results', label: t('myResults', lang), icon: '📈' },
+    { id: 'integrations', label: 'Integrations', icon: '🔗' },
     { id: 'aiteam', label: 'My AI Team', icon: '🤖' },
     { id: 'sequences', label: t('sequences', lang), icon: '⚡' },
     { id: 'activity', label: t('recentActivity', lang), icon: '📊' },
@@ -333,6 +334,7 @@ export default function ClientDashboard({ user, onLogout }) {
   const pageTitles = {
     dashboard: 'Dashboard',
     results: 'My Results',
+    integrations: 'Integrations',
     aiteam: 'My AI Team',
     sequences: 'Active Sequences',
     activity: 'Recent Activity',
@@ -365,6 +367,7 @@ export default function ClientDashboard({ user, onLogout }) {
     switch (currentPage) {
       case 'dashboard': return <ClientHome />;
       case 'results': return <ClientResults />;
+      case 'integrations': return <ClientIntegrations />;
       case 'sequences': return <ClientSequences />;
       case 'activity': return <ClientActivity />;
       case 'approvals': return <ClientApprovals />;
@@ -893,6 +896,180 @@ export default function ClientDashboard({ user, onLogout }) {
             </div>
           ))}
         </div>
+      </div>
+    );
+  };
+
+  // ─── INTEGRATIONS ─────────────────────────────────────
+  const ClientIntegrations = () => {
+    const [shopConn, setShopConn] = useState(null);
+    const [shopDomain, setShopDomain] = useState('');
+    const [products, setProducts] = useState([]);
+    const [checking, setChecking] = useState(false);
+    const [generating, setGenerating] = useState(false);
+    const [genDone, setGenDone] = useState(false);
+
+    const loadConnection = async () => {
+      try {
+        const r = await axios.get(`${API_BASE}/shopify/connection?client_id=${user.clientId}`);
+        const connected = r.data.connected ? r.data : false;
+        setShopConn(connected);
+        if (connected) {
+          axios.get(`${API_BASE}/shopify/products?client_id=${user.clientId}`)
+            .then(p => setProducts(p.data.products || []))
+            .catch(() => setProducts([]));
+        }
+      } catch {
+        setShopConn(false);
+      }
+    };
+
+    useEffect(() => { loadConnection(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const connectShopify = () => {
+      const domain = shopDomain.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
+      if (!domain) { alert('Enter your Shopify store domain (e.g. mystore.myshopify.com)'); return; }
+      window.open(`${API_BASE}/shopify/install?shop=${encodeURIComponent(domain)}&clientId=${encodeURIComponent(user.clientId)}`, '_blank');
+    };
+
+    const checkConnection = async () => {
+      setChecking(true);
+      setShopConn(null);
+      await loadConnection();
+      setChecking(false);
+    };
+
+    const triggerSequences = async () => {
+      setGenerating(true);
+      try {
+        await axios.post(`${API_BASE}/shopify/generate-sequences`, { client_id: user.clientId });
+        setGenDone(true);
+        setTimeout(() => setGenDone(false), 6000);
+      } catch (e) {
+        alert(e.response?.data?.error || 'Failed to start generation — please try again');
+      }
+      setGenerating(false);
+    };
+
+    return (
+      <div>
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 4 }}>Connected Platforms</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: '#f0f4f8' }}>Integrations</div>
+        </div>
+
+        {/* Shopify card */}
+        <div style={{ background: '#0f1f35', border: `1px solid ${shopConn ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.07)'}`, borderRadius: 16, padding: '24px', marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: shopConn ? 16 : 18 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(149,191,71,0.15)', border: '1px solid rgba(149,191,71,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>🛍️</div>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#f0f4f8' }}>Shopify</div>
+                <div style={{ fontSize: 11, color: '#4a5568' }}>eCommerce store</div>
+              </div>
+            </div>
+            {shopConn === null ? (
+              <span style={{ fontSize: 10, color: '#8896a8' }}>Loading...</span>
+            ) : shopConn ? (
+              <span style={{ fontSize: 10, padding: '5px 14px', borderRadius: 20, background: 'rgba(16,185,129,0.15)', color: '#34d399', fontWeight: 700, border: '1px solid rgba(16,185,129,0.3)' }}>● Connected</span>
+            ) : (
+              <span style={{ fontSize: 10, padding: '5px 14px', borderRadius: 20, background: 'rgba(255,255,255,0.05)', color: '#8896a8', fontWeight: 600, border: '1px solid rgba(255,255,255,0.08)' }}>Not connected</span>
+            )}
+          </div>
+
+          {shopConn ? (
+            <div>
+              {/* Store info banner */}
+              <div style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 10, padding: '14px 18px', marginBottom: 18 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#34d399', marginBottom: 4 }}>✓ {shopConn.shop}</div>
+                <div style={{ fontSize: 11, color: '#8896a8' }}>
+                  {shopConn.connected_at ? `Connected ${new Date(shopConn.connected_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · ` : ''}
+                  Cart recovery sequences active — check <button onClick={() => setCurrentPage('approvals')} style={{ background: 'none', border: 'none', color: '#c9a84c', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>Approvals</button> to review
+                </div>
+              </div>
+
+              {/* Product grid */}
+              {products.length > 0 && (
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase', fontFamily: 'DM Mono,monospace', marginBottom: 10 }}>Store Products</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
+                    {products.slice(0, 5).map((p, i) => (
+                      <div key={i} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, overflow: 'hidden' }}>
+                        <div style={{ height: 80, background: '#142840', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                          {p.image ? <img src={p.image} alt={p.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 24 }}>🛍️</span>}
+                        </div>
+                        <div style={{ padding: '8px 10px' }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: '#f0f4f8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.title}</div>
+                          <div style={{ fontSize: 12, color: '#c9a84c', fontWeight: 700, marginTop: 2 }}>${p.price}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={triggerSequences} disabled={generating}
+                  style={{ background: generating ? 'rgba(201,168,76,0.2)' : genDone ? 'rgba(16,185,129,0.15)' : 'rgba(201,168,76,0.12)', border: `1px solid ${genDone ? 'rgba(16,185,129,0.3)' : 'rgba(201,168,76,0.3)'}`, color: genDone ? '#34d399' : '#c9a84c', borderRadius: 8, padding: '9px 18px', fontSize: 12, fontWeight: 700, cursor: generating ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+                  {generating ? 'Generating...' : genDone ? '✓ Queued in Approvals' : '⚡ Regenerate Sequences'}
+                </button>
+                <a href={`https://${shopConn.shop}/admin`} target="_blank" rel="noopener noreferrer"
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#8896a8', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'DM Sans, sans-serif' }}>
+                  Open Admin ↗
+                </a>
+              </div>
+            </div>
+          ) : shopConn === false ? (
+            <div>
+              <div style={{ fontSize: 12, color: '#8896a8', lineHeight: 1.75, marginBottom: 18 }}>
+                Connect your Shopify store to activate your cart recovery sequences and enable live revenue tracking.
+                Once connected, Mahdi will automatically generate personalised email, SMS, and WhatsApp sequences
+                based on your actual products and pricing.
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <input
+                  type="text"
+                  value={shopDomain}
+                  onChange={e => setShopDomain(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && connectShopify()}
+                  placeholder="yourstore.myshopify.com"
+                  style={{ flex: 1, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: '11px 14px', fontSize: 13, color: '#f0f4f8', outline: 'none', fontFamily: 'DM Sans, sans-serif' }}
+                />
+                <button onClick={connectShopify}
+                  style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: 8, padding: '11px 22px', fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'DM Sans, sans-serif' }}>
+                  Connect Shopify →
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button onClick={checkConnection} disabled={checking}
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#8896a8', borderRadius: 8, padding: '7px 14px', fontSize: 11, fontWeight: 600, cursor: checking ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+                  {checking ? 'Checking...' : '↻ Check Connection'}
+                </button>
+                <span style={{ fontSize: 10, color: '#4a5568' }}>Completed OAuth? Click to verify.</span>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Other integrations */}
+        {[
+          { name: 'Klaviyo', icon: '📧', desc: 'Email marketing platform', note: 'Managed for you' },
+          { name: 'Meta Ads', icon: '📱', desc: 'Facebook & Instagram ads', note: 'Managed for you' },
+          { name: 'WhatsApp Business', icon: '💬', desc: 'WhatsApp messaging', note: 'Pending Meta approval' },
+        ].map(int => (
+          <div key={int.name} style={{ background: '#0f1f35', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 14, padding: '18px 22px', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', opacity: 0.65 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>{int.icon}</div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#f0f4f8' }}>{int.name}</div>
+                <div style={{ fontSize: 11, color: '#4a5568' }}>{int.desc}</div>
+              </div>
+            </div>
+            <span style={{ fontSize: 9, padding: '4px 12px', borderRadius: 20, background: 'rgba(255,255,255,0.05)', color: '#4a5568', fontWeight: 600, border: '1px solid rgba(255,255,255,0.07)', whiteSpace: 'nowrap' }}>{int.note}</span>
+          </div>
+        ))}
       </div>
     );
   };
