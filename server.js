@@ -652,6 +652,131 @@ const getShopifyContext = async (clientId) => {
   }
 };
 
+// ─── HELPER: GENERATE ALL CLIENT SEQUENCES VIA MAHDI ─────
+const generateAllClientSequences = async (shop, accessToken, clientId) => {
+  console.log(`[Mahdi] Starting sequence generation — shop: ${shop}, client: ${clientId}`);
+  const hdrs = { 'X-Shopify-Access-Token': accessToken, 'Content-Type': 'application/json' };
+  const base = `https://${shop}/admin/api/2026-01`;
+
+  let storeName = shop, productList = '', aov = '0';
+  try {
+    const [productsRes, ordersRes, shopRes] = await Promise.all([
+      axios.get(`${base}/products.json?limit=10&fields=id,title,variants`, { headers: hdrs }),
+      axios.get(`${base}/orders.json?status=any&limit=50&fields=total_price&financial_status=paid`, { headers: hdrs }),
+      axios.get(`${base}/shop.json`, { headers: hdrs }),
+    ]);
+    const products = productsRes.data.products || [];
+    const orders   = ordersRes.data.orders || [];
+    storeName   = shopRes.data.shop?.name || shop;
+    const total = orders.reduce((s, o) => s + parseFloat(o.total_price || 0), 0);
+    aov         = orders.length ? (total / orders.length).toFixed(2) : '0';
+    productList = products.slice(0, 6).map(p => `${p.title} ($${p.variants?.[0]?.price || '0'})`).join(', ');
+    console.log(`[Mahdi] Store data — ${storeName}, ${products.length} products, AOV $${aov}`);
+  } catch (e) {
+    console.error('[Mahdi] Failed to fetch store data:', e.message);
+    return;
+  }
+
+  const storeCtx   = `Store: ${storeName}\nProducts: ${productList}\nAverage order value: $${aov}`;
+  const mahdiSys   = `You are Mahdi, the Marketing and Content AI at Sales Scales. Return ONLY valid JSON. Short sentences, no exclamation marks, reference real product names. Use {{first_name}}.`;
+  const parseEmails = (raw) => {
+    try {
+      const clean = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+      const m = clean.match(/\{[\s\S]*\}/);
+      return (JSON.parse(m ? m[0] : clean).emails || []).slice(0, 3);
+    } catch { return []; }
+  };
+
+  const queueApproval = (type, title, body, steps, trigger) =>
+    supabase.from('approvals').insert([{
+      type, title, content: body,
+      metadata: { steps, trigger_type: trigger, shop, aov },
+      from_member: 'mahdi', client_id: clientId,
+      priority: 'normal', status: 'pending',
+      created_at: new Date().toISOString(),
+    }])
+    .then(() => console.log(`[Mahdi] Approval queued: ${title}`))
+    .catch(e => console.error(`[Mahdi] Approval insert failed (${title}):`, e.message));
+
+  const createWorkflow = async (name, trigger, steps) => {
+    const { data: wf, error } = await supabase.from('workflows').insert([{
+      name, client_id: clientId, trigger_type: trigger, status: 'paused', enrolled_count: 0,
+    }]).select('id').single();
+    if (error || !wf) { console.error(`[Mahdi] Workflow insert failed (${name}):`, error?.message); return; }
+    const rows = steps.map((s, i) => ({
+      workflow_id: wf.id, step_order: i + 1,
+      step_type: s.step_type, content: s.content || '',
+      subject: s.subject || '', wait_hours: s.wait_hours || 0,
+    }));
+    if (rows.length) await supabase.from('workflow_steps').insert(rows).catch(e => console.error('[Mahdi] workflow_steps insert failed:', e.message));
+    console.log(`[Mahdi] Workflow saved: "${name}" — ${rows.length} steps`);
+  };
+
+  const buildSteps = (emails, waits) =>
+    emails.flatMap((e, i) => {
+      const out = [];
+      if (waits[i]) out.push({ step_type: 'wait', content: '', wait_hours: waits[i] });
+      out.push({ step_type: 'email', subject: e.subject || '', content: e.content || '', wait_hours: 0 });
+      return out;
+    });
+
+  const SEQUENCES = [
+    {
+      key: 'cart_recovery',
+      trigger: 'cart_abandoned',
+      name: `Cart Recovery — ${storeName}`,
+      approvalTitle: `Cart Recovery Emails (3) — ${storeName}`,
+      approvalBody: `Mahdi built a 3-email cart recovery sequence for ${storeName}. AOV: $${aov}. Approve to activate.`,
+      waits: [1, 23, 48],
+      prompt: `Write 3 cart recovery emails.\n\n${storeCtx}\n\nEmail 1 (1h after abandonment): urgency — cart is waiting\nEmail 2 (24h later): social proof — reviews and bestseller status\nEmail 3 (72h later): final nudge\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."}]}\nUnder 120 words each. Reference product names.`,
+    },
+    {
+      key: 'lead_nurture',
+      trigger: 'new_contact',
+      name: `Lead Nurture — ${storeName}`,
+      approvalTitle: `Lead Nurture Emails (3) — ${storeName}`,
+      approvalBody: `Mahdi built a 3-email welcome nurture sequence for new ${storeName} subscribers. Approve to activate.`,
+      waits: [0, 72, 96],
+      prompt: `Write 3 lead nurture welcome emails for new subscribers.\n\n${storeCtx}\n\nEmail 1 (immediately): warm welcome, introduce brand story\nEmail 2 (3 days): spotlight your best product and key benefits\nEmail 3 (7 days): social proof and first-purchase encouragement\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."}]}\nUnder 120 words each.`,
+    },
+    {
+      key: 'win_back',
+      trigger: 'lapsed_customer',
+      name: `Win-Back — ${storeName}`,
+      approvalTitle: `Win-Back Emails (3) — ${storeName}`,
+      approvalBody: `Mahdi built a 3-email win-back sequence for lapsed ${storeName} customers. Approve to activate.`,
+      waits: [0, 72, 96],
+      prompt: `Write 3 win-back emails for customers who haven't purchased in 60+ days.\n\n${storeCtx}\n\nEmail 1 (immediately): personal "we miss you", no pressure\nEmail 2 (3 days): new arrivals or bestsellers since their last visit\nEmail 3 (7 days): last attempt, exclusivity angle\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."}]}\nUnder 120 words each.`,
+    },
+    {
+      key: 'post_purchase',
+      trigger: 'purchase_made',
+      name: `Post-Purchase — ${storeName}`,
+      approvalTitle: `Post-Purchase Emails (3) — ${storeName}`,
+      approvalBody: `Mahdi built a 3-email post-purchase sequence for ${storeName}. Approve to activate.`,
+      waits: [24, 144, 336],
+      prompt: `Write 3 post-purchase follow-up emails.\n\n${storeCtx}\n\nEmail 1 (1 day after purchase): thank you, set expectations\nEmail 2 (7 days): check-in, invite review\nEmail 3 (21 days): upsell or cross-sell a complementary product\n\nReturn JSON: {"emails":[{"subject":"...","content":"..."},{"subject":"...","content":"..."},{"subject":"...","content":"..."}]}\nUnder 120 words each.`,
+    },
+  ];
+
+  const done = [];
+  for (const seq of SEQUENCES) {
+    try {
+      const raw   = await aiCall(mahdiSys, seq.prompt, '');
+      const steps = buildSteps(parseEmails(raw), seq.waits);
+      if (steps.length === 0) { console.warn(`[Mahdi] No steps parsed for ${seq.key}`); continue; }
+      await Promise.all([
+        createWorkflow(seq.name, seq.trigger, steps),
+        queueApproval('email_sequence', seq.approvalTitle, seq.approvalBody, steps, seq.trigger),
+      ]);
+      done.push(seq.key);
+    } catch (e) {
+      console.error(`[Mahdi] ${seq.key} generation failed:`, e.message);
+    }
+  }
+  console.log(`[Mahdi] Generation complete for ${storeName} — sequences: ${done.join(', ') || 'none'}`);
+};
+
 // ─── HELPER: ENROLL CONTACT IN WORKFLOW ──────────────────
 const enrollContactInWorkflow = async (workflowId, contactId, clientId, contactEmail, contactPhone, contactName) => {
   // Fix 6: check contact blacklist before enrolling
@@ -6337,7 +6462,25 @@ app.post('/email/broadcast', async (req, res) => {
 // ─── ROUTE MODULES ────────────────────────────────────────
 app.use('/auth',    require('./routes/auth')({ supabase, jwt, bcrypt, JWT_SECRET, verifyToken, sgMail }));
 app.use('/',        require('./routes/ai-team')({ aiCall, ragSearch, getBriefingsContext, getShopifyContext, getClientProfile, getKlaviyoContext, verifyToken, aiLimiter }));
-app.use('/shopify', require('./routes/shopify')({ supabase, axios, crypto, processWebhookEvent, aiCall }));
+app.use('/shopify', require('./routes/shopify')({ supabase, axios, crypto, processWebhookEvent, aiCall, generateAllClientSequences }));
+
+// ─── POST /mahdi/generate-sequences ──────────────────────
+app.post('/mahdi/generate-sequences', async (req, res) => {
+  const { client_id } = req.body;
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+  try {
+    const { data: conn } = await supabase.from('shopify_connections')
+      .select('shop, access_token').eq('client_id', client_id).maybeSingle();
+    if (!conn) return res.status(404).json({ error: 'No Shopify store connected for this client' });
+    res.json({ ok: true, message: 'Sequence generation started — check Approvals in ~60 seconds', shop: conn.shop });
+    console.log(`[mahdi/generate-sequences] Triggered for client ${client_id} — ${conn.shop}`);
+    generateAllClientSequences(conn.shop, conn.access_token, client_id)
+      .catch(e => console.error('[mahdi/generate-sequences] Background generation failed:', e.message));
+  } catch (e) {
+    console.error('/mahdi/generate-sequences error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 app.use('/',        require('./routes/knowledge')({ supabase, axios, importLimiter, upload, PDF2Json, YoutubeTranscript }));
 app.use('/',        require('./routes/analytics')({ supabase, aiCall }));
 app.use('/',        require('./routes/integrations')({ supabase, axios, aiCall, ragSearch, getBriefingsContext, verifyToken }));

@@ -1,6 +1,6 @@
 const express = require('express');
 
-module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
+module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall, generateAllClientSequences }) => {
   const router = express.Router();
 
   const parseJson = (raw) => {
@@ -269,8 +269,9 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
         </html>
       `);
       if (clientId) {
-        generateShopifySequences(shop, accessToken, clientId).catch(e => {
-          console.error('[AUTO] Shopify sequence generation failed for', shop, ':', e.message);
+        const genFn = generateAllClientSequences || generateShopifySequences;
+        genFn(shop, accessToken, clientId).catch(e => {
+          console.error('[AUTO] Sequence generation failed for', shop, ':', e.message);
         });
       }
     } catch (e) {
@@ -489,8 +490,9 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
       const { data: conn } = await supabase.from('shopify_connections')
         .select('shop, access_token').eq('client_id', client_id).maybeSingle();
       if (!conn) return res.status(404).json({ error: 'No Shopify store connected for this client' });
-      res.json({ ok: true, message: 'Sequence generation started — check Approvals in ~30 seconds' });
-      generateShopifySequences(conn.shop, conn.access_token, client_id).catch(e => {
+      res.json({ ok: true, message: 'Sequence generation started — check Approvals in ~60 seconds' });
+      const genFn = generateAllClientSequences || generateShopifySequences;
+      genFn(conn.shop, conn.access_token, client_id).catch(e => {
         console.error('[MANUAL] Sequence generation failed for', conn.shop, ':', e.message);
       });
     } catch (e) {
