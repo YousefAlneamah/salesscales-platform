@@ -201,7 +201,8 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
     if (!shop) return res.status(400).send('Missing shop parameter');
     const state = clientId || crypto.randomBytes(16).toString('hex');
     const scopes = 'read_analytics,write_checkouts,read_checkouts,read_customers,write_customers,read_price_rules,write_price_rules,read_discounts,write_discounts,write_draft_orders,read_draft_orders,read_fulfillments,write_fulfillments,write_inventory,read_inventory,write_marketing_events,read_marketing_events,read_orders,write_orders,read_products,write_products,read_shipping';
-    const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${process.env.SHOPIFY_CLIENT_ID}&scope=${scopes}&redirect_uri=${process.env.SHOPIFY_REDIRECT_URI}&state=${state}`;
+    const redirectUri = process.env.SHOPIFY_REDIRECT_URI || `${process.env.BACKEND_URL}/shopify/callback`;
+    const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${process.env.SHOPIFY_CLIENT_ID}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
     res.redirect(installUrl);
   });
 
