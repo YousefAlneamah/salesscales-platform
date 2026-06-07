@@ -228,7 +228,7 @@ export default function ClientDashboard({ user, onLogout }) {
         supabase.from('shopify_connections').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId),
         supabase.from('approvals').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId).eq('status', 'approved'),
         supabase.from('workflow_enrollments').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId),
-        supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId).eq('channel', 'email').eq('direction', 'outbound'),
+        supabase.from('messages').select('id', { count: 'exact', head: true }).eq('client_id', user.clientId).in('channel', ['email', 'Email']).eq('direction', 'outbound'),
         supabase.from('client_users').select('created_at').eq('client_id', user.clientId).maybeSingle(),
       ]);
       const steps = {
@@ -908,6 +908,7 @@ export default function ClientDashboard({ user, onLogout }) {
     const [checking, setChecking] = useState(false);
     const [generating, setGenerating] = useState(false);
     const [genDone, setGenDone] = useState(false);
+    const [disconnecting, setDisconnecting] = useState(false);
 
     const loadConnection = async () => {
       try {
@@ -937,6 +938,19 @@ export default function ClientDashboard({ user, onLogout }) {
       setShopConn(null);
       await loadConnection();
       setChecking(false);
+    };
+
+    const disconnectShopify = async () => {
+      if (!window.confirm('Disconnect your Shopify store? Active sequences will be paused.')) return;
+      setDisconnecting(true);
+      try {
+        await axios.post(`${API_BASE}/shopify/disconnect`, { client_id: user.clientId });
+        setShopConn(false);
+        setProducts([]);
+      } catch (e) {
+        alert(e.response?.data?.error || 'Failed to disconnect — please try again');
+      }
+      setDisconnecting(false);
     };
 
     const triggerSequences = async () => {
@@ -1008,7 +1022,7 @@ export default function ClientDashboard({ user, onLogout }) {
                 </div>
               )}
 
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <button onClick={triggerSequences} disabled={generating}
                   style={{ background: generating ? 'rgba(201,168,76,0.2)' : genDone ? 'rgba(16,185,129,0.15)' : 'rgba(201,168,76,0.12)', border: `1px solid ${genDone ? 'rgba(16,185,129,0.3)' : 'rgba(201,168,76,0.3)'}`, color: genDone ? '#34d399' : '#c9a84c', borderRadius: 8, padding: '9px 18px', fontSize: 12, fontWeight: 700, cursor: generating ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
                   {generating ? 'Generating...' : genDone ? '✓ Queued in Approvals' : '⚡ Regenerate Sequences'}
@@ -1017,6 +1031,10 @@ export default function ClientDashboard({ user, onLogout }) {
                   style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#8896a8', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'DM Sans, sans-serif' }}>
                   Open Admin ↗
                 </a>
+                <button onClick={disconnectShopify} disabled={disconnecting}
+                  style={{ background: 'rgba(220,38,38,0.07)', border: '1px solid rgba(220,38,38,0.2)', color: '#dc2626', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 600, cursor: disconnecting ? 'not-allowed' : 'pointer', fontFamily: 'DM Sans, sans-serif', marginLeft: 'auto' }}>
+                  {disconnecting ? 'Disconnecting...' : 'Disconnect'}
+                </button>
               </div>
             </div>
           ) : shopConn === false ? (

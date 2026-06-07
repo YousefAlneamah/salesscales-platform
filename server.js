@@ -775,6 +775,16 @@ const generateAllClientSequences = async (shop, accessToken, clientId) => {
     }
   }
   console.log(`[Mahdi] Generation complete for ${storeName} — sequences: ${done.join(', ') || 'none'}`);
+
+  if (done.length > 0 && clientId) {
+    await createClientNotification(
+      clientId,
+      'Your sequences are ready to review',
+      `Mahdi built ${done.length} personalised sequence${done.length !== 1 ? 's' : ''} for ${storeName} — cart recovery, lead nurture, win-back, and post-purchase. Go to Approvals to review and activate them.`,
+      'success'
+    );
+    console.log(`[Mahdi] Client notification sent for ${clientId}`);
+  }
 };
 
 // ─── HELPER: ENROLL CONTACT IN WORKFLOW ──────────────────
