@@ -628,12 +628,18 @@ export default function ClientDashboard({ user, onLogout }) {
             <div style={{ width: `${onbPct}%`, height: '100%', background: 'linear-gradient(90deg, #c9a84c, #a07234)', borderRadius: 3, transition: 'width 0.5s' }} />
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {onbItems.map(item => (
-              <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: onboardingSteps[item.key] ? '#34d399' : '#4a5568', background: onboardingSteps[item.key] ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.04)', border: `1px solid ${onboardingSteps[item.key] ? 'rgba(16,185,129,0.25)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 20, padding: '3px 10px', fontFamily: 'Inter,sans-serif' }}>
-                <span>{onboardingSteps[item.key] ? '✓' : '○'}</span>
-                {item.label}
-              </div>
-            ))}
+            {onbItems.map(item => {
+              const isStoreStep = item.key === 'store' && !onboardingSteps[item.key];
+              return (
+                <div key={item.key}
+                  onClick={isStoreStep ? () => setCurrentPage('settings') : undefined}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: onboardingSteps[item.key] ? '#34d399' : isStoreStep ? '#c9a84c' : '#4a5568', background: onboardingSteps[item.key] ? 'rgba(16,185,129,0.1)' : isStoreStep ? 'rgba(201,168,76,0.08)' : 'rgba(255,255,255,0.04)', border: `1px solid ${onboardingSteps[item.key] ? 'rgba(16,185,129,0.25)' : isStoreStep ? 'rgba(201,168,76,0.3)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 20, padding: '3px 10px', fontFamily: 'Inter,sans-serif', cursor: isStoreStep ? 'pointer' : 'default' }}>
+                  <span>{onboardingSteps[item.key] ? '✓' : '○'}</span>
+                  {item.label}
+                  {isStoreStep && <span style={{ fontSize: 9 }}>→</span>}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -2561,6 +2567,9 @@ export default function ClientDashboard({ user, onLogout }) {
     const [inviting, setInviting] = useState(false);
     const [inviteResult, setInviteResult] = useState(null);
     const [removing, setRemoving] = useState(null);
+    const [shopDomain, setShopDomain] = useState('');
+    const [shopConn, setShopConn] = useState(null);
+    const [shopConnLoading, setShopConnLoading] = useState(true);
 
     useEffect(() => {
       (async () => {
@@ -2596,6 +2605,19 @@ export default function ClientDashboard({ user, onLogout }) {
         .finally(() => setLoadingM(false));
     };
     useEffect(() => { loadMembers(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+      axios.get(`${API_BASE}/shopify/connection?client_id=${user.clientId}`)
+        .then(r => setShopConn(r.data.connected ? r.data : false))
+        .catch(() => setShopConn(false))
+        .finally(() => setShopConnLoading(false));
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const connectShopify = () => {
+      const domain = shopDomain.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
+      if (!domain) { alert('Enter your Shopify domain (e.g. mystore.myshopify.com)'); return; }
+      window.open(`${API_BASE}/shopify/install?shop=${encodeURIComponent(domain)}&clientId=${encodeURIComponent(user.clientId)}`, '_blank');
+    };
 
     const inviteMember = async () => {
       if (!inviteForm.name || !inviteForm.email) return;
@@ -2683,6 +2705,47 @@ export default function ClientDashboard({ user, onLogout }) {
         </div>
         <div style={{ fontSize: '12px', color: '#8896a8', marginBottom: '18px', lineHeight: 1.6 }}>
           Your messaging channels are set up and managed by the Sales Scales team on your behalf. Add your WhatsApp Business number below and we'll handle the rest.
+        </div>
+
+        {/* Shopify Connection */}
+        <div style={{ marginBottom: '16px', background: shopConn ? 'rgba(16,185,129,0.06)' : 'rgba(255,255,255,0.03)', border: `1px solid ${shopConn ? 'rgba(16,185,129,0.25)' : 'rgba(255,255,255,0.1)'}`, borderRadius: '12px', padding: '16px 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: shopConn ? 6 : 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '18px' }}>🛍️</span>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#f0f4f8' }}>Shopify Store</div>
+            </div>
+            {shopConnLoading ? (
+              <span style={{ fontSize: '10px', color: '#8896a8' }}>Checking...</span>
+            ) : shopConn ? (
+              <span style={{ fontSize: '9px', padding: '4px 12px', borderRadius: '20px', background: 'rgba(16,185,129,0.15)', color: '#34d399', fontWeight: 700, border: '1px solid rgba(16,185,129,0.3)' }}>● Connected</span>
+            ) : (
+              <span style={{ fontSize: '9px', padding: '4px 12px', borderRadius: '20px', background: 'rgba(255,255,255,0.05)', color: '#8896a8', fontWeight: 600 }}>Not connected</span>
+            )}
+          </div>
+          {shopConn ? (
+            <div style={{ fontSize: '11px', color: '#34d399' }}>
+              ✓ {shopConn.shop}{shopConn.connected_at ? ` — connected ${new Date(shopConn.connected_at).toLocaleDateString()}` : ''}
+            </div>
+          ) : !shopConnLoading && (
+            <div>
+              <div style={{ fontSize: '11px', color: '#8896a8', marginBottom: '10px', lineHeight: 1.6 }}>
+                Connect your Shopify store to enable cart recovery, product sync, and live revenue tracking. Mahdi will automatically build your sequences after connecting.
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  value={shopDomain}
+                  onChange={e => setShopDomain(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && connectShopify()}
+                  placeholder="yourstore.myshopify.com"
+                  style={{ flex: 1, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', padding: '9px 12px', fontSize: '12px', color: '#f0f4f8', outline: 'none', fontFamily: 'DM Sans, sans-serif' }}
+                />
+                <button onClick={connectShopify} style={{ background: '#c9a84c', color: '#0a1628', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'DM Sans, sans-serif' }}>
+                  Connect Shopify →
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Fix 8: WhatsApp pending approval warning */}
