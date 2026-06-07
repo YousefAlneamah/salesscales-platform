@@ -385,23 +385,33 @@ module.exports = ({ supabase, axios, sgMail, storeBriefing }) => {
     const { client_id } = req.query;
     if (!client_id) return res.status(400).json({ error: 'client_id required' });
     try {
-      const { data: client } = await supabase.from('clients')
-        .select('id, name, tier, status, paypal_subscription_id, recovered_revenue, performance_fee_enabled')
+      // Core columns only — separating optional columns avoids a 500 when they don't exist yet
+      const { data: client, error: clientErr } = await supabase.from('clients')
+        .select('id, name, tier, status, paypal_subscription_id')
         .eq('id', client_id).maybeSingle();
-      if (!client) return res.status(404).json({ error: 'Client not found' });
+      if (clientErr || !client) return res.status(404).json({ error: 'Client not found' });
 
-      // Fetch last month's performance fee record
-      const lastMonthDate = new Date();
-      lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
-      const lastMonthLabel = lastMonthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-      const { data: lastFeeRow } = await supabase.from('performance_fees')
-        .select('fee_amount, month, status').eq('client_id', client_id)
-        .eq('month', lastMonthLabel).maybeSingle().catch(() => ({ data: null }));
+      // Optional performance columns — silently ignored if columns don't exist
+      const { data: clientPerf } = await supabase.from('clients')
+        .select('recovered_revenue, performance_fee_enabled')
+        .eq('id', client_id).maybeSingle().catch(() => ({ data: null }));
+
+      // Optional performance_fees table — may not be created yet
+      let lastFeeRow = null;
+      try {
+        const lastMonthDate = new Date();
+        lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
+        const lastMonthLabel = lastMonthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+        const { data } = await supabase.from('performance_fees')
+          .select('fee_amount, month, status').eq('client_id', client_id)
+          .eq('month', lastMonthLabel).maybeSingle();
+        lastFeeRow = data;
+      } catch { /* table not yet created — skip */ }
 
       const perfBase = {
-        recovered_revenue: parseFloat(client.recovered_revenue || 0),
-        performance_fee_enabled: client.performance_fee_enabled !== false,
-        estimated_fee: Math.round(parseFloat(client.recovered_revenue || 0) * 0.10 * 100) / 100,
+        recovered_revenue: parseFloat(clientPerf?.recovered_revenue || 0),
+        performance_fee_enabled: clientPerf?.performance_fee_enabled !== false,
+        estimated_fee: Math.round(parseFloat(clientPerf?.recovered_revenue || 0) * 0.10 * 100) / 100,
         last_perf_fee: lastFeeRow ? parseFloat(lastFeeRow.fee_amount || 0) : 0,
         last_perf_month: lastFeeRow?.month || null,
         last_perf_status: lastFeeRow?.status || null,

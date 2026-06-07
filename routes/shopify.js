@@ -201,8 +201,10 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
     if (!shop) return res.status(400).send('Missing shop parameter');
     const state = clientId || crypto.randomBytes(16).toString('hex');
     const scopes = 'read_analytics,write_checkouts,read_checkouts,read_customers,write_customers,read_price_rules,write_price_rules,read_discounts,write_discounts,write_draft_orders,read_draft_orders,read_fulfillments,write_fulfillments,write_inventory,read_inventory,write_marketing_events,read_marketing_events,read_orders,write_orders,read_products,write_products,read_shipping';
-    const redirectUri = process.env.SHOPIFY_REDIRECT_URI || `${process.env.BACKEND_URL}/shopify/callback`;
-    const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${process.env.SHOPIFY_CLIENT_ID}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+    const apiKey = process.env.SHOPIFY_API_KEY || process.env.SHOPIFY_CLIENT_ID;
+    const redirectUri = process.env.SHOPIFY_CALLBACK_URL || process.env.SHOPIFY_REDIRECT_URI || `${process.env.BACKEND_URL}/shopify/callback`;
+    console.log(`[Shopify OAuth] install — shop: ${shop}, redirect_uri: ${redirectUri}`);
+    const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${apiKey}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
     res.redirect(installUrl);
   });
 
@@ -224,19 +226,35 @@ module.exports = ({ supabase, axios, crypto, processWebhookEvent, aiCall }) => {
     const { shop, code, state } = req.query;
     if (!shop || !code) return res.status(400).send('Missing required parameters');
     try {
+      const apiKey = process.env.SHOPIFY_API_KEY || process.env.SHOPIFY_CLIENT_ID;
+      const apiSecret = process.env.SHOPIFY_API_SECRET || process.env.SHOPIFY_CLIENT_SECRET;
       const tokenResponse = await axios.post(`https://${shop}/admin/oauth/access_token`, {
-        client_id: process.env.SHOPIFY_CLIENT_ID,
-        client_secret: process.env.SHOPIFY_CLIENT_SECRET,
-        code: code
+        client_id: apiKey,
+        client_secret: apiSecret,
+        code,
       });
       const accessToken = tokenResponse.data.access_token;
       const clientId = state && state.length < 40 ? state : null;
+      console.log(`[Shopify OAuth] callback — shop: ${shop}, clientId: ${clientId || 'none'}`);
+
+      // Primary: save access token to shopify_connections
       await supabase.from('shopify_connections').upsert([{
         shop, access_token: accessToken, client_id: clientId,
         scope: 'read_analytics,write_checkouts,read_checkouts,read_customers,write_customers',
         created_at: new Date().toISOString()
       }], { onConflict: 'shop' });
-      console.log('Shopify connection saved for:', shop);
+      console.log(`[Shopify OAuth] shopify_connections saved — shop: ${shop}`);
+
+      // Also update clients table with shop domain (best effort — column may not exist)
+      if (clientId) {
+        const { error: clientUpdateErr } = await supabase.from('clients')
+          .update({ shopify_domain: shop }).eq('id', clientId);
+        if (clientUpdateErr) {
+          console.log(`[Shopify OAuth] clients.shopify_domain not updated: ${clientUpdateErr.message}`);
+        } else {
+          console.log(`[Shopify OAuth] clients table updated — shopify_domain: ${shop}`);
+        }
+      }
       res.send(`
         <html>
           <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background: #f0f2f5;">
