@@ -66,6 +66,7 @@ import PlatformHealth from "./pages/PlatformHealth";
 import SuccessScores from "./pages/SuccessScores";
 import PublicRoadmap from "./pages/PublicRoadmap";
 import ZidniWaitlist from "./pages/ZidniWaitlist";
+import ZidniSignup from "./pages/ZidniSignup";
 
 const navItems = [
   { group: "MAIN", items: [
@@ -389,8 +390,9 @@ function App() {
   if (window.location.pathname === '/signup') return <ClientSignup />;
   if (window.location.pathname === '/roadmap') return <PublicRoadmap />;
   if (window.location.pathname === '/zidni') return <ZidniWaitlist />;
+  if (window.location.pathname === '/zidni/signup') return <ZidniSignup />;
 
-  const knownPaths = ['/', '/terms', '/privacy', '/signup', '/roadmap', '/zidni'];
+  const knownPaths = ['/', '/terms', '/privacy', '/signup', '/roadmap', '/zidni', '/zidni/signup'];
   if (!knownPaths.includes(window.location.pathname)) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0a1628', fontFamily: 'DM Sans, sans-serif' }}>

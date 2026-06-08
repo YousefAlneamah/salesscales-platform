@@ -7929,8 +7929,148 @@ app.use((err, req, res, next) => {
 });
 
 // ─── ZIDNI ────────────────────────────────────────────────
+
+function paypalBase() {
+  return (process.env.PAYPAL_MODE || 'sandbox') === 'live'
+    ? 'https://api-m.paypal.com'
+    : 'https://api-m.sandbox.paypal.com';
+}
+
+async function getPayPalAccessToken() {
+  const creds = Buffer.from(`${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`).toString('base64');
+  const { data } = await axios.post(
+    `${paypalBase()}/v1/oauth2/token`,
+    'grant_type=client_credentials',
+    { headers: { Authorization: `Basic ${creds}`, 'Content-Type': 'application/x-www-form-urlencoded' } }
+  );
+  return data.access_token;
+}
+
 app.get('/zidni/health', (req, res) => {
   res.json({ status: 'ok' });
+});
+
+app.get('/zidni/paypal-config', (req, res) => {
+  res.json({ clientId: process.env.PAYPAL_CLIENT_ID || '', mode: process.env.PAYPAL_MODE || 'sandbox' });
+});
+
+app.post('/zidni/paypal/create-order', async (req, res) => {
+  const { tier } = req.body;
+  const amount = tier === 'elite' ? '200.00' : '100.00';
+  try {
+    const ppToken = await getPayPalAccessToken();
+    const { data } = await axios.post(
+      `${paypalBase()}/v2/checkout/orders`,
+      {
+        intent: 'CAPTURE',
+        purchase_units: [{
+          amount: { currency_code: 'USD', value: amount },
+          description: `Zidni ${tier === 'elite' ? 'Elite' : 'Starter'} Membership`,
+        }],
+      },
+      { headers: { Authorization: `Bearer ${ppToken}`, 'Content-Type': 'application/json' } }
+    );
+    res.json({ orderId: data.id });
+  } catch (err) {
+    const msg = err.response?.data?.message || err.message;
+    res.status(500).json({ error: 'Failed to create PayPal order: ' + msg });
+  }
+});
+
+app.post('/zidni/signup', async (req, res) => {
+  const { tier, name, email, password, whatsapp, country, niche, paypalOrderId } = req.body;
+  if (!email || !password || !tier || !paypalOrderId) {
+    return res.status(400).json({ error: 'Missing required fields.' });
+  }
+
+  // Capture PayPal payment
+  try {
+    const ppToken = await getPayPalAccessToken();
+    await axios.post(
+      `${paypalBase()}/v2/checkout/orders/${paypalOrderId}/capture`,
+      {},
+      { headers: { Authorization: `Bearer ${ppToken}`, 'Content-Type': 'application/json' } }
+    );
+  } catch (err) {
+    const ppErrName = err.response?.data?.name;
+    if (ppErrName !== 'ORDER_ALREADY_CAPTURED') {
+      return res.status(402).json({ error: 'Payment capture failed. Please contact support.' });
+    }
+    // idempotent: already captured on a retry — allow through
+  }
+
+  // Hash password + generate referral code
+  const passwordHash = await bcrypt.hash(password, 10);
+  const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+  // Create client record
+  const { data: client, error: clientErr } = await supabase
+    .from('zidni_clients')
+    .insert({ name, email, password: passwordHash, tier, whatsapp, country, niche, referral_code: referralCode, verified: true, accepted_terms: true })
+    .select()
+    .single();
+  if (clientErr) {
+    if (clientErr.code === '23505') return res.status(409).json({ error: 'An account with this email already exists.' });
+    return res.status(500).json({ error: 'Failed to create account.' });
+  }
+
+  // Assign pool spots (non-fatal if no pool exists yet)
+  const spots = tier === 'elite' ? 1.5 : 1;
+  try {
+    const { data: pool } = await supabase
+      .from('zidni_pools')
+      .select('id, current_spots')
+      .eq('niche', niche)
+      .in('status', ['building', 'active'])
+      .limit(1)
+      .maybeSingle();
+    if (pool) {
+      await supabase.from('zidni_client_spots').insert({ client_id: client.id, pool_id: pool.id, spots, multiplier: 1 });
+      await supabase.from('zidni_pools').update({ current_spots: (pool.current_spots || 0) + 1 }).eq('id', pool.id);
+    }
+  } catch (_) {}
+
+  // Send welcome email (non-fatal)
+  try {
+    await sgMail.send({
+      to: email,
+      from: { email: 'yousef@joinzidni.com', name: 'Zidni' },
+      subject: `Welcome to Zidni${name ? ', ' + name : ''}! Your income system is building.`,
+      html: `
+        <div style="font-family:Inter,sans-serif;max-width:560px;margin:0 auto;background:#050d1a;color:#f0f4f8;padding:40px 32px;border-radius:16px;">
+          <div style="margin-bottom:28px;">
+            <span style="background:#c9a84c;color:#050d1a;font-weight:800;font-size:16px;padding:6px 14px;border-radius:8px;">Zidni</span>
+          </div>
+          <h1 style="font-size:26px;font-weight:800;margin:0 0 12px;letter-spacing:-0.5px;">Welcome${name ? ', ' + name : ''}! 🎉</h1>
+          <p style="font-size:15px;color:#8896a8;line-height:1.6;margin:0 0 24px;">
+            Your <strong style="color:#c9a84c;">${tier === 'elite' ? 'Elite' : 'Starter'}</strong> membership is confirmed. We're building your <strong style="color:#f0f4f8;">${niche}</strong> income system across all 6 streams right now.
+          </p>
+          <div style="background:#0a1628;border:1px solid rgba(201,168,76,0.2);border-radius:12px;padding:24px;margin-bottom:24px;">
+            <p style="font-size:11px;font-weight:700;color:#c9a84c;text-transform:uppercase;letter-spacing:1.5px;margin:0 0 16px;">Your membership</p>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+              <tr><td style="padding:6px 0;color:#8896a8;">Plan</td><td style="padding:6px 0;font-weight:700;text-align:right;">${tier === 'elite' ? 'Elite — $200/mo' : 'Starter — $100/mo'}</td></tr>
+              <tr><td style="padding:6px 0;color:#8896a8;">Niche</td><td style="padding:6px 0;font-weight:700;text-align:right;">${niche}</td></tr>
+              <tr><td style="padding:6px 0;color:#8896a8;">Pool spots</td><td style="padding:6px 0;font-weight:700;text-align:right;">${spots}</td></tr>
+              <tr><td style="padding:6px 0;color:#8896a8;">Referral code</td><td style="padding:6px 0;font-weight:700;color:#c9a84c;text-align:right;">${referralCode}</td></tr>
+            </table>
+          </div>
+          <div style="background:#0a1628;border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:24px;margin-bottom:28px;">
+            <p style="font-size:11px;font-weight:700;color:#c9a84c;text-transform:uppercase;letter-spacing:1.5px;margin:0 0 12px;">Your 6 income streams</p>
+            <ul style="margin:0;padding-left:18px;font-size:13px;color:#8896a8;line-height:2.1;">
+              <li>Etsy digital product shop</li><li>Gumroad downloadable guides</li>
+              <li>Amazon KDP low-content books</li><li>Pinterest traffic engine</li>
+              <li>Affiliate program integrations</li><li>Shopify digital storefront</li>
+            </ul>
+          </div>
+          <a href="https://joinzidni.com/zidni/dashboard" style="display:block;background:linear-gradient(135deg,#c9a84c,#e8c96a);color:#050d1a;text-align:center;padding:14px;border-radius:10px;font-weight:800;font-size:15px;text-decoration:none;margin-bottom:24px;">View Your Dashboard →</a>
+          <p style="font-size:12px;color:#4a5568;margin:0;">Questions? Reply to this email or WhatsApp us directly.</p>
+        </div>
+      `,
+    });
+  } catch (_) {}
+
+  const token = jwt.sign({ id: client.id, email, role: 'zidni_client' }, JWT_SECRET, { expiresIn: '30d' });
+  res.json({ ok: true, clientId: client.id, token, name, email, tier });
 });
 
 app.post('/zidni/waitlist', async (req, res) => {
