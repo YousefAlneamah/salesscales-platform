@@ -7933,6 +7933,52 @@ app.get('/zidni/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+app.post('/zidni/waitlist', async (req, res) => {
+  const { name, email, whatsapp, country, niche } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email is required.' });
+
+  const { error: dbErr } = await supabase
+    .from('zidni_waitlist')
+    .insert({ name, email, whatsapp, country, niche });
+  if (dbErr) {
+    if (dbErr.code === '23505') return res.status(409).json({ error: 'This email is already on the waitlist.' });
+    return res.status(500).json({ error: 'Failed to save. Please try again.' });
+  }
+
+  try {
+    await sgMail.send({
+      to: email,
+      from: { email: 'yousef@joinzidni.com', name: 'Zidni' },
+      subject: "You're on the Zidni waitlist 🎉",
+      html: `
+        <div style="font-family:Inter,sans-serif;max-width:560px;margin:0 auto;background:#050d1a;color:#f0f4f8;padding:40px 32px;border-radius:16px;">
+          <div style="margin-bottom:32px;">
+            <span style="background:#c9a84c;color:#050d1a;font-weight:800;font-size:16px;padding:6px 14px;border-radius:8px;">Zidni</span>
+          </div>
+          <h1 style="font-size:28px;font-weight:800;margin:0 0 16px;letter-spacing:-0.5px;">You're in${name ? ', ' + name : ''}.</h1>
+          <p style="font-size:15px;color:#8896a8;line-height:1.6;margin:0 0 24px;">
+            We've added you to our waitlist. We onboard a limited number of members each month — you'll hear from us when your spot is ready.
+          </p>
+          <div style="background:#0a1628;border:1px solid rgba(201,168,76,0.2);border-radius:12px;padding:24px;margin-bottom:32px;">
+            <p style="font-size:13px;font-weight:600;color:#c9a84c;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">What happens next</p>
+            <ul style="font-size:14px;color:#8896a8;line-height:1.8;margin:0;padding-left:18px;">
+              <li>We review your application</li>
+              <li>We reach out to confirm your niche and tier</li>
+              <li>We build and launch your 6 income streams</li>
+              <li>You start earning</li>
+            </ul>
+          </div>
+          <p style="font-size:13px;color:#4a5568;">© 2026 Zidni. All rights reserved.</p>
+        </div>
+      `,
+    });
+  } catch (_) {
+    // confirmation email failure is non-fatal
+  }
+
+  res.json({ ok: true });
+});
+
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');
