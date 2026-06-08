@@ -43,7 +43,8 @@ CREATE TABLE zidni_pool_revenue (
   shopify numeric DEFAULT 0,
   redbubble numeric DEFAULT 0,
   total numeric DEFAULT 0,
-  created_at timestamptz DEFAULT now()
+  created_at timestamptz DEFAULT now(),
+  UNIQUE (pool_id, month)
 );
 
 CREATE TABLE zidni_client_spots (
@@ -67,7 +68,8 @@ CREATE TABLE zidni_earnings (
   personal_shopify numeric DEFAULT 0,
   personal_redbubble numeric DEFAULT 0,
   total numeric DEFAULT 0,
-  created_at timestamptz DEFAULT now()
+  created_at timestamptz DEFAULT now(),
+  UNIQUE (client_id, month)
 );
 
 CREATE TABLE zidni_payouts (

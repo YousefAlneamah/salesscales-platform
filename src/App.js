@@ -68,6 +68,7 @@ import PublicRoadmap from "./pages/PublicRoadmap";
 import ZidniWaitlist from "./pages/ZidniWaitlist";
 import ZidniSignup from "./pages/ZidniSignup";
 import ZidniDashboard from "./pages/ZidniDashboard";
+import ZidniOwnerDashboard from "./pages/ZidniOwnerDashboard";
 
 const navItems = [
   { group: "MAIN", items: [
@@ -393,8 +394,9 @@ function App() {
   if (window.location.pathname === '/zidni') return <ZidniWaitlist />;
   if (window.location.pathname === '/zidni/signup') return <ZidniSignup />;
   if (window.location.pathname === '/zidni/dashboard') return <ZidniDashboard />;
+  if (window.location.pathname === '/zidni/owner') return <ZidniOwnerDashboard />;
 
-  const knownPaths = ['/', '/terms', '/privacy', '/signup', '/roadmap', '/zidni', '/zidni/signup', '/zidni/dashboard'];
+  const knownPaths = ['/', '/terms', '/privacy', '/signup', '/roadmap', '/zidni', '/zidni/signup', '/zidni/dashboard', '/zidni/owner'];
   if (!knownPaths.includes(window.location.pathname)) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0a1628', fontFamily: 'DM Sans, sans-serif' }}>

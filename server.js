@@ -8205,6 +8205,165 @@ app.post('/zidni/client/request-payout', verifyZidniToken, async (req, res) => {
   res.json({ ok: true, payout });
 });
 
+// ── Zidni owner auth middleware ────────────────────────────
+const verifyZidniOwner = (req, res, next) => {
+  verifyToken(req, res, () => {
+    if (req.user?.role !== 'owner') return res.status(403).json({ error: 'Owner access required.' });
+    next();
+  });
+};
+
+app.get('/zidni/owner/stats', verifyZidniOwner, async (req, res) => {
+  const [totalRes, starterRes, eliteRes, poolRes, payoutRes, waitlistRes] = await Promise.all([
+    supabase.from('zidni_clients').select('id', { count: 'exact', head: true }),
+    supabase.from('zidni_clients').select('id', { count: 'exact', head: true }).eq('tier', 'starter'),
+    supabase.from('zidni_clients').select('id', { count: 'exact', head: true }).eq('tier', 'elite'),
+    supabase.from('zidni_pools').select('id', { count: 'exact', head: true }),
+    supabase.from('zidni_payouts').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+    supabase.from('zidni_waitlist').select('id', { count: 'exact', head: true }),
+  ]);
+  const starter = starterRes.count || 0;
+  const elite   = eliteRes.count || 0;
+  res.json({
+    totalClients:   totalRes.count || 0,
+    byTier:         { starter, elite },
+    mrr:            starter * 100 + elite * 200,
+    totalPools:     poolRes.count || 0,
+    pendingPayouts: payoutRes.count || 0,
+    waitlistCount:  waitlistRes.count || 0,
+  });
+});
+
+app.get('/zidni/owner/clients', verifyZidniOwner, async (req, res) => {
+  const { data, error } = await supabase
+    .from('zidni_clients')
+    .select('id,name,email,tier,niche,status,whatsapp,country,referral_code,joined_at')
+    .order('joined_at', { ascending: false });
+  if (error) return res.status(500).json({ error: 'Failed to fetch clients.' });
+  res.json({ clients: data || [] });
+});
+
+app.get('/zidni/owner/pools', verifyZidniOwner, async (req, res) => {
+  const { data, error } = await supabase
+    .from('zidni_pools')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: 'Failed to fetch pools.' });
+  res.json({ pools: data || [] });
+});
+
+app.post('/zidni/owner/pools', verifyZidniOwner, async (req, res) => {
+  const { niche, name, max_spots } = req.body;
+  if (!niche || !name) return res.status(400).json({ error: 'niche and name are required.' });
+  const { data: pool, error } = await supabase
+    .from('zidni_pools')
+    .insert({ niche, name, max_spots: max_spots || 100, status: 'building' })
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: 'Failed to create pool.' });
+  res.json({ pool });
+});
+
+app.post('/zidni/owner/revenue', verifyZidniOwner, async (req, res) => {
+  const { pool_id, month, etsy = 0, gumroad = 0, kdp = 0, pinterest = 0, affiliate = 0, shopify = 0 } = req.body;
+  if (!pool_id || !month) return res.status(400).json({ error: 'pool_id and month are required.' });
+
+  const poolTotal = [etsy, gumroad, kdp, pinterest, affiliate, shopify].reduce((s, v) => s + (parseFloat(v) || 0), 0);
+
+  // Upsert pool revenue record
+  await supabase.from('zidni_pool_revenue').upsert(
+    { pool_id, month, etsy: parseFloat(etsy) || 0, gumroad: parseFloat(gumroad) || 0, kdp: parseFloat(kdp) || 0, pinterest: parseFloat(pinterest) || 0, affiliate: parseFloat(affiliate) || 0, shopify: parseFloat(shopify) || 0, total: poolTotal },
+    { onConflict: 'pool_id,month' }
+  );
+
+  // Update pool's monthly_revenue snapshot
+  await supabase.from('zidni_pools').update({ monthly_revenue: poolTotal }).eq('id', pool_id);
+
+  // Get all client spots for this pool
+  const { data: spots } = await supabase
+    .from('zidni_client_spots')
+    .select('client_id, spots, multiplier')
+    .eq('pool_id', pool_id);
+
+  if (!spots || spots.length === 0) return res.json({ ok: true, poolTotal, month, distributions: [] });
+
+  const totalWeight = spots.reduce((s, cs) => s + (cs.spots * cs.multiplier), 0);
+
+  // Fetch client names + existing earnings for this month in parallel
+  const clientIds = spots.map(cs => cs.client_id);
+  const [clientsRes, existingRes] = await Promise.all([
+    supabase.from('zidni_clients').select('id,name').in('id', clientIds),
+    supabase.from('zidni_earnings').select('client_id,personal_etsy,personal_gumroad,personal_kdp,personal_affiliate,personal_shopify,personal_redbubble').eq('month', month).in('client_id', clientIds),
+  ]);
+
+  const nameMap     = {};
+  const existingMap = {};
+  (clientsRes.data || []).forEach(c => { nameMap[c.id] = c.name; });
+  (existingRes.data || []).forEach(e => { existingMap[e.client_id] = e; });
+
+  // Build earnings rows
+  const earningsRows = spots.map(cs => {
+    const poolShare    = totalWeight > 0 ? Math.round((cs.spots * cs.multiplier / totalWeight) * poolTotal * 100) / 100 : 0;
+    const ex           = existingMap[cs.client_id] || {};
+    const personalSum  = (ex.personal_etsy || 0) + (ex.personal_gumroad || 0) + (ex.personal_kdp || 0) + (ex.personal_affiliate || 0) + (ex.personal_shopify || 0) + (ex.personal_redbubble || 0);
+    return {
+      client_id:          cs.client_id,
+      month,
+      pool_share:         poolShare,
+      personal_etsy:      ex.personal_etsy      || 0,
+      personal_gumroad:   ex.personal_gumroad   || 0,
+      personal_kdp:       ex.personal_kdp       || 0,
+      personal_affiliate: ex.personal_affiliate || 0,
+      personal_shopify:   ex.personal_shopify   || 0,
+      personal_redbubble: ex.personal_redbubble || 0,
+      total:              Math.round((poolShare + personalSum) * 100) / 100,
+    };
+  });
+
+  await supabase.from('zidni_earnings').upsert(earningsRows, { onConflict: 'client_id,month' });
+
+  // Send notifications
+  const notifRows = earningsRows.map(e => ({
+    client_id: e.client_id,
+    title:     `${month} earnings posted`,
+    message:   `Your pool share for ${month} is $${e.pool_share.toFixed(2)}. Total earnings: $${e.total.toFixed(2)}.`,
+  }));
+  await supabase.from('zidni_notifications').insert(notifRows);
+
+  const distributions = earningsRows.map(e => ({ client_id: e.client_id, name: nameMap[e.client_id] || e.client_id, pool_share: e.pool_share }));
+  res.json({ ok: true, poolTotal, month, distributions });
+});
+
+app.get('/zidni/owner/payouts', verifyZidniOwner, async (req, res) => {
+  const { data, error } = await supabase
+    .from('zidni_payouts')
+    .select('*,zidni_clients(name,email,payout_method,payout_email)')
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: 'Failed to fetch payouts.' });
+  res.json({ payouts: data || [] });
+});
+
+app.post('/zidni/owner/payouts/:id/approve', verifyZidniOwner, async (req, res) => {
+  const { id } = req.params;
+  const { data: payout, error } = await supabase
+    .from('zidni_payouts')
+    .update({ status: 'completed', processed_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: 'Failed to approve payout.' });
+  res.json({ payout });
+});
+
+app.get('/zidni/owner/waitlist', verifyZidniOwner, async (req, res) => {
+  const { data, error } = await supabase
+    .from('zidni_waitlist')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: 'Failed to fetch waitlist.' });
+  res.json({ waitlist: data || [] });
+});
+
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');
