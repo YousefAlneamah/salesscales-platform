@@ -8119,6 +8119,92 @@ app.post('/zidni/waitlist', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Zidni client auth middleware ───────────────────────────
+const verifyZidniToken = (req, res, next) => {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Auth required.' });
+  try {
+    const decoded = jwt.verify(auth.slice(7), JWT_SECRET);
+    if (decoded.role !== 'zidni_client') return res.status(403).json({ error: 'Access denied.' });
+    req.zidniClient = decoded;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token.' });
+  }
+};
+
+app.get('/zidni/client/me', verifyZidniToken, async (req, res) => {
+  const { id } = req.zidniClient;
+  const [clientRes, notifsRes] = await Promise.all([
+    supabase.from('zidni_clients').select('id,name,email,tier,niche,status,whatsapp,country,referral_code,payout_email,payout_method,joined_at').eq('id', id).single(),
+    supabase.from('zidni_notifications').select('*').eq('client_id', id).order('created_at', { ascending: false }).limit(20),
+  ]);
+  if (clientRes.error) return res.status(404).json({ error: 'Client not found.' });
+  res.json({ client: clientRes.data, notifications: notifsRes.data || [] });
+});
+
+app.get('/zidni/client/earnings', verifyZidniToken, async (req, res) => {
+  const { id } = req.zidniClient;
+  const [earningsRes, payoutsRes] = await Promise.all([
+    supabase.from('zidni_earnings').select('*').eq('client_id', id).order('created_at', { ascending: false }).limit(6),
+    supabase.from('zidni_payouts').select('amount').eq('client_id', id).eq('status', 'completed'),
+  ]);
+  const earnings = earningsRes.data || [];
+  const thisMonth = earnings[0] || null;
+  const totalEarned = earnings.reduce((s, e) => s + (e.total || 0), 0);
+  const totalPaid = (payoutsRes.data || []).reduce((s, p) => s + (p.amount || 0), 0);
+  const availableBalance = Math.max(0, totalEarned - totalPaid);
+  res.json({ earnings, thisMonth, availableBalance });
+});
+
+app.get('/zidni/client/pools', verifyZidniToken, async (req, res) => {
+  const { id } = req.zidniClient;
+  const { data, error } = await supabase
+    .from('zidni_client_spots')
+    .select('id,spots,multiplier,created_at,zidni_pools(id,niche,name,max_spots,current_spots,status,monthly_revenue)')
+    .eq('client_id', id);
+  if (error) return res.status(500).json({ error: 'Failed to fetch pools.' });
+  const pools = (data || []).map(row => ({
+    spot_id: row.id,
+    spots: row.spots,
+    multiplier: row.multiplier,
+    created_at: row.created_at,
+    pool: row.zidni_pools,
+  }));
+  res.json({ pools });
+});
+
+app.get('/zidni/client/streams', verifyZidniToken, async (req, res) => {
+  const { id } = req.zidniClient;
+  const { data, error } = await supabase
+    .from('zidni_personal_streams')
+    .select('*')
+    .eq('client_id', id)
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: 'Failed to fetch streams.' });
+  res.json({ streams: data || [] });
+});
+
+app.post('/zidni/client/request-payout', verifyZidniToken, async (req, res) => {
+  const { id } = req.zidniClient;
+  const [earningsRes, payoutsRes] = await Promise.all([
+    supabase.from('zidni_earnings').select('total').eq('client_id', id),
+    supabase.from('zidni_payouts').select('amount').eq('client_id', id).eq('status', 'completed'),
+  ]);
+  const totalEarned = (earningsRes.data || []).reduce((s, e) => s + (e.total || 0), 0);
+  const totalPaid = (payoutsRes.data || []).reduce((s, p) => s + (p.amount || 0), 0);
+  const available = Math.max(0, totalEarned - totalPaid);
+  if (available <= 0) return res.status(400).json({ error: 'No balance available for payout.' });
+  const month = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const { data: payout, error: payoutErr } = await supabase
+    .from('zidni_payouts')
+    .insert({ client_id: id, amount: available, month, status: 'pending' })
+    .select()
+    .single();
+  if (payoutErr) return res.status(500).json({ error: 'Failed to create payout request.' });
+  res.json({ ok: true, payout });
+});
+
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');
