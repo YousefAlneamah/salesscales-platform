@@ -7928,6 +7928,11 @@ app.use((err, req, res, next) => {
   }
 });
 
+// ─── ZIDNI ────────────────────────────────────────────────
+app.get('/zidni/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');
