@@ -8364,6 +8364,170 @@ app.get('/zidni/owner/waitlist', verifyZidniOwner, async (req, res) => {
   res.json({ waitlist: data || [] });
 });
 
+// ─── ZIDNI MAHDI — Knowledge Base & Content Automation ───────────────────────
+
+app.get('/zidni/mahdi/knowledge-base', verifyZidniOwner, async (req, res) => {
+  const { data, error } = await supabase
+    .from('zidni_knowledge_base')
+    .select('*')
+    .order('niche');
+  if (error) return res.status(500).json({ error: 'Failed to load knowledge base.' });
+  res.json({ knowledge_base: data || [] });
+});
+
+app.post('/zidni/mahdi/knowledge-base', verifyZidniOwner, async (req, res) => {
+  const { niche, target_audience, top_products, affiliate_programs, content_hooks, forbidden_phrases } = req.body;
+  if (!niche) return res.status(400).json({ error: 'Niche is required.' });
+  const { data, error } = await supabase
+    .from('zidni_knowledge_base')
+    .upsert(
+      { niche, target_audience, top_products, affiliate_programs, content_hooks, forbidden_phrases, updated_at: new Date().toISOString() },
+      { onConflict: 'niche' }
+    )
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: 'Failed to save knowledge base.' });
+  res.json({ entry: data });
+});
+
+const ZIDNI_STREAM_SCHEMAS = {
+  etsy: 'title (catchy SEO-optimized product title), description (150-200 word listing description), tags (array of 13 tags), price_range (e.g. "$5-15")',
+  kdp: 'title (compelling book title), subtitle (clarifying subtitle), chapters (array of 8-10 chapter titles), keywords (array of 7 Amazon keywords)',
+  gumroad: 'title (product name), tagline (one sentence hook under 15 words), description (100-150 word sales description), suggested_price (e.g. "$27")',
+  pinterest: 'title (pin title under 100 chars), description (pin description with 2-3 hashtags), board_suggestion (board name), cta (call-to-action text)',
+  affiliate: 'title (content piece title), angle (unique positioning angle), content_hook (opening hook sentence), cta (affiliate CTA), programs (array of 2-3 suggested affiliate program names)',
+  shopify: 'title (product name), description (100-word product description), features (array of 4-5 bullet points), tags (array of 8 tags)',
+  redbubble: 'title (design collection title), concept (visual concept description in 2 sentences), description (50-word marketplace description), tags (array of 15 tags)',
+};
+
+const ZIDNI_STREAM_LABELS = {
+  etsy: 'Etsy digital product listings',
+  kdp: 'Kindle Direct Publishing book concepts',
+  gumroad: 'Gumroad digital product ideas',
+  pinterest: 'Pinterest pin descriptions',
+  affiliate: 'affiliate content pieces',
+  shopify: 'Shopify product descriptions',
+  redbubble: 'Redbubble design concepts',
+};
+
+app.post('/zidni/mahdi/generate', verifyZidniOwner, async (req, res) => {
+  const { niche, stream, qty = 5 } = req.body;
+  if (!niche || !stream) return res.status(400).json({ error: 'niche and stream are required.' });
+  const count = Math.min(Math.max(parseInt(qty) || 5, 1), 10);
+
+  const { data: kbData } = await supabase
+    .from('zidni_knowledge_base')
+    .select('*')
+    .eq('niche', niche)
+    .maybeSingle();
+
+  const schema = ZIDNI_STREAM_SCHEMAS[stream] || 'title, description';
+  const streamLabel = ZIDNI_STREAM_LABELS[stream] || stream;
+
+  const systemPrompt = `You are Mahdi, Zidni's passive income content strategist. You generate high-converting content for ${streamLabel}. You understand passive income psychology, SEO, and what buyers want. You only respond with valid JSON arrays — no markdown, no explanation, just the raw JSON array.`;
+
+  const userPrompt = `Generate ${count} optimized ${streamLabel} for the "${niche}" niche.
+
+${kbData ? `Knowledge Base Context:
+- Target Audience: ${kbData.target_audience || 'General audience interested in this niche'}
+- Top Products: ${kbData.top_products || 'N/A'}
+- Affiliate Programs: ${kbData.affiliate_programs || 'N/A'}
+- Content Hooks: ${kbData.content_hooks || 'N/A'}
+- Forbidden Phrases: ${kbData.forbidden_phrases || 'None'}` : `No knowledge base saved for "${niche}" yet — use best practices for passive income in this niche.`}
+
+Each item in the array must have these exact fields: ${schema}
+
+Return ONLY a valid JSON array. No markdown fences, no preamble, no explanation.`;
+
+  try {
+    const aiRes = await axios.post('https://api.anthropic.com/v1/messages', {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    }, {
+      headers: {
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+    });
+
+    let raw = aiRes.data.content[0].text;
+    raw = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    const match = raw.match(/\[[\s\S]*\]/);
+    if (!match) return res.status(500).json({ error: 'AI did not return a valid array.' });
+
+    let items;
+    try {
+      items = JSON.parse(match[0]);
+    } catch {
+      return res.status(500).json({ error: 'Failed to parse AI response as JSON.' });
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(500).json({ error: 'AI returned an empty result.' });
+    }
+
+    const rows = items.map(item => ({
+      niche,
+      stream,
+      title: item.title || null,
+      content: item,
+      status: 'pending',
+    }));
+
+    const { data: inserted, error: insertError } = await supabase
+      .from('zidni_content_queue')
+      .insert(rows)
+      .select();
+
+    if (insertError) return res.status(500).json({ error: 'Failed to save generated content.' });
+    res.json({ items: inserted, count: inserted.length });
+  } catch (err) {
+    const msg = err.response?.data?.error?.message || err.message || 'Generation failed.';
+    res.status(500).json({ error: msg });
+  }
+});
+
+app.get('/zidni/mahdi/queue', verifyZidniOwner, async (req, res) => {
+  const { status, niche, stream } = req.query;
+  let q = supabase
+    .from('zidni_content_queue')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (status) q = q.eq('status', status);
+  if (niche) q = q.eq('niche', niche);
+  if (stream) q = q.eq('stream', stream);
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: 'Failed to fetch queue.' });
+  res.json({ items: data || [] });
+});
+
+app.post('/zidni/mahdi/approve/:id', verifyZidniOwner, async (req, res) => {
+  const { id } = req.params;
+  const { data, error } = await supabase
+    .from('zidni_content_queue')
+    .update({ status: 'approved' })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: 'Failed to approve item.' });
+  res.json({ item: data });
+});
+
+app.post('/zidni/mahdi/reject/:id', verifyZidniOwner, async (req, res) => {
+  const { id } = req.params;
+  const { data, error } = await supabase
+    .from('zidni_content_queue')
+    .update({ status: 'rejected' })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: 'Failed to reject item.' });
+  res.json({ item: data });
+});
+
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');
