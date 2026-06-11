@@ -8392,16 +8392,18 @@ app.get('/zidni/mahdi/knowledge-base', verifyZidniOwner, async (req, res) => {
 app.post('/zidni/mahdi/knowledge-base', verifyZidniOwner, async (req, res) => {
   const { niche, target_audience, top_products, affiliate_programs, content_hooks, forbidden_phrases } = req.body;
   if (!niche) return res.status(400).json({ error: 'Niche is required.' });
+
   const { data, error } = await supabase
     .from('zidni_knowledge_base')
     .upsert(
       { niche, target_audience, top_products, affiliate_programs, content_hooks, forbidden_phrases, updated_at: new Date().toISOString() },
-      { onConflict: 'niche' }
+      { onConflict: 'niche', ignoreDuplicates: false }
     )
     .select()
     .single();
-  console.log('[Mahdi KB] upsert error:', error, 'data:', data);
-  if (error) return res.status(500).json({ error: 'Failed to save knowledge base.', detail: error.message });
+
+  console.log('[Mahdi KB] niche:', niche, 'error:', error, 'data:', data);
+  if (error) return res.status(500).json({ error: error.message });
   res.json({ entry: data });
 });
 
