@@ -87,17 +87,18 @@ export default function ZidniMahdi() {
     setKbMsg('');
     try {
       const entry = kb[kbNiche] || {};
-      await axios.post('http://localhost:3001/zidni/mahdi/knowledge-base', {
+      await axios.post('https://salesscales-server.onrender.com/zidni/mahdi/knowledge-base', {
         niche: kbNiche,
         target_audience: entry.target_audience || '',
         top_products: entry.top_products || '',
         affiliate_programs: entry.affiliate_programs || '',
         content_hooks: entry.content_hooks || '',
         forbidden_phrases: entry.forbidden_phrases || '',
-      }, { headers: authHeaders() });
+      }, { headers: { Authorization: 'Bearer ' + localStorage.getItem('token') } });
       setKbMsg('Saved');
       setTimeout(() => setKbMsg(''), 2500);
-    } catch {
+    } catch (err) {
+      console.error('[ZidniMahdi] saveKB failed:', err.response?.status, err.response?.data || err.message);
       setKbMsg('Error');
     }
     setKbSaving(false);
@@ -107,14 +108,15 @@ export default function ZidniMahdi() {
     setGenerating(true);
     setGenError('');
     try {
-      await axios.post('http://localhost:3001/zidni/mahdi/generate', {
+      await axios.post('https://salesscales-server.onrender.com/zidni/mahdi/generate', {
         niche: genNiche,
         stream: genStream,
         qty: genQty,
-      }, { headers: authHeaders() });
+      }, { headers: { Authorization: 'Bearer ' + localStorage.getItem('token') } });
       setQueueFilter('pending');
       loadQueue('pending');
     } catch (err) {
+      console.error('[ZidniMahdi] generate failed:', err.response?.status, err.response?.data || err.message);
       setGenError(err.response?.data?.error || 'Generation failed. Try again.');
     }
     setGenerating(false);
