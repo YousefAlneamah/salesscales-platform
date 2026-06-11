@@ -8454,7 +8454,7 @@ ${kbData ? `Knowledge Base Context:
 
 Each item in the array must have these exact fields: ${schema}
 
-Return ONLY a valid JSON array. No markdown fences, no preamble, no explanation.`;
+You MUST respond with ONLY a valid JSON array. No markdown. No backticks. No explanation. Start your response with [ and end with ]. Nothing before or after the array.`;
 
   try {
     const aiRes = await axios.post('https://api.anthropic.com/v1/messages', {
@@ -8470,16 +8470,24 @@ Return ONLY a valid JSON array. No markdown fences, no preamble, no explanation.
       },
     });
 
-    let raw = aiRes.data.content[0].text;
-    raw = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-    const match = raw.match(/\[[\s\S]*\]/);
-    if (!match) return res.status(500).json({ error: 'AI did not return a valid array.' });
-
+    const raw = aiRes.data.content[0].text.trim();
     let items;
     try {
-      items = JSON.parse(match[0]);
+      items = JSON.parse(raw);
     } catch {
-      return res.status(500).json({ error: 'Failed to parse AI response as JSON.' });
+      const start = raw.indexOf('[');
+      const end = raw.lastIndexOf(']');
+      if (start !== -1 && end !== -1 && end > start) {
+        try {
+          items = JSON.parse(raw.slice(start, end + 1));
+        } catch {
+          console.error('[Mahdi Generate] JSON parse failed. Raw response:', raw);
+          return res.status(500).json({ error: 'Failed to parse AI response as JSON.', raw: raw.slice(0, 500) });
+        }
+      } else {
+        console.error('[Mahdi Generate] No JSON array found in response. Raw response:', raw);
+        return res.status(500).json({ error: 'AI did not return a valid array.', raw: raw.slice(0, 500) });
+      }
     }
 
     if (!Array.isArray(items) || items.length === 0) {
