@@ -119,9 +119,11 @@ app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 
 // ─── RATE LIMITING ────────────────────────────────────────
 // Fix 2: log every rate-limit hit to rate_limit_hits table
-const logRateLimitHit = (req, limiterName) => {
+const logRateLimitHit = async (req, limiterName) => {
   const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unknown';
-  supabase.from('rate_limit_hits').insert([{ ip, endpoint: `${limiterName}:${req.method} ${req.path}`, created_at: new Date().toISOString() }]).catch(() => {});
+  try {
+    await supabase.from('rate_limit_hits').insert([{ ip, endpoint: `${limiterName}:${req.method} ${req.path}`, created_at: new Date().toISOString() }]);
+  } catch {}
 };
 
 const makeHandler = (limiterName, msg) => (req, res, next, options) => {
@@ -152,11 +154,15 @@ app.use((req, res, next) => {
   res.on('finish', () => {
     const ms = Date.now() - start;
     if (ms > 500) {
-      supabase.from('request_logs').insert([{
-        method: req.method, path: req.path,
-        status_code: res.statusCode, response_time_ms: ms,
-        created_at: new Date().toISOString(),
-      }]).catch(() => {});
+      (async () => {
+        try {
+          await supabase.from('request_logs').insert([{
+            method: req.method, path: req.path,
+            status_code: res.statusCode, response_time_ms: ms,
+            created_at: new Date().toISOString(),
+          }]);
+        } catch {}
+      })();
     }
   });
   next();
@@ -687,16 +693,20 @@ const generateAllClientSequences = async (shop, accessToken, clientId) => {
     } catch { return []; }
   };
 
-  const queueApproval = (type, title, body, steps, trigger) =>
-    supabase.from('approvals').insert([{
-      type, title, content: body,
-      metadata: { steps, trigger_type: trigger, shop, aov },
-      from_member: 'mahdi', client_id: clientId,
-      priority: 'normal', status: 'pending',
-      created_at: new Date().toISOString(),
-    }])
-    .then(() => console.log(`[Mahdi] Approval queued: ${title}`))
-    .catch(e => console.error(`[Mahdi] Approval insert failed (${title}):`, e.message));
+  const queueApproval = async (type, title, body, steps, trigger) => {
+    try {
+      await supabase.from('approvals').insert([{
+        type, title, content: body,
+        metadata: { steps, trigger_type: trigger, shop, aov },
+        from_member: 'mahdi', client_id: clientId,
+        priority: 'normal', status: 'pending',
+        created_at: new Date().toISOString(),
+      }]);
+      console.log(`[Mahdi] Approval queued: ${title}`);
+    } catch (e) {
+      console.error(`[Mahdi] Approval insert failed (${title}):`, e.message);
+    }
+  };
 
   const createWorkflow = async (name, trigger, steps) => {
     const { data: wf, error } = await supabase.from('workflows').insert([{
@@ -708,7 +718,10 @@ const generateAllClientSequences = async (shop, accessToken, clientId) => {
       step_type: s.step_type, content: s.content || '',
       subject: s.subject || '', wait_hours: s.wait_hours || 0,
     }));
-    if (rows.length) await supabase.from('workflow_steps').insert(rows).catch(e => console.error('[Mahdi] workflow_steps insert failed:', e.message));
+    if (rows.length) {
+      const { error: stepErr } = await supabase.from('workflow_steps').insert(rows);
+      if (stepErr) console.error('[Mahdi] workflow_steps insert failed:', stepErr.message);
+    }
     console.log(`[Mahdi] Workflow saved: "${name}" — ${rows.length} steps`);
   };
 
@@ -6138,7 +6151,7 @@ cron.schedule('0 9 1 * *', async () => {
           invoice_number: invNum, client_id: client.id, client_name: client.name,
           plan: `${client.tier} Plan`, amount, due_date: new Date(Date.now() + 7*86400000).toISOString().slice(0,10),
           status: 'sent',
-        }]).select().single().catch(() => ({ data: null }));
+        }]).select().single();
 
         for (const u of users) {
           await sgMail.send({
@@ -7764,7 +7777,7 @@ app.get('/revenue/attribution', async (req, res) => {
 
     // ── 5. Voice calls ───────────────────────────────────────
     const { data: callRows } = await supabase.from('call_logs')
-      .select('id, status').eq('client_id', client_id).gte('created_at', monthStart).catch(() => ({ data: [] }));
+      .select('id, status').eq('client_id', client_id).gte('created_at', monthStart);
     const callsMade = (callRows || []).length;
     const callsAnswered = (callRows || []).filter(c => ['completed', 'answered'].includes(c.status)).length;
     const voiceRate = callsMade > 0 ? Math.round((callsAnswered / callsMade) * 100) : 0;
@@ -7815,10 +7828,10 @@ app.post('/shopify/order-webhook', async (req, res) => {
     await supabase.from('revenue_attribution').insert([{
       client_id, contact_id: contact.id, order_id: orderId,
       order_value: orderValue, workflow_id: enrollment.workflow_id,
-    }]).catch(() => {});
+    }]);
     // Increment recovered_revenue
     const { data: cl } = await supabase.from('clients').select('recovered_revenue').eq('id', client_id).maybeSingle();
-    await supabase.from('clients').update({ recovered_revenue: ((cl?.recovered_revenue || 0) + orderValue) }).eq('id', client_id).catch(() => {});
+    await supabase.from('clients').update({ recovered_revenue: ((cl?.recovered_revenue || 0) + orderValue) }).eq('id', client_id);
     console.log(`[Attribution] $${orderValue} attributed to client ${client_id} from order ${orderId}`);
     res.json({ ok: true, attributed: orderValue });
   } catch (e) {
@@ -7882,7 +7895,7 @@ app.post('/ali/generate-call-script', async (req, res) => {
     await storeBriefing('ali', 'yousef', `Cart Recovery Brief — ${contactName} (${client?.name || 'Client'})`, briefingLines, 'high', client_id, contact_id);
     const { data: callRecord } = await supabase.from('call_logs').select('id').eq('contact_id', contact_id).eq('client_id', client_id).order('created_at', { ascending: false }).limit(1).maybeSingle();
     if (callRecord) {
-      await supabase.from('call_logs').update({ call_script: briefingLines, objection_handlers: script.objections || {} }).eq('id', callRecord.id).catch(() => {});
+      await supabase.from('call_logs').update({ call_script: briefingLines, objection_handlers: script.objections || {} }).eq('id', callRecord.id);
     }
     res.json({ ok: true, script, briefing: briefingLines });
   } catch (e) {
@@ -7905,11 +7918,12 @@ cron.schedule('0 2 1 * *', async () => {
       const recovered = parseFloat(client.recovered_revenue || 0);
       if (recovered <= 0) continue;
       const feeAmount = Math.round(recovered * 0.10 * 100) / 100;
-      await supabase.from('performance_fees').insert([{
+      const { error: feeErr } = await supabase.from('performance_fees').insert([{
         client_id: client.id, month: monthLabel,
         revenue_amount: recovered, fee_amount: feeAmount, status: 'pending',
-      }]).catch(e => console.error(`Perf fee insert failed for ${client.name}:`, e.message));
-      await supabase.from('clients').update({ recovered_revenue: 0 }).eq('id', client.id).catch(() => {});
+      }]);
+      if (feeErr) console.error(`Perf fee insert failed for ${client.name}:`, feeErr.message);
+      await supabase.from('clients').update({ recovered_revenue: 0 }).eq('id', client.id);
       console.log(`[CRON] Performance fee for ${client.name}: $${feeAmount} (10% of $${recovered})`);
     }
   } catch (e) {
