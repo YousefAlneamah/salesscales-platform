@@ -8400,7 +8400,8 @@ app.post('/zidni/mahdi/knowledge-base', verifyZidniOwner, async (req, res) => {
     )
     .select()
     .single();
-  if (error) return res.status(500).json({ error: 'Failed to save knowledge base.' });
+  console.log('[Mahdi KB] upsert error:', error, 'data:', data);
+  if (error) return res.status(500).json({ error: 'Failed to save knowledge base.', detail: error.message });
   res.json({ entry: data });
 });
 
