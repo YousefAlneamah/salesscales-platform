@@ -199,6 +199,10 @@ const pageTitles = {
 };
 
 function App() {
+  if (window.location.hostname.includes('joinzidni.com') && window.location.pathname === '/') {
+    window.location.replace('/zidni');
+  }
+
   const [user, setUser] = useState(null);
   const [currentPage, setCurrentPage] = useState("dashboard");
 
