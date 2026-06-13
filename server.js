@@ -8390,13 +8390,13 @@ app.get('/zidni/mahdi/knowledge-base', verifyZidniOwner, async (req, res) => {
 });
 
 app.post('/zidni/mahdi/knowledge-base', verifyZidniOwner, async (req, res) => {
-  const { niche, target_audience, top_products, affiliate_programs, content_hooks, forbidden_phrases } = req.body;
+  const { niche, target_audience, top_products, affiliate_programs, content_hooks, forbidden_phrases, full_document } = req.body;
   if (!niche) return res.status(400).json({ error: 'Niche is required.' });
 
   const { data, error } = await supabase
     .from('zidni_knowledge_base')
     .upsert(
-      { niche, target_audience, top_products, affiliate_programs, content_hooks, forbidden_phrases, updated_at: new Date().toISOString() },
+      { niche, target_audience, top_products, affiliate_programs, content_hooks, forbidden_phrases, full_document: full_document || null, updated_at: new Date().toISOString() },
       { onConflict: 'niche', ignoreDuplicates: false }
     )
     .select()
@@ -8432,25 +8432,63 @@ app.post('/zidni/mahdi/generate', verifyZidniOwner, async (req, res) => {
   if (!niche || !stream) return res.status(400).json({ error: 'niche and stream are required.' });
   const count = Math.min(Math.max(parseInt(qty) || 5, 1), 10);
 
-  const { data: kbData } = await supabase
-    .from('zidni_knowledge_base')
-    .select('*')
-    .eq('niche', niche)
-    .maybeSingle();
+  const [{ data: kbData }, { data: winnerData }] = await Promise.all([
+    supabase.from('zidni_knowledge_base').select('*').eq('niche', niche).maybeSingle(),
+    supabase.from('zidni_mahdi_winner_kb').select('*').eq('niche', niche).maybeSingle(),
+  ]);
 
   const schema = ZIDNI_STREAM_SCHEMAS[stream] || 'title, description';
   const streamLabel = ZIDNI_STREAM_LABELS[stream] || stream;
 
-  const systemPrompt = `You are Mahdi, Zidni's passive income content strategist. You generate high-converting content for ${streamLabel}. You understand passive income psychology, SEO, and what buyers want. You only respond with valid JSON arrays — no markdown, no explanation, just the raw JSON array.`;
+  const systemPrompt = `You are Mahdi, Zidni's elite passive income content strategist. You generate professional, market-winning content for ${streamLabel}. You have deep expertise in passive income psychology, SEO, marketplace algorithms, and buyer behavior.
 
-  const userPrompt = `Generate ${count} optimized ${streamLabel} for the "${niche}" niche.
+WINNER SCORECARD STANDARD (63/70 minimum to pass):
+Every product you generate must score 63 or above across these 7 dimensions (each scored 1–10):
+1. Problem Specificity — targets a concrete, felt pain not a vague topic
+2. Transformation Clarity — the before/after is unmistakable from the title alone
+3. Identity Match — speaks to who the buyer believes (or wants to believe) they are
+4. Emotional Pain Intensity — taps high-intensity emotions: fear, urgency, or financial stress
+5. SEO Keyword Depth — primary and secondary keywords embedded naturally
+6. Competition Gap — fills a gap competitors are missing or doing poorly
+7. Professional Completeness — a complete, ready-to-sell product, not an average template
 
-${kbData ? `Knowledge Base Context:
-- Target Audience: ${kbData.target_audience || 'General audience interested in this niche'}
+GENERATION RULES:
+- Target identity communities with high emotional pain scores — they buy fastest
+- Every product must have a clear transformation statement (from X to Y in Z without W)
+- Never produce average templates — produce professional, complete, battle-tested products
+- Use the full knowledge base documents as primary context; they override generic assumptions
+
+You only respond with valid JSON arrays — no markdown, no explanation, just the raw JSON array.`;
+
+  const kbDocBlock = kbData?.full_document ? `=== FULL KNOWLEDGE BASE DOCUMENT ===\n${kbData.full_document}\n=== END ===\n\n` : '';
+  const winnerDocBlock = winnerData?.full_document ? `=== WINNER KB DOCUMENT ===\n${winnerData.full_document}\n=== END ===\n\n` : '';
+
+  const kbBlock = kbData ? `Core Knowledge Base:
+- Target Audience: ${kbData.target_audience || 'N/A'}
 - Top Products: ${kbData.top_products || 'N/A'}
 - Affiliate Programs: ${kbData.affiliate_programs || 'N/A'}
 - Content Hooks: ${kbData.content_hooks || 'N/A'}
-- Forbidden Phrases: ${kbData.forbidden_phrases || 'None'}` : `No knowledge base saved for "${niche}" yet — use best practices for passive income in this niche.`}
+- Forbidden Phrases: ${kbData.forbidden_phrases || 'None'}` : '';
+
+  const winnerBlock = winnerData ? `Winner Intelligence:
+- Community: FB: ${winnerData.community_facebook || 'N/A'} | Reddit: ${winnerData.community_reddit || 'N/A'} | YouTube: ${winnerData.community_youtube || 'N/A'}
+- Community Language: ${winnerData.community_language || 'N/A'}
+- Pain Phrases: ${winnerData.community_pain_phrases || 'N/A'}
+- Pain Scores — Fear: ${winnerData.emotional_pain_fear ?? 'N/A'}/10 | Stress: ${winnerData.emotional_pain_stress ?? 'N/A'}/10 | Urgency: ${winnerData.emotional_pain_urgency ?? 'N/A'}/10 | Financial: ${winnerData.emotional_pain_financial ?? 'N/A'}/10 | Identity: ${winnerData.emotional_pain_identity ?? 'N/A'}/10
+- Transformation: ${winnerData.transformation_statement || 'N/A'}
+- Primary Keyword: ${winnerData.keyword_primary || 'N/A'} | Secondary: ${winnerData.keyword_secondary || 'N/A'}
+- Competition Gap: ${winnerData.competition_gap || 'N/A'}
+- Pricing Sweet Spot: ${winnerData.pricing_sweet_spot || 'N/A'}
+- Seasonal Timing: ${winnerData.seasonal_timing || 'N/A'}
+- Series Strategy: ${winnerData.series_strategy || 'N/A'}
+- Scale Methods: ${winnerData.scale_methods || 'N/A'}
+- Forbidden Concepts: ${winnerData.forbidden_concepts || 'None'}` : '';
+
+  const fallback = !kbData && !winnerData ? `No knowledge base saved for "${niche}" yet — apply best passive income practices and produce winner-standard content.` : '';
+
+  const userPrompt = `Generate ${count} market-winning ${streamLabel} for the "${niche}" niche. Every item must pass the 63/70 winner scorecard.
+
+${kbDocBlock}${winnerDocBlock}${[kbBlock, winnerBlock, fallback].filter(Boolean).join('\n\n')}
 
 Each item in the array must have these exact fields: ${schema}
 
@@ -8459,7 +8497,7 @@ You MUST respond with ONLY a valid JSON array. No markdown. No backticks. No exp
   try {
     const aiRes = await axios.post('https://api.anthropic.com/v1/messages', {
       model: 'claude-sonnet-4-6',
-      max_tokens: 4000,
+      max_tokens: 8000,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
     }, {
@@ -8572,7 +8610,7 @@ app.post('/zidni/mahdi/winner-kb', verifyZidniOwner, async (req, res) => {
     emotional_pain_financial, emotional_pain_identity,
     transformation_statement, keyword_primary, keyword_secondary,
     competition_gap, pricing_sweet_spot, seasonal_timing,
-    series_strategy, scale_methods, forbidden_concepts,
+    series_strategy, scale_methods, forbidden_concepts, full_document,
   } = req.body;
   if (!niche) return res.status(400).json({ error: 'Niche is required.' });
 
@@ -8601,6 +8639,7 @@ app.post('/zidni/mahdi/winner-kb', verifyZidniOwner, async (req, res) => {
       series_strategy: series_strategy || null,
       scale_methods: scale_methods || null,
       forbidden_concepts: forbidden_concepts || null,
+      full_document: full_document || null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'niche' })
     .select()

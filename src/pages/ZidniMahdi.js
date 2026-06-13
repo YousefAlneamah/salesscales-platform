@@ -126,6 +126,7 @@ export default function ZidniMahdi() {
         affiliate_programs: entry.affiliate_programs || '',
         content_hooks: entry.content_hooks || '',
         forbidden_phrases: entry.forbidden_phrases || '',
+        full_document: entry.full_document || '',
       }, { headers: { Authorization: 'Bearer ' + localStorage.getItem('token') } });
       setKbMsg('Saved');
       setTimeout(() => setKbMsg(''), 2500);
@@ -163,6 +164,7 @@ export default function ZidniMahdi() {
         series_strategy: entry.series_strategy || '',
         scale_methods: entry.scale_methods || '',
         forbidden_concepts: entry.forbidden_concepts || '',
+        full_document: entry.full_document || '',
       }, { headers: { Authorization: 'Bearer ' + localStorage.getItem('token') } });
       setWinnerMsg('Saved');
       setTimeout(() => setWinnerMsg(''), 2500);
@@ -308,6 +310,17 @@ export default function ZidniMahdi() {
                 </div>
               ))}
             </div>
+
+            <div style={{ marginTop: 14 }}>
+              <label style={labelStyle}>Full Knowledge Base Document</label>
+              <textarea
+                value={kbEntry.full_document || ''}
+                onChange={e => handleKbChange('full_document', e.target.value)}
+                placeholder="Paste your complete knowledge base document here."
+                rows={20}
+                style={textareaStyle}
+              />
+            </div>
           </>
         )}
 
@@ -420,6 +433,17 @@ export default function ZidniMahdi() {
                 <label style={labelStyle}>Forbidden Concepts</label>
                 <textarea value={winnerEntry.forbidden_concepts || ''} onChange={e => handleWinnerChange('forbidden_concepts', e.target.value)} placeholder="Angles, claims, or concepts to never use for this niche..." rows={2} style={textareaStyle} />
               </div>
+            </div>
+
+            <div style={{ marginTop: 14 }}>
+              <label style={labelStyle}>Full Knowledge Base Document</label>
+              <textarea
+                value={winnerEntry.full_document || ''}
+                onChange={e => handleWinnerChange('full_document', e.target.value)}
+                placeholder="Paste your complete knowledge base document here."
+                rows={20}
+                style={textareaStyle}
+              />
             </div>
           </>
         )}
