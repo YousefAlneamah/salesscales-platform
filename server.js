@@ -8553,6 +8553,62 @@ app.post('/zidni/mahdi/reject/:id', verifyZidniOwner, async (req, res) => {
   res.json({ item: data });
 });
 
+// ─── ZIDNI MAHDI — Winner KB ────────────────────────────────────────────────
+
+app.get('/zidni/mahdi/winner-kb', verifyZidniOwner, async (req, res) => {
+  const { data, error } = await supabase
+    .from('zidni_mahdi_winner_kb')
+    .select('*')
+    .order('niche');
+  if (error) return res.status(500).json({ error: 'Failed to load winner KB.' });
+  res.json({ winner_kb: data || [] });
+});
+
+app.post('/zidni/mahdi/winner-kb', verifyZidniOwner, async (req, res) => {
+  const {
+    niche, community_facebook, community_reddit, community_youtube,
+    community_language, community_pain_phrases,
+    emotional_pain_fear, emotional_pain_stress, emotional_pain_urgency,
+    emotional_pain_financial, emotional_pain_identity,
+    transformation_statement, keyword_primary, keyword_secondary,
+    competition_gap, pricing_sweet_spot, seasonal_timing,
+    series_strategy, scale_methods, forbidden_concepts,
+  } = req.body;
+  if (!niche) return res.status(400).json({ error: 'Niche is required.' });
+
+  const parseScore = (v) => (v != null && v !== '' ? parseInt(v) : null);
+
+  const { data, error } = await supabase
+    .from('zidni_mahdi_winner_kb')
+    .upsert({
+      niche,
+      community_facebook: community_facebook || null,
+      community_reddit: community_reddit || null,
+      community_youtube: community_youtube || null,
+      community_language: community_language || null,
+      community_pain_phrases: community_pain_phrases || null,
+      emotional_pain_fear: parseScore(emotional_pain_fear),
+      emotional_pain_stress: parseScore(emotional_pain_stress),
+      emotional_pain_urgency: parseScore(emotional_pain_urgency),
+      emotional_pain_financial: parseScore(emotional_pain_financial),
+      emotional_pain_identity: parseScore(emotional_pain_identity),
+      transformation_statement: transformation_statement || null,
+      keyword_primary: keyword_primary || null,
+      keyword_secondary: keyword_secondary || null,
+      competition_gap: competition_gap || null,
+      pricing_sweet_spot: pricing_sweet_spot || null,
+      seasonal_timing: seasonal_timing || null,
+      series_strategy: series_strategy || null,
+      scale_methods: scale_methods || null,
+      forbidden_concepts: forbidden_concepts || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'niche' })
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: 'Failed to save winner KB.' });
+  res.json({ entry: data });
+});
+
 app.listen(3001, () => {
   console.log('Server running on port 3001');
   console.log('Scheduler active — checking workflow steps every 15 minutes');
