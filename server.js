@@ -8644,7 +8644,10 @@ app.post('/zidni/mahdi/winner-kb', verifyZidniOwner, async (req, res) => {
     }, { onConflict: 'niche' })
     .select()
     .single();
-  if (error) return res.status(500).json({ error: 'Failed to save winner KB.' });
+  if (error) {
+    console.error('[WinnerKB] Supabase error:', JSON.stringify(error));
+    return res.status(500).json({ error: error.message, code: error.code, details: error.details });
+  }
   res.json({ entry: data });
 });
 
