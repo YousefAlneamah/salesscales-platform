@@ -78,7 +78,7 @@ export default function ZidniMahdi() {
 
   const loadKB = async () => {
     try {
-      const { data } = await axios.get('http://localhost:3001/zidni/mahdi/knowledge-base', { headers: authHeaders() });
+      const { data } = await axios.get('https://salesscales-server.onrender.com/zidni/mahdi/knowledge-base', { headers: authHeaders() });
       const map = {};
       (data.knowledge_base || []).forEach(e => { map[e.niche] = e; });
       setKb(map);
@@ -87,7 +87,7 @@ export default function ZidniMahdi() {
 
   const loadWinnerKB = async () => {
     try {
-      const { data } = await axios.get('http://localhost:3001/zidni/mahdi/winner-kb', { headers: authHeaders() });
+      const { data } = await axios.get('https://salesscales-server.onrender.com/zidni/mahdi/winner-kb', { headers: authHeaders() });
       const map = {};
       (data.winner_kb || []).forEach(e => { map[e.niche] = e; });
       setWinnerKb(map);
@@ -97,7 +97,7 @@ export default function ZidniMahdi() {
   const loadQueue = async (status) => {
     setLoadingQueue(true);
     try {
-      const { data } = await axios.get('http://localhost:3001/zidni/mahdi/queue', {
+      const { data } = await axios.get('https://salesscales-server.onrender.com/zidni/mahdi/queue', {
         headers: authHeaders(),
         params: { status },
       });
@@ -195,14 +195,14 @@ export default function ZidniMahdi() {
 
   const approve = async (id) => {
     try {
-      await axios.post(`http://localhost:3001/zidni/mahdi/approve/${id}`, {}, { headers: authHeaders() });
+      await axios.post(`https://salesscales-server.onrender.com/zidni/mahdi/approve/${id}`, {}, { headers: authHeaders() });
       setQueue(prev => prev.filter(i => i.id !== id));
     } catch {}
   };
 
   const reject = async (id) => {
     try {
-      await axios.post(`http://localhost:3001/zidni/mahdi/reject/${id}`, {}, { headers: authHeaders() });
+      await axios.post(`https://salesscales-server.onrender.com/zidni/mahdi/reject/${id}`, {}, { headers: authHeaders() });
       setQueue(prev => prev.filter(i => i.id !== id));
     } catch {}
   };
