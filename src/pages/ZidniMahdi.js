@@ -61,6 +61,8 @@ export default function ZidniMahdi() {
   const [queueFilter, setQueueFilter] = useState('pending');
   const [expanded, setExpanded] = useState(null);
   const [loadingQueue, setLoadingQueue] = useState(false);
+  const [publishing, setPublishing] = useState({});
+  const [publishResult, setPublishResult] = useState({});
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -205,6 +207,19 @@ export default function ZidniMahdi() {
       await axios.post(`https://salesscales-server.onrender.com/zidni/mahdi/reject/${id}`, {}, { headers: authHeaders() });
       setQueue(prev => prev.filter(i => i.id !== id));
     } catch {}
+  };
+
+  const publishGumroad = async (id) => {
+    setPublishing(prev => ({ ...prev, [id]: true }));
+    setPublishResult(prev => ({ ...prev, [id]: null }));
+    try {
+      const { data } = await axios.post('https://salesscales-server.onrender.com/zidni/mahdi/auto-publish', { id }, { headers: authHeaders() });
+      setPublishResult(prev => ({ ...prev, [id]: { url: data?.published_url || '' } }));
+      setQueue(prev => prev.map(i => i.id === id ? { ...i, status: 'published', published_url: data?.published_url, gumroad_id: data?.gumroad_id } : i));
+    } catch (err) {
+      setPublishResult(prev => ({ ...prev, [id]: { error: err.response?.data?.error || 'Publish failed. Try again.' } }));
+    }
+    setPublishing(prev => ({ ...prev, [id]: false }));
   };
 
   const handleFilterChange = (f) => {
@@ -587,6 +602,34 @@ export default function ZidniMahdi() {
                         <button style={{ fontSize: 12, padding: '7px 18px', borderRadius: 8, border: '1px solid var(--red)', background: 'transparent', color: 'var(--red)', cursor: 'pointer', fontFamily: 'inherit' }} onClick={() => reject(item.id)}>
                           <i className="ti ti-x" style={{ marginRight: 5 }} />Reject
                         </button>
+                      </div>
+                    )}
+                    {item.status === 'approved' && (
+                      <div>
+                        <button
+                          className="btn btn-gold"
+                          style={{ fontSize: 12, padding: '7px 18px', opacity: publishing[item.id] ? 0.6 : 1, cursor: publishing[item.id] ? 'default' : 'pointer' }}
+                          disabled={publishing[item.id]}
+                          onClick={() => publishGumroad(item.id)}
+                        >
+                          <i className={`ti ${publishing[item.id] ? 'ti-loader-2' : 'ti-shopping-cart-up'}`} style={{ marginRight: 5 }} />
+                          {publishing[item.id] ? 'Publishing…' : 'Publish to Gumroad'}
+                        </button>
+                        {publishResult[item.id]?.url && (
+                          <div style={{ marginTop: 10, fontSize: 13, color: 'var(--green)' }}>
+                            <i className="ti ti-check" style={{ marginRight: 5 }} />
+                            Published —{' '}
+                            <a href={publishResult[item.id].url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--green)', fontWeight: 600 }}>
+                              {publishResult[item.id].url}
+                            </a>
+                          </div>
+                        )}
+                        {publishResult[item.id]?.error && (
+                          <div style={{ marginTop: 10, fontSize: 13, color: 'var(--red)' }}>
+                            <i className="ti ti-alert-triangle" style={{ marginRight: 5 }} />
+                            {publishResult[item.id].error}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
