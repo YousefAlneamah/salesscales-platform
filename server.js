@@ -8617,16 +8617,19 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
   const priceCents = Math.round(dollars * 100);
 
   try {
-    // 2. Publish to Gumroad via the Gumroad API.
-    const gumRes = await axios.post('https://api.gumroad.com/v2/products', {
+    // 2. Publish to Gumroad via the Gumroad API. Gumroad expects
+    // form-encoded params with access_token passed as a field, not a header.
+    const form = new URLSearchParams({
+      access_token: process.env.GUMROAD_API_KEY,
       name,
       description,
-      price: priceCents,
-      published: true,
-    }, {
+      price: String(priceCents),
+      published: 'true',
+    });
+
+    const gumRes = await axios.post('https://api.gumroad.com/v2/products', form, {
       headers: {
-        'Authorization': `Bearer ${process.env.GUMROAD_API_KEY}`,
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
     });
 
