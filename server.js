@@ -8591,6 +8591,69 @@ app.post('/zidni/mahdi/reject/:id', verifyZidniOwner, async (req, res) => {
   res.json({ item: data });
 });
 
+// Auto-publish a generated product to Gumroad, then mark it published in the queue.
+app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
+  const { id } = req.body;
+  if (!id) return res.status(400).json({ error: 'id is required.' });
+
+  // GUMROAD_API_KEY is a required environment variable for this endpoint.
+  if (!process.env.GUMROAD_API_KEY) {
+    return res.status(400).json({ error: 'Gumroad API key not configured.' });
+  }
+
+  // 1. Pull the generated product from the queue.
+  const { data: item, error: fetchError } = await supabase
+    .from('zidni_content_queue')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (fetchError || !item) return res.status(404).json({ error: 'Queue item not found.' });
+
+  // Derive Gumroad product fields from the generated content.
+  const content = item.content || {};
+  const name = item.title || content.title || 'Untitled Product';
+  const description = content.description || content.summary || content.body || '';
+  const dollars = parseFloat(content.price ?? content.pricing ?? content.pricing_sweet_spot ?? 0) || 0;
+  const priceCents = Math.round(dollars * 100);
+
+  try {
+    // 2. Publish to Gumroad via the Gumroad API.
+    const gumRes = await axios.post('https://api.gumroad.com/v2/products', {
+      name,
+      description,
+      price: priceCents,
+      published: true,
+    }, {
+      headers: {
+        'Authorization': `Bearer ${process.env.GUMROAD_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const product = gumRes.data?.product || {};
+    const gumroadId = product.id || product.permalink || null;
+    const publishedUrl = product.short_url || product.preview_url || null;
+
+    // 3. Update the queue record with published status + Gumroad refs.
+    const { data: updated, error: updateError } = await supabase
+      .from('zidni_content_queue')
+      .update({ status: 'published', gumroad_id: gumroadId, published_url: publishedUrl })
+      .eq('id', id)
+      .select()
+      .single();
+    if (updateError) {
+      console.error('[Mahdi Auto-Publish] Supabase update error:', JSON.stringify(updateError));
+      return res.status(500).json({ error: 'Published to Gumroad but failed to update the queue.' });
+    }
+
+    res.json({ item: updated, gumroad_id: gumroadId, published_url: publishedUrl });
+  } catch (err) {
+    const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Gumroad publish failed.';
+    console.error('[Mahdi Auto-Publish] Gumroad error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
 // ─── ZIDNI MAHDI — Winner KB ────────────────────────────────────────────────
 
 app.get('/zidni/mahdi/winner-kb', verifyZidniOwner, async (req, res) => {
