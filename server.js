@@ -113,7 +113,40 @@ app.use((req, res, next) => {
 });
 
 app.use(compression());
-app.use(cors());
+
+// CORS allowed origins — front-ends permitted to call this API
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://aisalesscales.com',
+  'https://www.aisalesscales.com',
+  'https://api.aisalesscales.com',
+  'https://api-staging.aisalesscales.com',
+  'https://joinzidni.com',
+  'https://www.joinzidni.com',
+];
+app.use(cors({
+  origin: (origin, cb) => {
+    // Allow requests with no Origin (curl, server-to-server, Twilio/SendGrid webhooks)
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+}));
+
+// joinzidni.com domain routing — serve the Zidni pages from this platform.
+// Only rewrites browser page navigations (GET); API calls, assets, and the
+// already-correct /zidni* and /login paths pass straight through.
+app.use((req, res, next) => {
+  const host = req.hostname || '';
+  if (!host.includes('joinzidni.com')) return next();
+  if (req.method !== 'GET') return next();
+  const p = req.path;
+  if (p === '/login' || p === '/zidni' || p.startsWith('/zidni/')) return next();
+  if (p.startsWith('/static') || p.includes('.')) return next();
+  if (p === '/mahdi') return res.redirect(302, '/zidni/mahdi');
+  return res.redirect(302, '/zidni');
+});
+
 app.use(express.json({ limit: '50mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 

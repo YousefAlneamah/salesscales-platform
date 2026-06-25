@@ -199,7 +199,10 @@ const pageTitles = {
 };
 
 function App() {
-  if (window.location.hostname.includes('joinzidni.com') && window.location.pathname === '/') {
+  // joinzidni.com is served from this same platform. Detect the domain so the
+  // Sales Scales sidebar/header/branding is never shown there.
+  const onZidniDomain = window.location.hostname.includes('joinzidni.com');
+  if (onZidniDomain && window.location.pathname === '/') {
     window.location.replace('/zidni');
   }
 
@@ -401,6 +404,13 @@ function App() {
   if (window.location.pathname === '/zidni/dashboard') return <ZidniDashboard />;
   if (window.location.pathname === '/zidni/owner') return <ZidniOwnerDashboard />;
   if (window.location.pathname === '/zidni/mahdi') return <ZidniMahdi />;
+
+  // On the joinzidni.com domain, never fall through to the Sales Scales app
+  // chrome. The /login path stays available; everything else shows the clean
+  // Zidni page (the server also redirects these — this is the client fallback).
+  if (onZidniDomain && window.location.pathname !== '/login') {
+    return <ZidniWaitlist />;
+  }
 
   const knownPaths = ['/', '/terms', '/privacy', '/signup', '/roadmap', '/zidni', '/zidni/signup', '/zidni/dashboard', '/zidni/owner', '/zidni/mahdi'];
   if (!knownPaths.includes(window.location.pathname)) {
