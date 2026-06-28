@@ -8646,6 +8646,110 @@ app.post('/zidni/mahdi/reject/:id', verifyZidniOwner, async (req, res) => {
   res.json({ item: data });
 });
 
+// Generate a 1280x720 product cover PNG for a Zidni product. Returns a PNG
+// Buffer, or null if the canvas package is unavailable or rendering fails —
+// callers treat the thumbnail as best-effort and must not block on it.
+function generateZidniThumbnail({ name, niche, priceLabel }) {
+  let createCanvas;
+  try {
+    ({ createCanvas } = require('canvas'));
+  } catch (e) {
+    console.error('[Mahdi Auto-Publish] canvas package unavailable:', e.message);
+    return null;
+  }
+  try {
+    const W = 1280, H = 720;
+    const canvas = createCanvas(W, H);
+    const ctx = canvas.getContext('2d');
+
+    // Background — dark navy.
+    ctx.fillStyle = '#0A1628';
+    ctx.fillRect(0, 0, W, H);
+
+    // Gold accent bar across the top (8px).
+    ctx.fillStyle = '#C9A84C';
+    ctx.fillRect(0, 0, W, 8);
+
+    // Niche badge — gold pill with navy text, centered near the top.
+    const nicheText = (niche || '').toString().trim();
+    if (nicheText) {
+      ctx.font = 'bold 22px sans-serif';
+      const label = nicheText.toUpperCase();
+      const padX = 26, badgeH = 46;
+      const badgeW = ctx.measureText(label).width + padX * 2;
+      const badgeX = (W - badgeW) / 2;
+      const badgeY = 120;
+      const r = badgeH / 2;
+      ctx.fillStyle = '#C9A84C';
+      ctx.beginPath();
+      ctx.moveTo(badgeX + r, badgeY);
+      ctx.arcTo(badgeX + badgeW, badgeY, badgeX + badgeW, badgeY + badgeH, r);
+      ctx.arcTo(badgeX + badgeW, badgeY + badgeH, badgeX, badgeY + badgeH, r);
+      ctx.arcTo(badgeX, badgeY + badgeH, badgeX, badgeY, r);
+      ctx.arcTo(badgeX, badgeY, badgeX + badgeW, badgeY, r);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#0A1628';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, W / 2, badgeY + badgeH / 2 + 1);
+    }
+
+    // Product name — white bold, centered, word-wrapped to a max of 2 lines.
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 42px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const maxWidth = W - 200;
+    const words = (name || 'Untitled Product').toString().split(/\s+/).filter(Boolean);
+    const lines = [];
+    let current = '';
+    for (const word of words) {
+      const test = current ? current + ' ' + word : word;
+      if (ctx.measureText(test).width > maxWidth && current) {
+        lines.push(current);
+        current = word;
+        if (lines.length === 2) { current = ''; break; }
+      } else {
+        current = test;
+      }
+    }
+    if (current && lines.length < 2) lines.push(current);
+    // Add an ellipsis if the name overflowed two lines.
+    if (lines.length === 2 && current && words.length) {
+      let last = lines[1];
+      while (last && ctx.measureText(last + '…').width > maxWidth) {
+        last = last.replace(/\s*\S*$/, '');
+      }
+      lines[1] = (last || lines[1]) + '…';
+    }
+    const lineHeight = 56;
+    const startY = H / 2 - ((lines.length - 1) * lineHeight) / 2;
+    lines.forEach((line, i) => ctx.fillText(line, W / 2, startY + i * lineHeight));
+
+    // Price — gold, bottom left.
+    if (priceLabel) {
+      ctx.fillStyle = '#C9A84C';
+      ctx.font = 'bold 36px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText(priceLabel, 60, H - 52);
+    }
+
+    // Branding — gray, bottom right.
+    ctx.fillStyle = '#8896A8';
+    ctx.font = '24px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('joinzidni.com', W - 60, H - 52);
+
+    return canvas.toBuffer('image/png');
+  } catch (e) {
+    console.error('[Mahdi Auto-Publish] Thumbnail render failed:', e.message);
+    return null;
+  }
+}
+
 // Auto-publish a generated product to Gumroad, then mark it published in the queue.
 app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
   const { id } = req.body;
@@ -8694,6 +8798,10 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
   // Default to $27 (2700 cents) when no valid price is found in the content.
   const priceCents = dollars > 0 ? Math.round(dollars * 100) : 2700;
 
+  // Generate the product cover image up front (best-effort — never blocks).
+  const priceLabel = '$' + (priceCents / 100).toFixed(priceCents % 100 === 0 ? 0 : 2);
+  const thumbnailBuffer = generateZidniThumbnail({ name, niche: item.niche, priceLabel });
+
   try {
     // 2. Publish to Gumroad via the Gumroad API. Gumroad expects
     // form-encoded params with access_token passed as a field, not a header.
@@ -8728,6 +8836,25 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
         });
       } catch (enableErr) {
         console.error('[Mahdi Auto-Publish] Failed to enable product:', enableErr.response?.data?.message || enableErr.message);
+      }
+    }
+
+    // 2c. Upload the generated cover image as the product thumbnail. Best-effort:
+    // any failure is logged but must not block the publish.
+    if (product.id && thumbnailBuffer) {
+      try {
+        const FormData = require('form-data');
+        const imgForm = new FormData();
+        imgForm.append('access_token', process.env.GUMROAD_API_KEY);
+        imgForm.append('preview_url', thumbnailBuffer, { filename: 'cover.png', contentType: 'image/png' });
+        imgForm.append('thumbnail', thumbnailBuffer, { filename: 'cover.png', contentType: 'image/png' });
+        await axios.post(`https://api.gumroad.com/v2/products/${product.id}/edit`, imgForm, {
+          headers: imgForm.getHeaders(),
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+        });
+      } catch (thumbErr) {
+        console.error('[Mahdi Auto-Publish] Thumbnail upload failed:', thumbErr.response?.data?.message || thumbErr.message);
       }
     }
 
