@@ -8888,8 +8888,10 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
       },
     });
 
+    console.log('[Mahdi Auto-Publish] Gumroad create response:', JSON.stringify(gumRes.data));
+
     const product = gumRes.data?.product || {};
-    const gumroadId = product.id || product.permalink || null;
+    const gumroadId = product.permalink || product.id || null;
     const publishedUrl = product.short_url || product.preview_url || null;
 
     // 2b. Upload the generated cover image as the product thumbnail. Best-effort:
@@ -8913,15 +8915,15 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
 
     // 2c. Upload the generated PDF as the product's downloadable file. Best-effort:
     // any failure is logged but must not block the publish.
-    if (product.id && pdfBuffer) {
+    if (product.permalink && pdfBuffer) {
       try {
         const FormData = require('form-data');
         const safeTitle = (name || 'product').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'product';
         const fileForm = new FormData();
         fileForm.append('access_token', process.env.GUMROAD_API_KEY);
         fileForm.append('file', pdfBuffer, { filename: `${safeTitle}.pdf`, contentType: 'application/pdf' });
-        console.log(`[Mahdi Auto-Publish] Uploading PDF file (${pdfBuffer.length} bytes) to product ${product.id}...`);
-        await axios.post(`https://api.gumroad.com/v2/products/${product.id}/files`, fileForm, {
+        console.log(`[Mahdi Auto-Publish] Uploading PDF file (${pdfBuffer.length} bytes) to product ${product.permalink}...`);
+        await axios.post(`https://api.gumroad.com/v2/products/${product.permalink}/files`, fileForm, {
           headers: fileForm.getHeaders(),
           maxContentLength: Infinity,
           maxBodyLength: Infinity,
@@ -8933,15 +8935,15 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
     }
 
     // 2d. Enable/publish the product now that it has a file attached. Best-effort.
-    if (product.id) {
+    if (product.permalink) {
       try {
         const enableForm = new URLSearchParams({
           access_token: process.env.GUMROAD_API_KEY,
           published: 'true',
           price: String(priceCents),
         });
-        console.log(`[Mahdi Auto-Publish] Enabling product ${product.id} (price ${priceCents}, published true)...`);
-        await axios.put(`https://api.gumroad.com/v2/products/${product.id}`, enableForm, {
+        console.log(`[Mahdi Auto-Publish] Enabling product ${product.permalink} (price ${priceCents}, published true)...`);
+        await axios.put(`https://api.gumroad.com/v2/products/${product.permalink}`, enableForm, {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         });
         console.log('[Mahdi Auto-Publish] Product enabled/published.');
