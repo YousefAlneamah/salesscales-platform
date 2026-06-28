@@ -8789,9 +8789,9 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
     return 0;
   };
   const dollars = extractPrice(
+    content.suggested_price,
     content.price,
     content.pricing,
-    content.suggested_price,
     content.price_sweet_spot,
     content.pricing_sweet_spot,
     content.price_range,
