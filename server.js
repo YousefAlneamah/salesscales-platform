@@ -8770,6 +8770,7 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
 
   // Derive Gumroad product fields from the generated content.
   const content = item.content || {};
+  console.log('[Mahdi Auto-Publish] Content fields:', JSON.stringify(content));
   const name = item.title || content.title || 'Untitled Product';
   const description = content.description || content.summary || content.body || '';
 
@@ -8848,7 +8849,7 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
         imgForm.append('access_token', process.env.GUMROAD_API_KEY);
         imgForm.append('preview_url', thumbnailBuffer, { filename: 'cover.png', contentType: 'image/png' });
         imgForm.append('thumbnail', thumbnailBuffer, { filename: 'cover.png', contentType: 'image/png' });
-        await axios.post(`https://api.gumroad.com/v2/products/${product.id}/edit`, imgForm, {
+        await axios.put(`https://api.gumroad.com/v2/products/${product.id}`, imgForm, {
           headers: imgForm.getHeaders(),
           maxContentLength: Infinity,
           maxBodyLength: Infinity,
