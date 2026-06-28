@@ -8750,6 +8750,66 @@ function generateZidniThumbnail({ name, niche, priceLabel }) {
   }
 }
 
+// Generate a professional A4 product PDF for a Zidni product. Resolves to a
+// PDF Buffer, or null if pdfkit is unavailable or rendering fails — callers
+// treat the PDF as best-effort and must not block on it.
+function generateZidniPDF({ name, tagline, description }) {
+  return new Promise((resolve) => {
+    let PDFDocument;
+    try {
+      PDFDocument = require('pdfkit');
+    } catch (e) {
+      console.error('[Mahdi Auto-Publish] pdfkit package unavailable:', e.message);
+      return resolve(null);
+    }
+    try {
+      const doc = new PDFDocument({ size: 'A4', margin: 0 });
+      const chunks = [];
+      doc.on('data', (c) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', (e) => {
+        console.error('[Mahdi Auto-Publish] PDF stream error:', e.message);
+        resolve(null);
+      });
+
+      const W = doc.page.width;
+      const H = doc.page.height;
+      const M = 50;
+      const headerH = 120;
+
+      // Navy header bar with the product title in white bold text.
+      doc.rect(0, 0, W, headerH).fill('#0A1628');
+      doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(24)
+        .text(name || 'Untitled Product', M, 44, { width: W - M * 2 });
+
+      // Gold accent line directly below the header.
+      doc.rect(0, headerH, W, 4).fill('#C9A84C');
+
+      let y = headerH + 40;
+
+      // Tagline — italic gray.
+      if (tagline) {
+        doc.fillColor('#8896A8').font('Helvetica-Oblique').fontSize(14)
+          .text(tagline, M, y, { width: W - M * 2 });
+        y = doc.y + 24;
+      }
+
+      // Description — clean body text.
+      doc.fillColor('#0A1628').font('Helvetica').fontSize(12)
+        .text(description || '', M, y, { width: W - M * 2, lineGap: 4 });
+
+      // Footer branding.
+      doc.fillColor('#8896A8').font('Helvetica').fontSize(10)
+        .text('joinzidni.com', M, H - 50, { width: W - M * 2, align: 'center' });
+
+      doc.end();
+    } catch (e) {
+      console.error('[Mahdi Auto-Publish] PDF generation failed:', e.message);
+      resolve(null);
+    }
+  });
+}
+
 // Auto-publish a generated product to Gumroad, then mark it published in the queue.
 app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
   const { id } = req.body;
@@ -8802,6 +8862,12 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
   // Generate the product cover image up front (best-effort — never blocks).
   const priceLabel = '$' + (priceCents / 100).toFixed(priceCents % 100 === 0 ? 0 : 2);
   const thumbnailBuffer = generateZidniThumbnail({ name, niche: item.niche, priceLabel });
+  console.log('[Mahdi Auto-Publish] Thumbnail generated:', thumbnailBuffer ? `${thumbnailBuffer.length} bytes` : 'failed/skipped');
+
+  // Generate the downloadable product PDF up front (best-effort — never blocks).
+  const tagline = content.tagline || content.subtitle || content.hook || '';
+  const pdfBuffer = await generateZidniPDF({ name, tagline, description });
+  console.log('[Mahdi Auto-Publish] PDF generated:', pdfBuffer ? `${pdfBuffer.length} bytes` : 'failed/skipped');
 
   try {
     // 2. Publish to Gumroad via the Gumroad API. Gumroad expects
@@ -8842,6 +8908,45 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
         });
       } catch (thumbErr) {
         console.error('[Mahdi Auto-Publish] Thumbnail upload failed:', thumbErr.response?.data?.message || thumbErr.message);
+      }
+    }
+
+    // 2c. Upload the generated PDF as the product's downloadable file. Best-effort:
+    // any failure is logged but must not block the publish.
+    if (product.id && pdfBuffer) {
+      try {
+        const FormData = require('form-data');
+        const safeTitle = (name || 'product').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'product';
+        const fileForm = new FormData();
+        fileForm.append('access_token', process.env.GUMROAD_API_KEY);
+        fileForm.append('file', pdfBuffer, { filename: `${safeTitle}.pdf`, contentType: 'application/pdf' });
+        console.log(`[Mahdi Auto-Publish] Uploading PDF file (${pdfBuffer.length} bytes) to product ${product.id}...`);
+        await axios.post(`https://api.gumroad.com/v2/products/${product.id}/files`, fileForm, {
+          headers: fileForm.getHeaders(),
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+        });
+        console.log('[Mahdi Auto-Publish] PDF file uploaded successfully.');
+      } catch (fileErr) {
+        console.error('[Mahdi Auto-Publish] PDF file upload failed:', fileErr.response?.data?.message || fileErr.message);
+      }
+    }
+
+    // 2d. Enable/publish the product now that it has a file attached. Best-effort.
+    if (product.id) {
+      try {
+        const enableForm = new URLSearchParams({
+          access_token: process.env.GUMROAD_API_KEY,
+          published: 'true',
+          price: String(priceCents),
+        });
+        console.log(`[Mahdi Auto-Publish] Enabling product ${product.id} (price ${priceCents}, published true)...`);
+        await axios.put(`https://api.gumroad.com/v2/products/${product.id}`, enableForm, {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        });
+        console.log('[Mahdi Auto-Publish] Product enabled/published.');
+      } catch (enableErr) {
+        console.error('[Mahdi Auto-Publish] Failed to enable product:', enableErr.response?.data?.message || enableErr.message);
       }
     }
 
