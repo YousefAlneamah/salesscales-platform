@@ -8668,8 +8668,31 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
   const content = item.content || {};
   const name = item.title || content.title || 'Untitled Product';
   const description = content.description || content.summary || content.body || '';
-  const dollars = parseFloat(content.price ?? content.pricing ?? content.pricing_sweet_spot ?? 0) || 0;
-  const priceCents = Math.round(dollars * 100);
+
+  // Extract a numeric price from the generated content. The price may live in
+  // several fields and be formatted as "$27", "27", "$5-15", etc., so strip
+  // any currency symbols/text and parse the first number found.
+  const extractPrice = (...vals) => {
+    for (const v of vals) {
+      if (v == null) continue;
+      const match = String(v).replace(/,/g, '').match(/\d+(\.\d+)?/);
+      if (match) {
+        const n = parseFloat(match[0]);
+        if (!isNaN(n) && n > 0) return n;
+      }
+    }
+    return 0;
+  };
+  const dollars = extractPrice(
+    content.price,
+    content.pricing,
+    content.suggested_price,
+    content.price_sweet_spot,
+    content.pricing_sweet_spot,
+    content.price_range,
+  );
+  // Default to $27 (2700 cents) when no valid price is found in the content.
+  const priceCents = dollars > 0 ? Math.round(dollars * 100) : 2700;
 
   try {
     // 2. Publish to Gumroad via the Gumroad API. Gumroad expects
@@ -8691,6 +8714,22 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
     const product = gumRes.data?.product || {};
     const gumroadId = product.id || product.permalink || null;
     const publishedUrl = product.short_url || product.preview_url || null;
+
+    // 2b. Explicitly enable (publish) the product. The create call can leave it
+    // in an unpublished state, so call the update endpoint to mark it published.
+    if (product.id) {
+      try {
+        const enableForm = new URLSearchParams({
+          access_token: process.env.GUMROAD_API_KEY,
+          published: 'true',
+        });
+        await axios.put(`https://api.gumroad.com/v2/products/${product.id}`, enableForm, {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        });
+      } catch (enableErr) {
+        console.error('[Mahdi Auto-Publish] Failed to enable product:', enableErr.response?.data?.message || enableErr.message);
+      }
+    }
 
     // 3. Update the queue record with published status + Gumroad refs.
     const { data: updated, error: updateError } = await supabase
