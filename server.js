@@ -8565,20 +8565,42 @@ You MUST respond with ONLY a valid JSON array. No markdown. No backticks. No exp
       return res.status(500).json({ error: 'AI returned an empty result.' });
     }
 
-    const rows = items.map(item => ({
-      niche,
-      stream,
-      title: item.title || null,
-      content: item,
-      status: 'pending',
-    }));
+    const rows = items.map(item => {
+      // Guard against malformed array elements (e.g. a bare string) so the
+      // jsonb `content` column always receives an object.
+      const obj = (item && typeof item === 'object' && !Array.isArray(item)) ? item : { value: item };
+      return {
+        niche,
+        stream,
+        title: obj.title || null,
+        content: obj,
+        status: 'pending',
+      };
+    });
+
+    console.log(`[Mahdi Generate] Inserting ${rows.length} row(s) into zidni_content_queue (niche="${niche}", stream="${stream}"). First row column keys:`, Object.keys(rows[0] || {}));
 
     const { data: inserted, error: insertError } = await supabase
       .from('zidni_content_queue')
       .insert(rows)
       .select();
 
-    if (insertError) return res.status(500).json({ error: 'Failed to save generated content.' });
+    if (insertError) {
+      console.error('[Mahdi Generate] Supabase insert error:', JSON.stringify({
+        message: insertError.message,
+        details: insertError.details,
+        hint: insertError.hint,
+        code: insertError.code,
+      }));
+      console.error('[Mahdi Generate] First row that failed to insert:', JSON.stringify(rows[0]));
+      return res.status(500).json({
+        error: insertError.message || 'Failed to save generated content.',
+        details: insertError.details || null,
+        hint: insertError.hint || null,
+        code: insertError.code || null,
+      });
+    }
+    console.log(`[Mahdi Generate] Successfully inserted ${inserted.length} item(s) into zidni_content_queue.`);
     res.json({ items: inserted, count: inserted.length });
   } catch (err) {
     const msg = err.response?.data?.error?.message || err.message || 'Generation failed.';
