@@ -8814,6 +8814,8 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
       published: 'true',
     });
 
+    console.log('[Mahdi Auto-Publish] Sending to Gumroad:', { name, priceCents, published: true });
+
     const gumRes = await axios.post('https://api.gumroad.com/v2/products', form, {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -8824,23 +8826,7 @@ app.post('/zidni/mahdi/auto-publish', verifyZidniOwner, async (req, res) => {
     const gumroadId = product.id || product.permalink || null;
     const publishedUrl = product.short_url || product.preview_url || null;
 
-    // 2b. Explicitly enable (publish) the product. The create call can leave it
-    // in an unpublished state, so call the update endpoint to mark it published.
-    if (product.id) {
-      try {
-        const enableForm = new URLSearchParams({
-          access_token: process.env.GUMROAD_API_KEY,
-          published: 'true',
-        });
-        await axios.put(`https://api.gumroad.com/v2/products/${product.id}`, enableForm, {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        });
-      } catch (enableErr) {
-        console.error('[Mahdi Auto-Publish] Failed to enable product:', enableErr.response?.data?.message || enableErr.message);
-      }
-    }
-
-    // 2c. Upload the generated cover image as the product thumbnail. Best-effort:
+    // 2b. Upload the generated cover image as the product thumbnail. Best-effort:
     // any failure is logged but must not block the publish.
     if (product.id && thumbnailBuffer) {
       try {
